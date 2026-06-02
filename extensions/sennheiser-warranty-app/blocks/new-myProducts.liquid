@@ -1,0 +1,211 @@
+<script>
+  window.WARRANTY_ICONS = {
+    active: "{{ 'active-icon.svg' | asset_url }}",
+    expiring: "{{ 'expire-icon.svg' | asset_url }}",
+    expired: "{{ 'expired-icon.svg' | asset_url }}"
+  };
+</script>
+
+{% if customer or request.design_mode %}
+
+
+<div id="mp-app-root" class="mp-app-root" data-web-register-link="{{ block.settings.web_register_link }}" data-source="shopify" data-web-register-label="{{ block.settings.web_register_label}}">
+
+  <!-- HEADER -->
+  <section class="mp-header">
+    <div class="mp-user-info"> 
+    <div class="avatar-wrap">
+      <div class="mp-avatar">
+      
+        {% if customer.first_name != blank %}
+          {{ customer.first_name | slice: 0, 1 }}
+        {% else %}
+          U
+        {% endif %}
+      </div>
+</div>
+<div class="mp-user-text">
+  <h1>
+    {{ block.settings.greeting_text }}
+
+    {% if customer.first_name != blank %}
+      {{ customer.first_name }}
+    {% else %}
+      Customer
+    {% endif %}
+  </h1>
+
+  <p>{{ customer.email }}</p>
+  <a href="{{ routes.account_logout_url }}" class="mp-logout">
+    <em class="logout-icon">
+    <img
+  src="{{ 'logout-icon.svg' | asset_url }}"
+  alt="Logout Icon"
+/>
+    </em>
+    <span>Logout</span>
+</a>
+</div>
+
+    <div class="mp-header-desc">
+      <p>
+        Welcome to your account. Check your order history,
+        register your products, and manage your personal data – all in one place!
+      </p>
+    </div>
+  </section>
+
+  <!-- PRODUCTS -->
+  <section class="product-outer-wrapper" id="mp-products-section">
+    <div class="title-wrapper">
+      <h2>{{ block.settings.products_title }}</h2>
+
+      <a id="mp-external-register-btn" data-source="external" data-external-register-link="{{ block.settings.external_register_link }}" data-external-register-label="{{ block.settings.external_register_label }}" href="{{ block.settings.external_register_link }}"
+         class="mp-register-btn static">
+        {{ block.settings.external_register_label }}
+      </a>
+    </div>
+
+    <div class="slider-wrapper">
+      <div class="mp-slider swiper" data-customer="{{ customer.email }}">
+        <div class="mp-track swiper-wrapper" id="mp-track"></div>
+      </div>
+      <div class="mp-nav-wrap">
+        <div class="mp-nav mp-prev swiper-button-prev"></div>
+        <div class="mp-nav mp-next swiper-button-next"></div>
+      </div>
+    </div>
+  </section>
+
+   <section id="mp-product-detail" class="mp-product-detail hidden">
+
+  <div class="title-wrapper">
+  <h2>{{ block.settings.products_detail_title }}</h2>
+</div>
+
+    <div class="mp-detail-inner">
+      <div class="mp-detail-img">
+        <img id="mp-detail-image" src="" alt="">
+      </div>
+
+     <div class="mp-detail-content">
+
+  <!-- REGISTERED -->
+  <div id="mp-detail-registered" class="hidden">
+    <h2 id="mp-detail-title"></h2>
+
+    <div id="mp-detail-status" class="mp-warranty-badge hidden"></div>
+
+    <p id="mp-detail-date"></p>
+    <p id="mp-detail-serial"></p>
+
+    <div class="mp-detail-warranty">
+      <strong>Vendor Warranty expires on:</strong>
+      <div id="mp-detail-warranty"></div>
+    </div>
+    <div class="mp-detail-bottom">
+      <div class="right-block">
+        <div class="mp-detail-actions">
+           <a href="/" class="btn bordered-btn">
+             Get Support
+          </a>
+          <a href="/" class="btn bordered-btn">
+            Find Spare Parts & Accessories
+          </a>
+          <a href="/" class="mp-link"> 
+          <img
+            src="{{ 'manual-icon.svg' | asset_url }}"
+            alt="Manual & Tips Icon" />Manual & Tips</a>
+            <button class="btn bordered-btn" id="mp-detail-back-btn">
+              Back
+            </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- UNREGISTERED -->
+  <div id="mp-detail-unregistered" class="hidden">
+    <h2 id="mp-detail-title-unregistered"></h2>
+    <p id="mp-detail-date-unregistered"></p>
+    <button
+    id="mp-detail-web-register-btn"
+  class="mp-register-btn btn"
+  data-source="shopify"
+  data-web-register-link="{{ block.settings.web_register_link }}">
+  {{ block.settings.web_register_label}}
+  </button>
+    <div class="mp-detail-actions">
+      <button class="btn bordered-btn" id="mp-detail-back-btn">
+        Back
+</button>
+  </div>
+
+</div>
+
+    </div>
+  </section>
+
+</div>
+
+{% else %}
+<script>location.href='/account/login'</script>
+{% endif %} 
+
+{{ 'new-myProducts.css' | asset_url | stylesheet_tag }}
+<script src="https://cdn.jsdelivr.net/npm/swiper@12/swiper-bundle.min.js"></script>
+<script src="{{ 'new-my-product.js' | asset_url }}" defer></script>
+<script>
+
+</script>
+{% schema %}
+{
+  "name": "My Products Dashboard",
+  "target": "section",
+  "settings": [
+    {
+      "type": "text",
+      "id": "greeting_text",
+      "label": "Greeting text",
+      "default": "Hi"
+    },
+    {
+      "type": "text",
+      "id": "products_title",
+      "label": "Products heading",
+      "default": "My Products"
+    },
+    {
+  "type": "text",
+  "id": "products_detail_title",
+  "label": "Product detail heading",
+  "default": "Product Details"
+},
+    {
+      "type": "url",
+      "id": "web_register_link",
+      "label": "Register product link - web purchase flow"
+    },
+    {
+      "type": "text",
+      "id": "web_register_label",
+      "label": "Register button label (web purchase flow)",
+      "default": "+ Register new product"
+    },
+    {
+      "type": "url",
+      "id": "external_register_link",
+      "label": "Register product link - external purchase flow"
+    },
+    {
+      "type": "text",
+      "id": "external_register_label",
+      "label": "Register button label (external purchase flow)",
+      "default": "+ Register new product"
+    }
+  ]
+}
+{% endschema %}
+
+
