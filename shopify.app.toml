@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "97a00dce8ef910c604664315987f9599"
-application_url = "https://knew-cpu-presents-supporters.trycloudflare.com"
+application_url = "https://firmware-sewing-switched-dash.trycloudflare.com"
 embedded = true
 name = "sennheiser warranty app"
 
@@ -13,7 +13,7 @@ scopes = "write_products"
 api_version = "2026-07"
 
 [auth]
-redirect_urls = [ "https://knew-cpu-presents-supporters.trycloudflare.com/api/auth" ]
+redirect_urls = [ "https://firmware-sewing-switched-dash.trycloudflare.com/api/auth" ]
 
 [build]
 include_config_on_deploy = true

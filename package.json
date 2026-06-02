@@ -5,13 +5,22 @@
   "license": "UNLICENSED",
   "scripts": {
     "shopify": "shopify",
-    "build": "shopify app build",
-    "dev": "shopify app dev",
-    "info": "shopify app info",
-    "generate": "shopify app generate",
-    "deploy": "shopify app deploy"
+    "start": "node ./web/index.js",
+    "build": "npx shopify app build",
+    "dev": "npm run shopify app dev",
+    "info": "npm run shopify app info",
+    "generate": "npm run shopify app generate",
+    "deploy": "npm run shopify app deploy"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
+    "@shopify/app-bridge-utils": "^3.5.1",
+    "dotenv": "^17.3.1",
+    "express": "^4.22.1",
+    "mysql2": "^3.17.1",
+    "nodemailer": "^8.0.1",
+    "xlsx": "^0.18.5"
+  },
   "author": "PCA177",
   "private": true,
   "workspaces": [
