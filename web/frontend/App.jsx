@@ -20,6 +20,10 @@ function AppContent({ pages }) {
                 onClick: () => navigate("/StandardWarranty"),
               },
               {
+                label: "Extended Warranty Setup",
+                onClick: () => navigate("/ExtendedWarranty"),
+              },
+              {
                 label: "Retailers Setup",
                 onClick: () => navigate("/Retailers"),
               },

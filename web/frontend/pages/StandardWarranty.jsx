@@ -42,7 +42,7 @@ import {
   
     const loadDurations = async () => {
       try {
-        const r = await fetch("/app/warranty/durations");
+        const r = await fetch("/app/standard-warranty/durations");
         const data = await r.json();
         setDurations(Array.isArray(data) ? data : []);
       } catch {
@@ -56,7 +56,7 @@ import {
   
       try {
         const r = await fetch(
-          `/app/warranty/products${loadMore && cursor ? `?cursor=${cursor}` : ""}`
+          `/app/standard-warranty/products${loadMore && cursor ? `?cursor=${cursor}` : ""}`
         );
   
         if (!r.ok) throw new Error();
@@ -117,7 +117,7 @@ import {
     };
   
     const saveWarranty = async () => {
-      await fetch("/app/warranty/bulk", {
+      await fetch("/app/standard-warranty/bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -167,7 +167,7 @@ import {
               onClick={async () => {
                 if (!newDurationMonths) return;
   
-                await fetch("/app/warranty/durations", {
+                await fetch("/app/standard-warranty/durations", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({

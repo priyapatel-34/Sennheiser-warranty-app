@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config({ path: "../.env" });
+
 import { defineConfig } from "vite";
 import { dirname } from "path";
 import { fileURLToPath } from "url";
@@ -57,6 +60,13 @@ export default defineConfig({
     proxy: {
       "^/(\\?.*)?$": proxyOptions,
       "^/api(/|(\\?.*)?$)": proxyOptions,
+      "^/webhooks(\\?.*)?$": proxyOptions,
+      "^/tws-warranty(/|(\\?.*)?$)": proxyOptions,
+      "^/app/retailers(/|(\\?.*)?$)": proxyOptions,
+      "^/app/settings(/|(\\?.*)?$)": proxyOptions,
+      "^/app/standard-warranty(/|(\\?.*)?$)": proxyOptions,
+      "^/app/extended-warranty(/|(\\?.*)?$)": proxyOptions,
+      "^/app/registered-products(/|(\\?.*)?$)": proxyOptions,
     },
   },
 });

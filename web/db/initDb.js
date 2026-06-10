@@ -151,6 +151,57 @@ export async function initDb() {
     `);
 
     console.log("✅ Store settings table ready");
+
+    /* -----------------------------
+       EXTENDED WARRANTY DURATIONS
+       (Shop-level configurable duration options)
+    ------------------------------ */
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS extended_warranty_durations (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        shop_id BIGINT UNSIGNED NOT NULL,
+        duration_months INT NOT NULL,
+        duration_years INT NOT NULL,
+        plan_name VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+        UNIQUE KEY uk_shop_ew_duration (shop_id, duration_months),
+        CONSTRAINT fk_ewd_shop
+          FOREIGN KEY (shop_id)
+          REFERENCES shops(id)
+          ON DELETE CASCADE
+      )
+    `);
+
+    console.log("✅ Extended warranty durations table ready");
+
+    /* -----------------------------
+       EXTENDED WARRANTY PLANS
+       (Per-variant pricing mapped to Shopify products)
+    ------------------------------ */
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS extended_warranty_plans (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        shop_id BIGINT UNSIGNED NOT NULL,
+        shopify_product_id BIGINT NOT NULL,
+        shopify_variant_id BIGINT NOT NULL,
+        plan_name VARCHAR(255) NOT NULL,
+        duration_years INT NOT NULL,
+        duration_months INT NOT NULL,
+        price DECIMAL(10, 2) NOT NULL,
+        currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+        status ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          ON UPDATE CURRENT_TIMESTAMP,
+
+        UNIQUE KEY uniq_shop_variant_duration (shop_id, shopify_variant_id, duration_months),
+        INDEX idx_shop_product (shop_id, shopify_product_id),
+        FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+      )
+    `);
+
+    console.log("✅ Extended warranty plans table ready");
     
   } catch (err) {
     console.error("❌ DB init failed:", err);

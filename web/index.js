@@ -21,6 +21,7 @@ import warrantyRoutes from "./routes/warranty.routes.js";
 import retailersRoutes from "./routes/retailers.routes.js";
 import settingRoutes from "./routes/settings.routes.js";
 import standardWarranty from "./routes/standardWarranty.routes.js";
+import extendedWarranty from "./routes/extendedWarranty.routes.js";
 //import webHookRoutes from "./routes/webhook.routes.js";
 import registeredProducts from "./routes/registeredProducts.routes.js";
 
@@ -120,7 +121,9 @@ app.use("/app/retailers", shopify.validateAuthenticatedSession(), retailersRoute
 
 app.use("/app/settings", shopify.validateAuthenticatedSession() , settingRoutes);
 
-app.use("/app/warranty", shopify.validateAuthenticatedSession() , standardWarranty);
+app.use("/app/standard-warranty", shopify.validateAuthenticatedSession() , standardWarranty);
+
+app.use("/app/extended-warranty", shopify.validateAuthenticatedSession(), extendedWarranty);
 
 app.use("/app/registered-products", shopify.validateAuthenticatedSession() , registeredProducts);
 
