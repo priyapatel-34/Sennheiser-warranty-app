@@ -11,13 +11,14 @@ import {
     Select,
     Modal,
     Badge,
-    Spinner,
-    Banner,
     Text,
   } from "@shopify/polaris";
   import { useEffect, useState } from "react";
+  import { useToast } from "../hooks/useToast.js";
+  import LoadingPanel from "../components/LoadingPanel.jsx";
   
   export default function WarrantyAdmin() {
+    const toast = useToast();
     const [tab, setTab] = useState(0);
   
     // CONFIG (MONTHS)
@@ -31,6 +32,7 @@ import {
   
     // UI
     const [loading, setLoading] = useState(false);
+    const [productsLoaded, setProductsLoaded] = useState(false);
     const [error, setError] = useState(null);
   
     // MODAL
@@ -70,6 +72,7 @@ import {
   
         setCursor(data.nextCursor || null);
         setHasNextPage(Boolean(data.hasNextPage));
+        setProductsLoaded(true);
       } catch {
         setError("Unable to load products");
         setProducts([]);
@@ -117,18 +120,28 @@ import {
     };
   
     const saveWarranty = async () => {
-      await fetch("/app/standard-warranty/bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          productIds: modalProductIds,
-          duration: Number(selectedDuration), // MONTHS
-        }),
-      });
-  
-      setModalOpen(false);
-      clearSelection();
-      loadProducts();
+      try {
+        const r = await fetch("/app/standard-warranty/bulk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            productIds: modalProductIds,
+            duration: Number(selectedDuration),
+          }),
+        });
+
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error(err.error || "Failed to save warranty");
+        }
+
+        setModalOpen(false);
+        clearSelection();
+        toast.showSuccess("Standard warranty saved successfully");
+        loadProducts();
+      } catch (err) {
+        toast.showError(err.message || "Failed to save warranty");
+      }
     };
   
     /* ---------------- UI ---------------- */
@@ -145,9 +158,11 @@ import {
         />
   
         {error && (
-          <Banner status="critical" title="Error">
-            {error}
-          </Banner>
+          <div style={{ padding: "0 0 12px" }}>
+            <Text as="p" tone="critical">
+              {error}
+            </Text>
+          </div>
         )}
   
         {/* CONFIG TAB */}
@@ -171,11 +186,12 @@ import {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
-                    months: Number(newDurationMonths), // ✅ MONTHS ONLY
+                    months: Number(newDurationMonths),
                   }),
                 });
   
                 setNewDurationMonths("");
+                toast.showSuccess("Duration added");
                 loadDurations();
               }}
             >
@@ -192,9 +208,11 @@ import {
         {/* PRODUCTS TAB */}
         {tab === 1 && (
           <LegacyCard>
-            {loading && <Spinner accessibilityLabel="Loading products" />}
-  
-            {selectedResources.length > 0 && !loading && (
+            {loading && !productsLoaded ? (
+              <LoadingPanel label="Loading products..." />
+            ) : (
+              <>
+            {selectedResources.length > 0 && (
               <div style={{ marginBottom: 12 }}>
                 <Button primary onClick={openBulkModal}>
                   Set warranty for {selectedResources.length} products
@@ -252,10 +270,12 @@ import {
               ))}
             </IndexTable>
   
-            {hasNextPage && !loading && (
-              <Button fullWidth onClick={() => loadProducts(true)}>
+            {hasNextPage && (
+              <Button fullWidth loading={loading} onClick={() => loadProducts(true)}>
                 Load more
               </Button>
+            )}
+              </>
             )}
           </LegacyCard>
         )}

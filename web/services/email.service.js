@@ -12,6 +12,14 @@ export const sendEmailService = async ({
   from,
   replyTo
 }) => {
+  if (!process.env.SENDGRID_API_KEY) {
+    console.warn(
+      "⚠️ SENDGRID_API_KEY not configured — skipping email:",
+      subject
+    );
+    return { success: false, error: "SendGrid not configured", skipped: true };
+  }
+
   try {
     const msg = {
       to,

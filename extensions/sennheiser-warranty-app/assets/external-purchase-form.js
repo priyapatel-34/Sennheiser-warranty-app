@@ -480,52 +480,36 @@
 
 
       if (data.success === true) {
+        window.WarrantyToast?.showSuccess("Product registered successfully");
 
-        window.scrollTo({ top: 0, behavior: "smooth" });
-        console.log("In success if", data.success);
+        if (
+          data.showExtendedWarrantyOffer &&
+          data.extendedWarrantyOffer?.eligible &&
+          window.ExtendedWarrantyOffer
+        ) {
+          const nameInput = document.getElementById("customerName");
+          const emailInput = document.getElementById("customerEmail");
+          try {
+            const rendered = window.ExtendedWarrantyOffer.renderOffer(
+              data.extendedWarrantyOffer,
+              {
+                myProductsLink: myProductLink,
+                customerEmail: emailInput?.value?.trim() || "",
+                customerName: nameInput?.value?.trim() || "",
+                onSkip: () => {
+                  window.location.href = myProductLink;
+                },
+              }
+            );
+            if (rendered) return;
+          } catch (err) {
+            console.error("Extended warranty offer render failed:", err);
+          }
+        }
 
-        const result = confirm("Thank you. Product Registered Successfully!");
-        if (result) {
+        window.setTimeout(() => {
           window.location.href = myProductLink;
-        }
-        else {
-
-          /* ===============================
-            CLEAR INPUT FIELDS (UPDATED)
-          =============================== */
-
-          document.querySelectorAll(".external-products-wrapper").forEach(block => {
-
-            const productInput = block.querySelector("[data-autocomplete]");
-            const retailerInput = block.querySelector("[data-retailer-autocomplete]");
-            const dateInput = block.querySelector("input[type=date]");
-            const serialInput = block.querySelector("[data-serial]");
-
-            if (productInput) {
-              productInput.value = "";
-              productInput.dataset.productId = "";
-            }
-
-            if (retailerInput) {
-              retailerInput.value = "";
-              retailerInput.dataset.valid = "";
-            }
-
-            if (dateInput) {
-              dateInput.value = "";
-            }
-
-            if (serialInput) {
-              serialInput.value = "";
-            }
-
-            if (consent1) consent1.checked = false;
-            if (consent2) consent2.checked = false;
-
-          });
-
-        }
-
+        }, 4500);
       }
     } catch {
       throw new Error("Something went wrong. Please try again.");

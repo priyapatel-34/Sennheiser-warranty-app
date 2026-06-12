@@ -1,0 +1,260 @@
+.ew-offer-section {
+  padding: 0 8px 120px;
+  color: #fff;
+  max-width: 1280px;
+  margin: 0 auto;
+  position: relative;
+}
+
+.ew-offer-shell {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.ew-success-strip {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  background: linear-gradient(135deg, #0a3d2e 0%, #0d4a38 100%);
+  border: 1px solid #1a6b4a;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 28px;
+}
+
+.ew-success-strip p {
+  margin: 4px 0 0;
+  color: #b8e6d0;
+  font-size: 14px;
+}
+
+.ew-success-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #22c55e;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.ew-offer-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 24px;
+}
+
+@media (max-width: 768px) {
+  .ew-offer-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ew-offer-title {
+  font-size: 32px;
+  font-weight: 500;
+  margin-bottom: 20px;
+  line-height: 1.1;
+}
+
+.ew-product-card {
+  background: #141414;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.ew-product-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #888;
+  margin-bottom: 8px;
+}
+
+.ew-product-card h3 {
+  font-size: 20px;
+  margin-bottom: 16px;
+}
+
+.ew-meta-list {
+  display: grid;
+  gap: 10px;
+}
+
+.ew-meta-list dt {
+  font-size: 12px;
+  color: #888;
+}
+
+.ew-meta-list dd {
+  font-size: 14px;
+  margin: 2px 0 0;
+}
+
+.ew-coverage-box {
+  background: #141414;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.ew-coverage-box h4 {
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.ew-coverage-box p {
+  white-space: pre-line;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #bbb;
+}
+
+.ew-choose-title {
+  font-size: 18px;
+  margin-bottom: 16px;
+}
+
+.ew-plan-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.ew-plan-option {
+  display: block;
+  cursor: pointer;
+}
+
+.ew-plan-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ew-plan-option-inner {
+  border: 2px solid #333;
+  border-radius: 12px;
+  padding: 18px 20px;
+  background: #141414;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  position: relative;
+}
+
+.ew-plan-option input:checked + .ew-plan-option-inner {
+  border-color: #0096d6;
+  box-shadow: 0 0 0 1px #0096d6;
+}
+
+.ew-plan-recommended .ew-plan-option-inner {
+  border-color: #444;
+}
+
+.ew-plan-badge {
+  display: inline-block;
+  background: #0096d6;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin-bottom: 10px;
+}
+
+.ew-plan-option-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ew-plan-name {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.ew-plan-price {
+  font-size: 22px;
+  font-weight: 700;
+  color: #0096d6;
+}
+
+.ew-plan-features {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: #aaa;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ew-terms {
+  margin-top: 16px;
+  font-size: 13px;
+  color: #888;
+}
+
+.ew-terms a {
+  color: #0096d6;
+}
+
+.ew-sticky-actions {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: rgba(0, 0, 0, 0.92);
+  border-top: 1px solid #222;
+  z-index: 100;
+}
+
+.ew-primary-btn {
+  min-width: 200px;
+}
+
+.ew-page-loader {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  border-radius: 12px;
+}
+
+.ew-loader-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #333;
+  border-top-color: #0096d6;
+  border-radius: 50%;
+  animation: ew-spin 0.8s linear infinite;
+}
+
+.ew-loader-text {
+  margin-top: 14px;
+  color: #aaa;
+  font-size: 14px;
+}
+
+@keyframes ew-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.hidden {
+  display: none !important;
+}

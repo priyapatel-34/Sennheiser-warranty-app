@@ -1,5 +1,62 @@
 import { pool } from "./mysql.js";
 
+async function columnExists(table, column) {
+  const [rows] = await pool.query(
+    `
+    SELECT COUNT(*) AS cnt
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = ?
+      AND COLUMN_NAME = ?
+    `,
+    [table, column]
+  );
+  return rows[0].cnt > 0;
+}
+
+/** Additive schema updates for existing installs (no migration framework). */
+async function ensureSchemaUpdates() {
+  if (!(await columnExists("registered_products", "shopify_variant_id"))) {
+    await pool.query(`
+      ALTER TABLE registered_products
+      ADD COLUMN shopify_variant_id VARCHAR(100) NULL AFTER shopify_product_id
+    `);
+    console.log("✅ Added registered_products.shopify_variant_id");
+  }
+
+  const planColumns = [
+    ["region_code", "VARCHAR(10) NULL AFTER status"],
+    ["coverage_text", "TEXT NULL AFTER region_code"],
+    [
+      "shopify_checkout_variant_id",
+      "BIGINT NULL AFTER coverage_text",
+    ],
+  ];
+
+  for (const [col, definition] of planColumns) {
+    if (!(await columnExists("extended_warranty_plans", col))) {
+      await pool.query(
+        `ALTER TABLE extended_warranty_plans ADD COLUMN ${col} ${definition}`
+      );
+      console.log(`✅ Added extended_warranty_plans.${col}`);
+    }
+  }
+
+  const entitlementColumns = [
+    ["refund_amount", "DECIMAL(10, 2) NULL AFTER expiry_date"],
+    ["refunded_at", "TIMESTAMP NULL AFTER refund_amount"],
+  ];
+
+  for (const [col, definition] of entitlementColumns) {
+    if (!(await columnExists("extended_warranty_entitlements", col))) {
+      await pool.query(
+        `ALTER TABLE extended_warranty_entitlements ADD COLUMN ${col} ${definition}`
+      );
+      console.log(`✅ Added extended_warranty_entitlements.${col}`);
+    }
+  }
+}
+
 export async function initDb() {
   try {
     console.log("🔧 Initializing database...");
@@ -202,6 +259,115 @@ export async function initDb() {
     `);
 
     console.log("✅ Extended warranty plans table ready");
+
+    /* -----------------------------
+       EXTENDED WARRANTY SETTINGS
+       (Per-store configuration: terms, coverage, branding)
+    ------------------------------ */
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS extended_warranty_settings (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        shop_id BIGINT UNSIGNED NOT NULL,
+        enabled TINYINT(1) NOT NULL DEFAULT 1,
+        offer_after_registration TINYINT(1) NOT NULL DEFAULT 1,
+        terms_url VARCHAR(500) NULL,
+        coverage_text TEXT NULL,
+        store_display_name VARCHAR(255) NULL,
+        region_code VARCHAR(10) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_ew_settings_shop (shop_id),
+        FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+      )
+    `);
+
+    console.log("✅ Extended warranty settings table ready");
+
+    /* -----------------------------
+       EXTENDED WARRANTY ENTITLEMENTS
+       (Purchase + activation records linked to registrations)
+    ------------------------------ */
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS extended_warranty_entitlements (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        shop_id BIGINT UNSIGNED NOT NULL,
+        registered_product_id BIGINT NOT NULL,
+        extended_warranty_plan_id BIGINT UNSIGNED NOT NULL,
+        shopify_order_id VARCHAR(100) NULL,
+        shopify_draft_order_id VARCHAR(100) NULL,
+        status ENUM(
+          'pending_payment',
+          'active',
+          'expired',
+          'cancelled',
+          'refunded'
+        ) NOT NULL DEFAULT 'pending_payment',
+        plan_name VARCHAR(255) NOT NULL,
+        duration_years INT NOT NULL,
+        duration_months INT NOT NULL,
+        price DECIMAL(10, 2) NOT NULL,
+        currency VARCHAR(10) NOT NULL,
+        purchase_date DATE NULL,
+        activation_date DATE NULL,
+        expiry_date DATE NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_ew_ent_shop_register (shop_id, registered_product_id),
+        INDEX idx_ew_ent_order (shop_id, shopify_order_id),
+        FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+        FOREIGN KEY (registered_product_id) REFERENCES registered_products(id) ON DELETE CASCADE,
+        FOREIGN KEY (extended_warranty_plan_id) REFERENCES extended_warranty_plans(id) ON DELETE CASCADE
+      )
+    `);
+
+    console.log("✅ Extended warranty entitlements table ready");
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS extended_warranty_refund_settings (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        shop_id BIGINT UNSIGNED NOT NULL,
+        refund_enabled TINYINT(1) NOT NULL DEFAULT 1,
+        pro_rata_enabled TINYINT(1) NOT NULL DEFAULT 1,
+        refund_percentage DECIMAL(5, 2) NOT NULL DEFAULT 100.00,
+        cancel_on_refund TINYINT(1) NOT NULL DEFAULT 1,
+        minimum_used_days INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_ew_refund_shop (shop_id),
+        FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+      )
+    `);
+
+    console.log("✅ Extended warranty refund settings table ready");
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS extended_warranty_refund_records (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        shop_id BIGINT UNSIGNED NOT NULL,
+        entitlement_id BIGINT UNSIGNED NOT NULL,
+        shopify_order_id VARCHAR(100) NULL,
+        shopify_refund_id VARCHAR(100) NULL,
+        original_amount DECIMAL(10, 2) NOT NULL,
+        calculated_refund_amount DECIMAL(10, 2) NOT NULL,
+        currency VARCHAR(10) NOT NULL,
+        total_coverage_days INT NOT NULL,
+        remaining_days INT NOT NULL,
+        refund_percentage_applied DECIMAL(5, 2) NOT NULL,
+        calculation_notes TEXT NULL,
+        status ENUM('calculated', 'processed', 'cancelled') NOT NULL DEFAULT 'calculated',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_ew_refund_ent (entitlement_id),
+        FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+        FOREIGN KEY (entitlement_id) REFERENCES extended_warranty_entitlements(id) ON DELETE CASCADE
+      )
+    `);
+
+    console.log("✅ Extended warranty refund records table ready");
+
+    await ensureSchemaUpdates();
     
   } catch (err) {
     console.error("❌ DB init failed:", err);

@@ -72,6 +72,8 @@
             data-serial
             data-line-item-id="${data.product.line_item_id}"
             data-product-id="${data.product.product_id}"
+            data-variant-id="${data.product.variant_id || ""}"
+            data-sku="${data.product.displaySku || data.product.sku || ""}"
           />
 
           <div class="field-error"></div>
@@ -253,9 +255,11 @@
         shopify_order_id: orderNumber.value,
         shopify_line_item_id: input.dataset.lineItemId,
         product_id: input.dataset.productId || null,
+        variant_id: input.dataset.variantId || null,
+        sku: input.dataset.sku || null,
 
         product_name:
-          input.closest(".product-block")?.querySelector("strong")?.innerText ||
+          input.closest(".product-block")?.querySelector(".product-name")?.innerText?.trim() ||
           "",
 
         purchase_date: purchaseDate,
@@ -287,61 +291,35 @@
               console.log("outer if sucess msg", data.success);
 
       if (data.success === true) {
-                console.log("outer if sucess msg", data.success);
+        window.WarrantyToast?.showSuccess("Product registered successfully");
 
-        // const successBox = document.getElementById("successMessage");
-        // if (successBox) {
-        //   successBox.classList.add("show");
-        // }
+        if (
+          data.showExtendedWarrantyOffer &&
+          data.extendedWarrantyOffer?.eligible &&
+          window.ExtendedWarrantyOffer
+        ) {
+          try {
+            const rendered = window.ExtendedWarrantyOffer.renderOffer(
+              data.extendedWarrantyOffer,
+              {
+                myProductsLink: myProductLink,
+                customerEmail: emailInput?.value?.trim() || "",
+                customerName: nameInput?.value?.trim() || "",
+                onSkip: () => {
+                  window.location.href = myProductLink;
+                },
+              }
+            );
+            if (rendered) return;
+          } catch (err) {
+            console.error("Extended warranty offer render failed:", err);
+          }
+        }
 
-        window.scrollTo({ top: 0, behavior: "smooth" });
-
-        const result = confirm("Thank you. Product Registered Successfully!");
-        if (result) {
+        window.setTimeout(() => {
           window.location.href = myProductLink;
-        }
-        else {
-
-          /* ===============================
-            CLEAR INPUT FIELDS (UPDATED)
-          =============================== */
-
-          document.querySelectorAll(".external-products-wrapper").forEach(block => {
-
-            const productInput = block.querySelector("[data-autocomplete]");
-            const retailerInput = block.querySelector("[data-retailer-autocomplete]");
-            const dateInput = block.querySelector("input[type=date]");
-            const serialInput = block.querySelector("[data-serial]");
-
-            if (productInput) {
-              productInput.value = "";
-              productInput.dataset.productId = "";
-            }
-
-            if (retailerInput) {
-              retailerInput.value = "";
-              retailerInput.dataset.valid = "";
-            }
-
-            if (dateInput) {
-              dateInput.value = "";
-            }
-
-            if (serialInput) {
-              serialInput.value = "";
-            }
-
-            if (consent1) consent1.checked = false;
-            if (consent2) consent2.checked = false;
-
-          });
-
-        }
-
+        }, 4500);
       }
-      // setTimeout(() => {
-      //   window.location.href = myProductLink;
-      // }, 8000);
       
     } catch {
       alert("Something went wrong. Please try again.");

@@ -1,5 +1,9 @@
 import shopify from "../shopify.js";
 import { pool } from "../db/mysql.js";
+import {
+  getRefundSettings,
+  saveRefundSettings,
+} from "../services/extendedWarranty.service.js";
 
 function getNumericIdFromGid(gid) {
   if (!gid) return null;
@@ -607,5 +611,192 @@ export async function saveWarrantyPlanMapping(req, res) {
   } catch (err) {
     console.error("❌ saveWarrantyPlanMapping error:", err);
     return res.status(500).json({ error: "Failed to save warranty plan mapping" });
+  }
+}
+
+/* =====================================================
+   STORE SETTINGS (terms, coverage, branding)
+   ===================================================== */
+
+export async function getEWSettings(req, res) {
+  try {
+    const session = res.locals.shopify.session;
+    if (!session?.shop) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const shopId = await resolveShopId(session);
+    if (!shopId) {
+      return res.status(404).json({ error: "Shop not registered" });
+    }
+
+    const [[row]] = await pool.query(
+      `SELECT * FROM extended_warranty_settings WHERE shop_id = ?`,
+      [shopId]
+    );
+
+    return res.json({
+      success: true,
+      settings: row || {
+        enabled: 1,
+        terms_url: "",
+        coverage_text: "",
+      },
+    });
+  } catch (err) {
+    console.error("❌ getEWSettings error:", err);
+    return res.status(500).json({ error: "Failed to load settings" });
+  }
+}
+
+export async function saveEWSettings(req, res) {
+  try {
+    const session = res.locals.shopify.session;
+    if (!session?.shop) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const shopId = await resolveShopId(session);
+    if (!shopId) {
+      return res.status(404).json({ error: "Shop not registered" });
+    }
+
+    const { enabled = true, termsUrl = "", coverageText = "" } = req.body;
+
+    await pool.query(
+      `
+      INSERT INTO extended_warranty_settings (
+        shop_id, enabled, offer_after_registration, terms_url, coverage_text
+      ) VALUES (?, ?, 1, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        enabled = VALUES(enabled),
+        terms_url = VALUES(terms_url),
+        coverage_text = VALUES(coverage_text),
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      [shopId, enabled ? 1 : 0, termsUrl || null, coverageText || null]
+    );
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("❌ saveEWSettings error:", err);
+    return res.status(500).json({ error: "Failed to save settings" });
+  }
+}
+
+export async function getEWRefundSettings(req, res) {
+  try {
+    const session = res.locals.shopify.session;
+    if (!session?.shop) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const shopId = await resolveShopId(session);
+    if (!shopId) {
+      return res.status(404).json({ error: "Shop not registered" });
+    }
+
+    const settings = await getRefundSettings(shopId);
+
+    return res.json({
+      success: true,
+      settings: {
+        refundEnabled: Boolean(settings.refund_enabled),
+        proRataEnabled: Boolean(settings.pro_rata_enabled),
+        refundPercentage: Number(settings.refund_percentage),
+        cancelOnRefund: Boolean(settings.cancel_on_refund),
+        minimumUsedDays: Number(settings.minimum_used_days),
+      },
+    });
+  } catch (err) {
+    console.error("❌ getEWRefundSettings error:", err);
+    return res.status(500).json({ error: "Failed to load refund settings" });
+  }
+}
+
+export async function saveEWRefundSettings(req, res) {
+  try {
+    const session = res.locals.shopify.session;
+    if (!session?.shop) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const shopId = await resolveShopId(session);
+    if (!shopId) {
+      return res.status(404).json({ error: "Shop not registered" });
+    }
+
+    await saveRefundSettings(shopId, req.body);
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("❌ saveEWRefundSettings error:", err);
+    return res.status(500).json({ error: "Failed to save refund settings" });
+  }
+}
+
+export async function deleteEWDuration(req, res) {
+  try {
+    const session = res.locals.shopify.session;
+    if (!session?.shop) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const shopId = await resolveShopId(session);
+    if (!shopId) {
+      return res.status(404).json({ error: "Shop not registered" });
+    }
+
+    const durationId = Number(req.params.id);
+    if (!durationId) {
+      return res.status(400).json({ error: "Invalid duration id" });
+    }
+
+    const [result] = await pool.query(
+      `DELETE FROM extended_warranty_durations WHERE shop_id = ? AND id = ?`,
+      [shopId, durationId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Duration not found" });
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("❌ deleteEWDuration error:", err);
+    return res.status(500).json({ error: "Failed to delete duration" });
+  }
+}
+
+export async function deleteEWPlan(req, res) {
+  try {
+    const session = res.locals.shopify.session;
+    if (!session?.shop) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const shopId = await resolveShopId(session);
+    if (!shopId) {
+      return res.status(404).json({ error: "Shop not registered" });
+    }
+
+    const planId = Number(req.params.id);
+    if (!planId) {
+      return res.status(400).json({ error: "Invalid plan id" });
+    }
+
+    const [result] = await pool.query(
+      `DELETE FROM extended_warranty_plans WHERE shop_id = ? AND id = ?`,
+      [shopId, planId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Plan not found" });
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("❌ deleteEWPlan error:", err);
+    return res.status(500).json({ error: "Failed to delete plan" });
   }
 }

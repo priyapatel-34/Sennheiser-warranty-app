@@ -139,6 +139,18 @@ function getWarrantyStatus(warrantyEnd) {
                 <span class=gray-text>Warranty Expiry: ${formatDate(
                   p.warranty_end,
                 )}</span>
+                ${
+                  p.extended_warranty?.displayStatus &&
+                  p.extended_warranty.displayStatus !== "Not Purchased"
+                    ? `<span class="gray-text">Extended: ${p.extended_warranty.displayStatus}${
+                        p.extended_warranty.extendedWarrantyEndDate
+                          ? ` · until ${formatDate(p.extended_warranty.extendedWarrantyEndDate)}`
+                          : p.extended_warranty.endDate
+                            ? ` · until ${formatDate(p.extended_warranty.endDate)}`
+                            : ""
+                      }</span>`
+                    : ""
+                }
               </div>
 
               <button
@@ -338,6 +350,30 @@ function getWarrantyStatus(warrantyEnd) {
         product.warranty_end
           ? formatDate(product.warranty_end)
           : "Not registered";
+
+      const ewSection = document.getElementById("mp-detail-extended-warranty");
+      const ew = product.extended_warranty;
+
+      if (ewSection && ew && ew.displayStatus && ew.displayStatus !== "Not Purchased") {
+        ewSection.classList.remove("hidden");
+        document.getElementById("mp-detail-extended-status").innerText =
+          `Status: ${ew.displayStatus}`;
+        document.getElementById("mp-detail-extended-plan").innerText =
+          ew.planName ? `Plan: ${ew.planName}` : "";
+        document.getElementById("mp-detail-extended-dates").innerText = [
+          ew.extendedWarrantyStartDate || ew.startDate
+            ? `Coverage start: ${formatDate(ew.extendedWarrantyStartDate || ew.startDate)}`
+            : "",
+          ew.extendedWarrantyEndDate || ew.endDate
+            ? `Coverage end: ${formatDate(ew.extendedWarrantyEndDate || ew.endDate)}`
+            : "",
+          ew.purchaseDate ? `Purchased: ${formatDate(ew.purchaseDate)}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+      } else if (ewSection) {
+        ewSection.classList.add("hidden");
+      }
 
       const statusEl =
         document.getElementById("mp-detail-status");

@@ -41,7 +41,9 @@
     
   </section>
 
-  <div class="tws-bg">
+  <div id="ew-offer-section" class="ew-offer-section hidden"></div>
+
+  <div class="tws-bg ew-registration-form-panel">
     <div class="tws-wrap">
     <div id="successMessage" class="tws-success-message">
       <img 
@@ -129,6 +131,10 @@
 {% endif %} 
 
 {{ 'web-purchase-form.css' | asset_url | stylesheet_tag }}
+{{ 'warranty-toast.css' | asset_url | stylesheet_tag }}
+{{ 'extended-warranty-offer.css' | asset_url | stylesheet_tag }}
+{{ 'warranty-toast.js' | asset_url | script_tag }}
+{{ 'extended-warranty-offer.js' | asset_url | script_tag }}
 {{ 'web-purchase-form.js' | asset_url | script_tag }}
 
 {% schema %}

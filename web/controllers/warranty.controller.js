@@ -2,6 +2,89 @@ import shopify from "../shopify.js";
 import { pool } from "../db/mysql.js";
 import { sendEmailService } from "../services/email.service.js";
 import WarrantyRegistrationSuccessTemplate from "../emailTemp/standard_warranty.js";
+import {
+  getEntitlementsForRegistrations,
+  formatEntitlementForApiExport,
+  getExtendedWarrantySettings,
+  buildExtendedWarrantyOffer,
+  getNumericIdFromGid,
+  trySyncPendingEntitlementActivation,
+} from "../services/extendedWarranty.service.js";
+
+function getStandardWarrantyStatus(warrantyEnd) {
+  if (!warrantyEnd) return "pending_registration";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const end = new Date(warrantyEnd);
+  end.setHours(0, 0, 0, 0);
+  if (end < today) return "expired";
+  return "active";
+}
+
+function getExtendedWarrantyDisplayStatus(entitlement) {
+  if (!entitlement) return null;
+  if (entitlement.status === "pending_payment") return "Pending Payment";
+  if (entitlement.status === "cancelled" || entitlement.status === "refunded") {
+    return "Cancelled";
+  }
+  if (entitlement.status === "expired") return "Expired";
+  if (entitlement.status === "active" && entitlement.expiry_date) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const end = new Date(entitlement.expiry_date);
+    end.setHours(0, 0, 0, 0);
+    if (end < today) return "Expired";
+  }
+  if (entitlement.status === "active") return "Active";
+  return entitlement.status;
+}
+
+async function resolveEntitlementWithSync({
+  session,
+  shopId,
+  registerId,
+  customerEmail,
+  entitlement,
+}) {
+  if (entitlement?.status !== "pending_payment" || !registerId) {
+    return entitlement;
+  }
+
+  const synced = await trySyncPendingEntitlementActivation({
+    session,
+    shopId,
+    registerId,
+    customerEmail,
+  });
+  return synced || entitlement;
+}
+
+async function enrichProductWarrantyFields(product, shopId, entitlementRow = null) {
+  product.standard_warranty = {
+    status: product.is_registered
+      ? getStandardWarrantyStatus(product.warranty_end)
+      : "pending_registration",
+    start: product.warranty_start || null,
+    end: product.warranty_end || null,
+  };
+
+  if (entitlementRow) {
+    const registeredProduct = {
+      warranty_end: product.warranty_end,
+    };
+    product.extended_warranty = {
+      ...formatEntitlementForApiExport(entitlementRow, registeredProduct),
+      displayStatus: getExtendedWarrantyDisplayStatus(entitlementRow),
+    };
+  } else if (product.register_id && product.is_registered) {
+    product.extended_warranty = {
+      status: null,
+      displayStatus: "Not Purchased",
+    };
+  }
+
+  return product;
+}
 
 export async function getMyProductsOld(req, res) {
   console.log("➡️ App Proxy hit: /my-products");
@@ -636,6 +719,34 @@ export async function getMyProducts(req, res) {
     }
 
     console.log("my products :: ", products);
+
+    const registerIds = products.map(p => p.register_id).filter(Boolean);
+    let entitlementMap = await getEntitlementsForRegistrations(shopId, registerIds);
+
+    for (const product of products) {
+      if (!product.register_id) continue;
+      const entitlement = entitlementMap.get(product.register_id);
+      if (entitlement?.status === "pending_payment") {
+        const synced = await resolveEntitlementWithSync({
+          session,
+          shopId,
+          registerId: product.register_id,
+          customerEmail,
+          entitlement,
+        });
+        if (synced) {
+          entitlementMap.set(product.register_id, synced);
+        }
+      }
+    }
+
+    for (const product of products) {
+      const entitlement = product.register_id
+        ? entitlementMap.get(product.register_id)
+        : null;
+      await enrichProductWarrantyFields(product, shopId, entitlement);
+    }
+
     /* =====================================
        5️⃣ RESPONSE
     ===================================== */
@@ -804,29 +915,45 @@ export async function getProductDetail(req, res) {
       );
 
       const registered = registeredRows[0] || null;
+      const entitlementMap = registered
+        ? await getEntitlementsForRegistrations(shopId, [registered.id])
+        : new Map();
+      const entitlement = registered
+        ? await resolveEntitlementWithSync({
+            session,
+            shopId,
+            registerId: registered.id,
+            customerEmail: registered.customer_email,
+            entitlement: entitlementMap.get(registered.id) || null,
+          })
+        : null;
 
       const image = variant?.image?.url || product?.featuredImage?.url || null;
 
+      const productPayload = {
+        source: "shopify",
+        order_id: order.id,
+        order_number: order.name,
+        product_id: product?.id?.split("/").pop(),
+        variant_id: variant?.id?.split("/").pop() || null,
+        title: node.name,
+        base_product_title: product?.title,
+        variant_title: variant?.title || null,
+        sku: node.sku || null,
+        image,
+        purchase_date: order.processedAt,
+        register_id: registered?.id || null,
+        serial_number: registered?.serial_number || null,
+        warranty_start: registered?.warranty_start || null,
+        warranty_end: registered?.warranty_end || null,
+        is_registered: !!registered,
+      };
+
+      await enrichProductWarrantyFields(productPayload, shopId, entitlement);
+
       return res.json({
         success: true,
-        product: {
-          source: "shopify",
-          order_id: order.id,
-          order_number: order.name,
-          product_id: product?.id?.split("/").pop(),
-          variant_id: variant?.id?.split("/").pop() || null,
-          title: node.name,
-          base_product_title: product?.title,
-          variant_title: variant?.title || null,
-          sku: node.sku || null,
-          image,
-          purchase_date: order.processedAt,
-          register_id: registered?.id || null,
-          serial_number: registered?.serial_number || null,
-          warranty_start: registered?.warranty_start || null,
-          warranty_end: registered?.warranty_end || null,
-          is_registered: !!registered,
-        },
+        product: productPayload,
       });
     }
 
@@ -897,27 +1024,39 @@ export async function getProductDetail(req, res) {
         )?.node || null;
 
       const image = variant?.image?.url || product?.featuredImage?.url || null;
+      const entitlementMap = await getEntitlementsForRegistrations(shopId, [r.id]);
+      const entitlement = await resolveEntitlementWithSync({
+        session,
+        shopId,
+        registerId: r.id,
+        customerEmail: r.customer_email,
+        entitlement: entitlementMap.get(r.id) || null,
+      });
+
+      const productPayload = {
+        source: "external",
+        order_id: null,
+        order_number: null,
+        product_id: r.shopify_product_id,
+        variant_id: variant?.id?.split("/").pop() || r.shopify_variant_id || null,
+        title: product?.title,
+        base_product_title: product?.title,
+        variant_title: variant?.title || null,
+        sku: r.sku || null,
+        image,
+        purchase_date: r.purchase_date,
+        register_id: r.id,
+        serial_number: r.serial_number,
+        warranty_start: r.warranty_start,
+        warranty_end: r.warranty_end,
+        is_registered: true,
+      };
+
+      await enrichProductWarrantyFields(productPayload, shopId, entitlement);
 
       return res.json({
         success: true,
-        product: {
-          source: "external",
-          order_id: null,
-          order_number: null,
-          product_id: r.shopify_product_id,
-          variant_id: variant?.id?.split("/").pop() || null,
-          title: product?.title,
-          base_product_title: product?.title,
-          variant_title: variant?.title || null,
-          sku: r.sku || null,
-          image,
-          purchase_date: r.purchase_date,
-          register_id: r.id,
-          serial_number: r.serial_number,
-          warranty_start: r.warranty_start,
-          warranty_end: r.warranty_end,
-          is_registered: true,
-        },
+        product: productPayload,
       });
     }
 
@@ -2455,6 +2594,13 @@ export async function registerProducts(req, res) {
         }
 
         const numericPId = productId.split("/").pop();
+        const variantNumericId = p.variant_id
+          ? getNumericIdFromGid(
+              p.variant_id.startsWith("gid://")
+                ? p.variant_id
+                : `gid://shopify/ProductVariant/${p.variant_id}`
+            )
+          : null;
 
         /* ===============================
            WARRANTY DURATION
@@ -2490,7 +2636,7 @@ export async function registerProducts(req, res) {
         /* ===============================
            INSERT REGISTERED PRODUCT
         =============================== */
-        await conn.query(
+        const [insertResult] = await conn.query(
           `
           INSERT INTO registered_products (
             shop_id,
@@ -2501,6 +2647,8 @@ export async function registerProducts(req, res) {
             shopify_order_id,
             shopify_line_item_id,
             shopify_product_id,
+            shopify_variant_id,
+            sku,
             product_name,
             serial_number,
             retailer_name,
@@ -2510,7 +2658,7 @@ export async function registerProducts(req, res) {
             consent_terms,
             consent_marketing
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
           [
             shopId,
@@ -2523,6 +2671,8 @@ export async function registerProducts(req, res) {
               ? p.shopify_line_item_id.split("/").pop()
               : null,
             numericPId,
+            variantNumericId ? String(variantNumericId) : null,
+            p.sku || null,
             productName,
             serial,
             p.retailer_name || null,
@@ -2535,9 +2685,13 @@ export async function registerProducts(req, res) {
         );
 
         createdProducts.push({
+          registerId: insertResult.insertId,
           productName,
+          productId: numericPId,
+          variantId: variantNumericId,
           orderNumber: p.shopify_order_id,
           purchaseDate: p.purchase_date,
+          serialNumber: serial,
           warrantyStart,
           warrantyEnd,
         });
@@ -2580,10 +2734,36 @@ export async function registerProducts(req, res) {
       });
 
        if (!emailResult.success) {
-        console.error('Failed to send email:', emailResult.error);
+        if (emailResult.skipped) {
+          console.warn("Registration email skipped (SendGrid not configured)");
+        } else {
+          console.error(
+            "Registration succeeded but email failed:",
+            emailResult.error,
+            "— verify SENDGRID_API_KEY in .env"
+          );
+        }
       }
 
-      return res.json({ success: true });
+      const ewSettings = await getExtendedWarrantySettings(shopId);
+      const primaryRegistration = createdProducts[0];
+      let extendedWarrantyOffer = null;
+
+      if (ewSettings.enabled && primaryRegistration?.registerId) {
+        extendedWarrantyOffer = await buildExtendedWarrantyOffer(
+          shopId,
+          primaryRegistration.registerId
+        );
+      }
+
+      return res.json({
+        success: true,
+        registrations: createdProducts,
+        showExtendedWarrantyOffer: Boolean(
+          extendedWarrantyOffer?.eligible && ewSettings.enabled
+        ),
+        extendedWarrantyOffer,
+      });
     } catch (err) {
       await conn.rollback();
       throw err;

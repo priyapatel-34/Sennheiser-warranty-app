@@ -14,6 +14,7 @@ import serveStatic from "serve-static";
 import shopify from "./shopify.js";
 import productCreator from "./product-creator.js";
 import PrivacyWebhookHandlers from "./privacy.js";
+import { OrderWebhookHandlers, registerOrderWebhooks } from "./orderWebhooks.js";
 
 
 import { verifyAppProxy } from "./middleware/verifyAppProxy.js";
@@ -99,13 +100,20 @@ app.get(
 
     await registerProductUpdateWebhook(admin);
 
+    await registerOrderWebhooks(admin);
+
     // ✅ redirect AFTER DB write
     return shopify.redirectToShopifyOrAppRoot();
   }
 );
 app.post(
   shopify.config.webhooks.path,
-  shopify.processWebhooks({ webhookHandlers: PrivacyWebhookHandlers })
+  shopify.processWebhooks({
+    webhookHandlers: {
+      ...PrivacyWebhookHandlers,
+      ...OrderWebhookHandlers,
+    },
+  })
 );
 
 // If you are adding routes outside of the /api path, remember to
