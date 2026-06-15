@@ -464,7 +464,6 @@ export async function getMyProductsWorkingOld1702(req, res) {
       });
     }
 
-    console.log("my products :: ", products);
     /* =====================================
        5️⃣ RESPONSE
     ===================================== */
@@ -717,8 +716,6 @@ export async function getMyProducts(req, res) {
         is_registered: true,
       });
     }
-
-    console.log("my products :: ", products);
 
     const registerIds = products.map(p => p.register_id).filter(Boolean);
     let entitlementMap = await getEntitlementsForRegistrations(shopId, registerIds);
