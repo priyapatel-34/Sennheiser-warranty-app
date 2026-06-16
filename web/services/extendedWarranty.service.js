@@ -145,7 +145,7 @@ export async function getEntitlementsForRegistrations(shopId, registerIds) {
   const map = new Map();
   for (const row of rows) {
     const key = row.registered_product_id;
-    if (!map.has(key) || row.status === "active") {
+    if (!map.has(key)) {
       map.set(key, row);
     }
   }
@@ -517,171 +517,16 @@ export async function activateEntitlementFromPayment({
   }
 }
 
-export async function cancelEntitlementFromRefund({
-  shopId,
-  shopifyOrderId,
-  shopifyRefundId = null,
-}) {
-  const [entitlements] = await pool.query(
-    `
-    SELECT e.*, r.warranty_end, r.customer_email, r.sku
-    FROM extended_warranty_entitlements e
-    LEFT JOIN registered_products r
-      ON r.id = e.registered_product_id AND r.shop_id = e.shop_id
-    WHERE e.shop_id = ?
-      AND e.shopify_order_id = ?
-      AND e.status IN ('active', 'pending_payment')
-    `,
-    [shopId, shopifyOrderId]
-  );
-
-  const results = [];
-
-  for (const entitlement of entitlements) {
-    const calculation = calculateProRataRefund(entitlement);
-    const wasActivated = Boolean(entitlement.activation_date);
-    const newStatus = wasActivated ? "refunded" : "cancelled";
-
-    await pool.query(
-      `
-      UPDATE extended_warranty_entitlements
-      SET
-        status = ?,
-        refund_amount = ?,
-        refunded_at = CURRENT_TIMESTAMP,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-      `,
-      [newStatus, calculation.refundAmount, entitlement.id]
-    );
-
-    await pool.query(
-      `
-      INSERT INTO extended_warranty_refund_records (
-        shop_id,
-        entitlement_id,
-        shopify_order_id,
-        shopify_refund_id,
-        original_amount,
-        calculated_refund_amount,
-        currency,
-        total_coverage_days,
-        remaining_days,
-        refund_percentage_applied,
-        calculation_notes,
-        status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 100, ?, 'pending_finance_action')
-      `,
-      [
-        shopId,
-        entitlement.id,
-        shopifyOrderId,
-        shopifyRefundId,
-        entitlement.price,
-        calculation.refundAmount,
-        entitlement.currency,
-        calculation.totalCoverageDays,
-        calculation.remainingDays,
-        calculation.notes,
-      ]
-    );
-
-    results.push({ entitlementId: entitlement.id, ...calculation });
-  }
-
-  return results;
+export async function cancelEntitlementFromRefund(params) {
+  const mod = await import("./extendedWarrantyRefund.service.js");
+  return mod.cancelEntitlementFromRefund(params);
 }
 
-/** Fixed PRD Section 5.2 defaults — not admin-configurable in Phase 2A. */
-export async function getRefundSettings(_shopId) {
-  return {
-    refund_enabled: 1,
-    pro_rata_enabled: 1,
-    cancel_on_refund: 1,
-  };
-}
-
-export async function saveRefundSettings(shopId, settings) {
-  const {
-    refundEnabled = true,
-    proRataEnabled = true,
-    refundPercentage = 100,
-    cancelOnRefund = true,
-    minimumUsedDays = 0,
-  } = settings;
-
-  await pool.query(
-    `
-    INSERT INTO extended_warranty_refund_settings (
-      shop_id,
-      refund_enabled,
-      pro_rata_enabled,
-      refund_percentage,
-      cancel_on_refund,
-      minimum_used_days
-    ) VALUES (?, ?, ?, ?, ?, ?)
-    ON DUPLICATE KEY UPDATE
-      refund_enabled = VALUES(refund_enabled),
-      pro_rata_enabled = VALUES(pro_rata_enabled),
-      refund_percentage = VALUES(refund_percentage),
-      cancel_on_refund = VALUES(cancel_on_refund),
-      minimum_used_days = VALUES(minimum_used_days),
-      updated_at = CURRENT_TIMESTAMP
-    `,
-    [
-      shopId,
-      refundEnabled ? 1 : 0,
-      proRataEnabled ? 1 : 0,
-      Number(refundPercentage),
-      cancelOnRefund ? 1 : 0,
-      Number(minimumUsedDays) || 0,
-    ]
-  );
-}
-
-/**
- * PRD Section 5.2:
- * (total_coverage_days - days_used) / total_coverage_days × purchase_price
- * Full refund when extended warranty was never activated.
- */
-export function calculateProRataRefund(entitlement) {
-  const price = Number(entitlement.price);
-
-  if (!entitlement.activation_date) {
-    return {
-      refundAmount: price,
-      totalCoverageDays: Number(entitlement.duration_months || 0) * 30 || 1,
-      remainingDays: Number(entitlement.duration_months || 0) * 30 || 1,
-      usedDays: 0,
-      notes: "Full refund — extended warranty was not activated",
-    };
-  }
-
-  const activation = new Date(entitlement.activation_date);
-  const expiry = new Date(entitlement.expiry_date);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  activation.setHours(0, 0, 0, 0);
-  expiry.setHours(0, 0, 0, 0);
-
-  const msPerDay = 86400000;
-  const totalCoverageDays = Math.max(
-    1,
-    Math.round((expiry - activation) / msPerDay)
-  );
-  const usedDays = Math.max(0, Math.round((today - activation) / msPerDay));
-  const remainingDays = Math.max(0, totalCoverageDays - usedDays);
-  const refundAmount =
-    Math.round((remainingDays / totalCoverageDays) * price * 100) / 100;
-
-  return {
-    refundAmount,
-    totalCoverageDays,
-    remainingDays,
-    usedDays,
-    notes: `Pro-rata: (${totalCoverageDays} - ${usedDays}) / ${totalCoverageDays} × ${price}`,
-  };
-}
+export {
+  calculateProRataRefund,
+  getRefundSettings,
+  saveRefundSettings,
+} from "./extendedWarrantyRefund.service.js";
 
 export function formatMoney(amount, currency, locale) {
   try {

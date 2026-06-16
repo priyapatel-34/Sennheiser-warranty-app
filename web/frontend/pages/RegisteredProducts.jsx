@@ -1,207 +1,307 @@
 import {
   Page,
   Layout,
-  Card,
+  LegacyCard,
   IndexTable,
   Text,
-  Spinner,
   Badge,
-  Box,
   Button,
   Modal,
-  useIndexResourceState,
+  TextField,
+  Pagination,
+  EmptyState,
 } from "@shopify/polaris";
 import { useEffect, useState } from "react";
+import LoadingPanel from "../components/LoadingPanel.jsx";
+import { useToast } from "../hooks/useToast.js";
+
+const PAGE_SIZE = 10;
+
+function formatWarrantyType(item) {
+  const status = item.extended_warranty_status;
+  if (status === "active") return "Extended (Active)";
+  if (status === "pending_payment") return "Extended (Pending)";
+  return "Standard";
+}
+
+function warrantyTone(item) {
+  const status = item.extended_warranty_status;
+  if (status === "active") return "success";
+  if (status === "pending_payment") return "warning";
+  return "info";
+}
 
 export default function RegisteredProductsTable() {
+  const toast = useToast();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  // delete
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [paginationMeta, setPaginationMeta] = useState({
+    total: 0,
+    totalPages: 1,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  });
+
+  const [refreshKey, setRefreshKey] = useState(0);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  const { selectedResources, allResourcesSelected, handleSelectionChange } =
-    useIndexResourceState(products);
-
   useEffect(() => {
-    console.log("✅ RegisteredProducts mounted");
-    console.log("Origin:", window.location.origin);
-    console.log("Current URL:", window.location.href);
-    setLoading(true);
-    fetchRegisteredProducts();
-  }, []);
+    let cancelled = false;
 
-  const fetchRegisteredProducts = async () => {
-    try {
+    async function load() {
       setLoading(true);
+      setError(null);
 
-      console.log("🚀 Fetching registered products...");
+      try {
+        const params = new URLSearchParams({
+          page: String(page),
+          limit: String(PAGE_SIZE),
+          sort: "created_at",
+          order: "desc",
+        });
 
-      const res = await fetch("/app/registered-products/");
+        if (searchQuery) {
+          params.set("q", searchQuery);
+        }
 
-      console.log("📡 Response status:", res.status);
-      console.log("📡 Response URL:", res.url);
+        const res = await fetch(`/app/registered-products?${params.toString()}`);
+        const json = await res.json();
 
-      const text = await res.text();
+        if (!res.ok) {
+          throw new Error(json.error || "Failed to load registered products");
+        }
 
-      console.log("📦 Raw response:", text);
+        if (cancelled) return;
 
-      const json = JSON.parse(text);
+        setProducts(json.data || []);
 
-      setProducts(json.data || []);
-    } catch (error) {
-      console.error("❌ Error loading registered products", error);
-    } finally {
-      setLoading(false);
+        const meta = json.pagination || {};
+        setPaginationMeta({
+          total: meta.total || 0,
+          totalPages: meta.totalPages || 1,
+          hasNextPage: Boolean(meta.hasNextPage),
+          hasPreviousPage: Boolean(meta.hasPreviousPage),
+        });
+
+        if (meta.page && meta.page !== page) {
+          setPage(meta.page);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        const message = err.message || "Failed to load registered products";
+        setError(message);
+        setProducts([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [page, searchQuery, refreshKey]);
+
+  const runSearch = () => {
+    setPage(1);
+    setSearchQuery(searchInput.trim());
   };
 
-  // delete
-  const handleDeleteClick = (product) => {
+  const clearSearch = () => {
+    setSearchInput("");
+    setSearchQuery("");
+    setPage(1);
+  };
+
+  const handleDeleteClick = product => {
     setSelectedProduct(product);
     setDeleteModalOpen(true);
   };
 
-  // delete
   const handleDeleteProduct = async () => {
     if (!selectedProduct) return;
 
     try {
       setDeleteLoading(true);
-
       const response = await fetch(
         `/app/registered-products/${selectedProduct.id}`,
-        {
-          method: "DELETE",
-        },
+        { method: "DELETE" }
       );
-
       const data = await response.json();
 
-      if (data.success) {
-        setProducts((prev) =>
-          prev.filter((item) => item.id !== selectedProduct.id),
-        );
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Failed to delete product");
       }
 
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to delete product");
-      }
-
+      toast.showSuccess("Registered product deleted");
       setDeleteModalOpen(false);
       setSelectedProduct(null);
-
-      console.log("✅ Product deleted successfully");
-    } catch (error) {
-      console.error("❌ Delete failed:", error);
-      alert("Failed to delete product");
+      setRefreshKey(k => k + 1);
+    } catch (err) {
+      toast.showError(err.message || "Failed to delete product");
     } finally {
       setDeleteLoading(false);
     }
   };
 
-  const rowMarkup = products.map((item, index) => (
-    <IndexTable.Row
-      id={String(item.id)}
-      key={item.id}
-      selected={selectedResources.includes(String(item.id))}
-      position={index}
-    >
-      <IndexTable.Cell>
-        <Text as="span" fontWeight="medium">
-          {item.product_name}
-        </Text>
-      </IndexTable.Cell>
-      <IndexTable.Cell>{item.serial_number}</IndexTable.Cell>
-      <IndexTable.Cell>{item.sku || "-"}</IndexTable.Cell>
-      <IndexTable.Cell>{item.customer_name || "-"}</IndexTable.Cell>
-      <IndexTable.Cell>{item.customer_email}</IndexTable.Cell>
-      <IndexTable.Cell>
-        <Badge tone={item.purchase_type === "shopify" ? "success" : "info"}>
-          {item.purchase_type}
-        </Badge>
-      </IndexTable.Cell>
-      <IndexTable.Cell>{item.retailer_name || "-"}</IndexTable.Cell>
-      <IndexTable.Cell>{item.purchase_date || "-"}</IndexTable.Cell>
-      <IndexTable.Cell>{item.warranty_start}</IndexTable.Cell>
-      <IndexTable.Cell>{item.warranty_end}</IndexTable.Cell>
-      <IndexTable.Cell>
-        <Badge tone={item.consent_terms ? "success" : "critical"}>
-          {item.consent_terms ? "Yes" : "No"}
-        </Badge>
-      </IndexTable.Cell>
-      <IndexTable.Cell>
-        <Badge tone={item.consent_marketing ? "success" : "warning"}>
-          {item.consent_marketing ? "Yes" : "No"}
-        </Badge>
-      </IndexTable.Cell>
-      <IndexTable.Cell>
-        <Button
-          tone="critical"
-          size="micro"
-          onClick={() => handleDeleteClick(item)}
-        >
-          Delete
-        </Button>
-      </IndexTable.Cell>
-    </IndexTable.Row>
-  ));
+  const showPagination =
+    !loading && !error && paginationMeta.totalPages > 1;
 
   return (
     <>
       <Page title="Registered Products" fullWidth>
         <Layout>
           <Layout.Section>
-            <Box>
-              <Card>
-                {loading ? (
-                  <Box padding="600">
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Spinner size="large" />
-                    </div>
-                  </Box>
-                ) : (
-                  <IndexTable
-                    resourceName={{
-                      singular: "product",
-                      plural: "products",
+            <LegacyCard sectioned>
+              <Text as="p" tone="subdued">
+                Search by customer name, email, serial number, product name, SKU, or registration ID.
+              </Text>
+              <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 240 }}>
+                  <TextField
+                    label="Search"
+                    labelHidden
+                    value={searchInput}
+                    onChange={setSearchInput}
+                    placeholder="Search registered products..."
+                    autoComplete="off"
+                    onKeyDown={e => {
+                      if (e.key === "Enter") runSearch();
                     }}
-                    itemCount={products.length}
-                    selectedItemsCount={
-                      allResourcesSelected ? "All" : selectedResources.length
+                    clearButton
+                    onClearButtonClick={clearSearch}
+                    connectedRight={
+                      <Button variant="primary" onClick={runSearch}>
+                        Search
+                      </Button>
                     }
-                    onSelectionChange={handleSelectionChange}
+                  />
+                </div>
+                {searchQuery ? (
+                  <Button onClick={clearSearch}>Clear</Button>
+                ) : null}
+              </div>
+            </LegacyCard>
+
+            <LegacyCard>
+              {loading ? (
+                <LoadingPanel label="Loading registered products..." />
+              ) : error ? (
+                <EmptyState heading="Unable to load products" image="">
+                  <p>{error}</p>
+                  <Button onClick={() => setRefreshKey(k => k + 1)}>
+                    Retry
+                  </Button>
+                </EmptyState>
+              ) : products.length === 0 ? (
+                <EmptyState heading="No registered products found" image="">
+                  <p>
+                    {searchQuery
+                      ? "No results match your search."
+                      : "No registered products yet."}
+                  </p>
+                </EmptyState>
+              ) : (
+                <>
+                  <IndexTable
+                    resourceName={{ singular: "product", plural: "products" }}
+                    itemCount={products.length}
+                    selectable={false}
                     headings={[
+                      { title: "ID" },
                       { title: "Product" },
                       { title: "Serial No" },
                       { title: "SKU" },
                       { title: "Customer" },
                       { title: "Email" },
+                      { title: "Warranty Type" },
                       { title: "Purchase Type" },
-                      { title: "Retailer" },
-                      { title: "Purchase Date" },
-                      { title: "Warranty Start" },
                       { title: "Warranty End" },
-                      { title: "Terms" },
-                      { title: "Marketing" },
+                      { title: "EW End" },
                       { title: "Actions" },
                     ]}
                   >
-                    {rowMarkup}
+                    {products.map((item, index) => (
+                      <IndexTable.Row
+                        id={String(item.id)}
+                        key={item.id}
+                        position={index}
+                      >
+                        <IndexTable.Cell>{item.id}</IndexTable.Cell>
+                        <IndexTable.Cell>
+                          <Text as="span" fontWeight="semibold">
+                            {item.product_name}
+                          </Text>
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>{item.serial_number}</IndexTable.Cell>
+                        <IndexTable.Cell>{item.sku || "—"}</IndexTable.Cell>
+                        <IndexTable.Cell>{item.customer_name || "—"}</IndexTable.Cell>
+                        <IndexTable.Cell>{item.customer_email}</IndexTable.Cell>
+                        <IndexTable.Cell>
+                          <Badge tone={warrantyTone(item)}>
+                            {formatWarrantyType(item)}
+                          </Badge>
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>
+                          <Badge tone={item.purchase_type === "shopify" ? "success" : "info"}>
+                            {item.purchase_type}
+                          </Badge>
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>{item.warranty_end || "—"}</IndexTable.Cell>
+                        <IndexTable.Cell>
+                          {item.extended_warranty_end || "—"}
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>
+                          <Button
+                            tone="critical"
+                            size="micro"
+                            onClick={() => handleDeleteClick(item)}
+                          >
+                            Delete
+                          </Button>
+                        </IndexTable.Cell>
+                      </IndexTable.Row>
+                    ))}
                   </IndexTable>
-                )}
-              </Card>
-            </Box>
+
+                  <div
+                    style={{
+                      padding: 16,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                      gap: 12,
+                    }}
+                  >
+                    <Text as="p" tone="subdued">
+                      {paginationMeta.total} result
+                      {paginationMeta.total === 1 ? "" : "s"}
+                    </Text>
+                    {showPagination ? (
+                      <Pagination
+                        hasPrevious={paginationMeta.hasPreviousPage}
+                        onPrevious={() => setPage(p => Math.max(1, p - 1))}
+                        hasNext={paginationMeta.hasNextPage}
+                        onNext={() => setPage(p => p + 1)}
+                        label={`Page ${page} of ${paginationMeta.totalPages}`}
+                      />
+                    ) : null}
+                  </div>
+                </>
+              )}
+            </LegacyCard>
           </Layout.Section>
         </Layout>
       </Page>
+
       <Modal
         open={deleteModalOpen}
         onClose={() => {
@@ -226,19 +326,12 @@ export default function RegisteredProductsTable() {
         ]}
       >
         <Modal.Section>
-          <Text as="p" variant="bodyMd">
+          <Text as="p">
             Are you sure you want to delete{" "}
             <strong>{selectedProduct?.product_name}</strong>?
           </Text>
-
-          <Box paddingBlockStart="300">
-            <Text as="p" variant="bodyMd" tone="critical">
-              This action cannot be undone.
-            </Text>
-          </Box>
         </Modal.Section>
       </Modal>
     </>
   );
 }
- 

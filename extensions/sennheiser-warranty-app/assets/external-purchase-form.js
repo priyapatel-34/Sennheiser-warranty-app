@@ -480,6 +480,16 @@
 
 
       if (data.success === true) {
+        const primary = data.registrations?.[0];
+        if (primary?.registerId) {
+          window.WarrantyFlowState?.savePostRegistration({
+            registerId: primary.registerId,
+            customerEmail: emailInput.value.trim(),
+            customerName: nameInput.value.trim(),
+            myProductsLink: myProductLink,
+          });
+        }
+
         window.WarrantyToast?.showSuccess("Product registered successfully");
 
         if (
@@ -487,16 +497,15 @@
           data.extendedWarrantyOffer?.eligible &&
           window.ExtendedWarrantyOffer
         ) {
-          const nameInput = document.getElementById("customerName");
-          const emailInput = document.getElementById("customerEmail");
           try {
             const rendered = window.ExtendedWarrantyOffer.renderOffer(
               data.extendedWarrantyOffer,
               {
                 myProductsLink: myProductLink,
-                customerEmail: emailInput?.value?.trim() || "",
-                customerName: nameInput?.value?.trim() || "",
+                customerEmail: emailInput.value.trim(),
+                customerName: nameInput.value.trim(),
                 onSkip: () => {
+                  window.WarrantyFlowState?.clearPostRegistration();
                   window.location.href = myProductLink;
                 },
               }
@@ -508,6 +517,7 @@
         }
 
         window.setTimeout(() => {
+          window.WarrantyFlowState?.clearPostRegistration();
           window.location.href = myProductLink;
         }, 4500);
       }
@@ -523,8 +533,17 @@
   //  loadStoreSettings().then(addExternalProduct);
 
   document.addEventListener("DOMContentLoaded", async () => {
-    await loadStoreSettings(); // ensures retailerRequired is ready
-    addExternalProduct(); // 🔥 FIRST PRODUCT ALWAYS RENDERS
+    await loadStoreSettings();
+    addExternalProduct();
+
+    const myProductLink =
+      document.getElementById("my_products_link")?.value || "/pages/my-products";
+    const restored = await window.WarrantyFlowState?.restoreExtendedWarrantyOffer({
+      myProductsLink: myProductLink,
+    });
+    if (restored) {
+      window.WarrantyToast?.showInfo("Continue selecting your extended warranty plan.");
+    }
   });
 
   console.log("In js external 222");

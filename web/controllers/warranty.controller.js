@@ -10,6 +10,10 @@ import {
   getNumericIdFromGid,
   trySyncPendingEntitlementActivation,
 } from "../services/extendedWarranty.service.js";
+import {
+  getLatestRefundForEntitlements,
+  getCustomerFacingRefundStatus,
+} from "../services/extendedWarrantyRefund.service.js";
 
 function getStandardWarrantyStatus(warrantyEnd) {
   if (!warrantyEnd) return "pending_registration";
@@ -21,12 +25,15 @@ function getStandardWarrantyStatus(warrantyEnd) {
   return "active";
 }
 
-function getExtendedWarrantyDisplayStatus(entitlement) {
+function getExtendedWarrantyDisplayStatus(entitlement, refundRecord = null) {
   if (!entitlement) return null;
+
+  const refundStatus = getCustomerFacingRefundStatus(entitlement, refundRecord);
+  if (refundStatus) return refundStatus;
+
   if (entitlement.status === "pending_payment") return "Pending Payment";
-  if (entitlement.status === "cancelled" || entitlement.status === "refunded") {
-    return "Cancelled";
-  }
+  if (entitlement.status === "cancelled") return "Cancelled";
+  if (entitlement.status === "refunded") return "Refunded";
   if (entitlement.status === "expired") return "Expired";
   if (entitlement.status === "active" && entitlement.expiry_date) {
     const today = new Date();
@@ -59,7 +66,7 @@ async function resolveEntitlementWithSync({
   return synced || entitlement;
 }
 
-async function enrichProductWarrantyFields(product, shopId, entitlementRow = null) {
+async function enrichProductWarrantyFields(product, shopId, entitlementRow = null, refundRecord = null) {
   product.standard_warranty = {
     status: product.is_registered
       ? getStandardWarrantyStatus(product.warranty_end)
@@ -74,7 +81,9 @@ async function enrichProductWarrantyFields(product, shopId, entitlementRow = nul
     };
     product.extended_warranty = {
       ...formatEntitlementForApiExport(entitlementRow, registeredProduct),
-      displayStatus: getExtendedWarrantyDisplayStatus(entitlementRow),
+      displayStatus: getExtendedWarrantyDisplayStatus(entitlementRow, refundRecord),
+      refundStatus: refundRecord?.status || null,
+      refundAmount: refundRecord?.netRefundAmount ?? entitlementRow.refund_amount ?? null,
     };
   } else if (product.register_id && product.is_registered) {
     product.extended_warranty = {
@@ -737,11 +746,22 @@ export async function getMyProducts(req, res) {
       }
     }
 
+    const entitlementIds = [...entitlementMap.values()]
+      .map(e => e.id)
+      .filter(Boolean);
+    const refundMap = await getLatestRefundForEntitlements(shopId, entitlementIds);
+
     for (const product of products) {
       const entitlement = product.register_id
         ? entitlementMap.get(product.register_id)
         : null;
-      await enrichProductWarrantyFields(product, shopId, entitlement);
+      const refundRecord = entitlement ? refundMap.get(entitlement.id) : null;
+      await enrichProductWarrantyFields(
+        product,
+        shopId,
+        entitlement,
+        refundRecord
+      );
     }
 
     /* =====================================
@@ -2617,7 +2637,7 @@ export async function registerProducts(req, res) {
           );
         }
 
-        const warrantyStart = today;
+        const warrantyStart = p.purchase_date ? new Date(p.purchase_date) : today;
         /*const warrantyEnd = new Date(
           warrantyStart.getFullYear(),
           warrantyStart.getMonth() + durRow.duration_months,

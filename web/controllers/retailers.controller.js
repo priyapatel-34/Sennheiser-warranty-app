@@ -40,31 +40,67 @@ export async function getRetailers(req, res) {
 
     const shopId = shopRow.id;
 
+    const searchTerm = String(req.query.q || req.query.search || "").trim();
+    const pageSize = Math.min(
+      100,
+      Math.max(1, parseInt(req.query.limit, 10) || 25)
+    );
+    const pageNum = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const offset = (pageNum - 1) * pageSize;
+    const likeTerm = `%${searchTerm}%`;
+
+    const whereClause = `
+      shop_id = ?
+      AND is_active = 1
+      ${
+        searchTerm
+          ? `AND (
+              retailer_name LIKE ?
+              OR retailer_city LIKE ?
+              OR retailer_name_ja LIKE ?
+            )`
+          : ""
+      }
+    `;
+    const searchParams = searchTerm ? [likeTerm, likeTerm, likeTerm] : [];
+
+    const [[countRow]] = await pool.query(
+      `SELECT COUNT(*) AS total FROM retailers WHERE ${whereClause}`,
+      [shopId, ...searchParams]
+    );
+    const total = countRow?.total || 0;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
     const [rows] = await pool.query(
       `
       SELECT
+        id,
         retailer_name,
         retailer_city,
         retailer_name_ja
       FROM retailers
-      WHERE shop_id = ?
-        AND is_active = 1
+      WHERE ${whereClause}
       ORDER BY retailer_name ASC
+      LIMIT ? OFFSET ?
       `,
-      [shopId]
+      [shopId, ...searchParams, pageSize, offset]
     );
 
-    console.log("🚨 retailers.controller.js LOADED 333");
-
-
-    // Keep your existing admin-table format
-    res.json(
-      rows.map(r => [
+    res.json({
+      retailers: rows.map(r => [
         r.retailer_name,
         r.retailer_name_ja,
-        r.retailer_city
-      ])
-    );
+        r.retailer_city,
+      ]),
+      pagination: {
+        total,
+        totalPages,
+        page: pageNum,
+        pageSize,
+        hasNextPage: pageNum < totalPages,
+        hasPreviousPage: pageNum > 1,
+      },
+    });
   } catch (e) {
     console.error("❌ getRetailers error:", e);
     res.status(500).json({ error: "Failed to load retailers" });

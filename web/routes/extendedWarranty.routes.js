@@ -11,6 +11,18 @@ import {
   getEWSettings,
   saveEWSettings,
 } from "../controllers/extendedWarranty.controller.js";
+import {
+  listEWRefundRequests,
+  getEWRefundRequest,
+  approveEWRefundRequest,
+  rejectEWRefundRequest,
+  completeEWRefundRequest,
+  cancelEWRefundRequest,
+  createEWManualRefundRequest,
+  getEWRefundSettings,
+  saveEWRefundSettings,
+  exportEWRefundRequests,
+} from "../controllers/extendedWarrantyRefund.controller.js";
 
 const router = express.Router();
 
@@ -27,5 +39,17 @@ router.get("/products/:productId/variants", getProductVariants);
 router.get("/variants/:variantId/plans", getWarrantyPlans);
 router.post("/plans", saveWarrantyPlanMapping);
 router.delete("/plans/:id", deleteEWPlan);
+
+router.get("/refunds/export", exportEWRefundRequests);
+router.get("/refunds", listEWRefundRequests);
+router.get("/refunds/settings", getEWRefundSettings);
+router.put("/refunds/settings", saveEWRefundSettings);
+router.post("/refunds/settings", saveEWRefundSettings);
+router.get("/refunds/:id", getEWRefundRequest);
+router.post("/refunds/:id/approve", approveEWRefundRequest);
+router.post("/refunds/:id/reject", rejectEWRefundRequest);
+router.post("/refunds/:id/complete", completeEWRefundRequest);
+router.post("/refunds/:id/cancel", cancelEWRefundRequest);
+router.post("/refunds/manual", createEWManualRefundRequest);
 
 export default router;

@@ -5,22 +5,33 @@ import {
     Modal,
     DropZone,
     DataTable,
-    IndexTable,
     Text,
     Tabs,
     TextField,
     Checkbox,
     LegacyStack,
     Link,
+    Pagination,
   } from "@shopify/polaris";
   import { useEffect, useState } from "react";
   import * as XLSX from "xlsx";
+
+  const PAGE_SIZE = 25;
   
   export default function Retailers() {
-    /* ---------------- STATE ---------------- */
     const [selectedTab, setSelectedTab] = useState(0);
   
     const [rows, setRows] = useState([]);
+    const [searchInput, setSearchInput] = useState("");
+    const [searchQuery, setSearchQuery] = useState("");
+    const [page, setPage] = useState(1);
+    const [paginationMeta, setPaginationMeta] = useState({
+      total: 0,
+      totalPages: 1,
+      hasNextPage: false,
+      hasPreviousPage: false,
+    });
+    const [loading, setLoading] = useState(false);
     const [openImport, setOpenImport] = useState(false);
     const [preview, setPreview] = useState([]);
   
@@ -29,36 +40,60 @@ import {
   
     const [retailerRequired, setRetailerRequired] = useState(false);
   
-    /* ---------------- LOAD DATA ---------------- */
-    async function loadRetailers() {
-        const response = await fetch("/app/retailers/", { 
-            method: "GET",
-            credentials: "include",
-            headers: {
-                "Accept": "application/json",
-            },
+    async function loadRetailers({
+      targetPage = page,
+      search = searchQuery,
+    } = {}) {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({
+          page: String(targetPage),
+          limit: String(PAGE_SIZE),
+        });
+        if (search) params.set("q", search);
+
+        const response = await fetch(`/app/retailers/?${params.toString()}`, {
+          method: "GET",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+          },
         });
       
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+          throw new Error(`HTTP ${response.status}`);
         }
   
         const contentType = response.headers.get("content-type");
   
-      // 🚨 Prevent HTML parsing
-      if (!contentType || !contentType.includes("application/json")) {
-        const text = await response.text();
-        console.error("Non-JSON response:", text);
-        throw new Error("Expected JSON, got HTML");
-      }
+        if (!contentType || !contentType.includes("application/json")) {
+          const text = await response.text();
+          console.error("Non-JSON response:", text);
+          throw new Error("Expected JSON, got HTML");
+        }
   
-      //console.log("Retailers data: ", await response.json());
+        const data = await response.json();
+        const retailerRows = Array.isArray(data)
+          ? data
+          : Array.isArray(data.retailers)
+            ? data.retailers
+            : [];
+        setRows(retailerRows);
 
-      const data = await response.json(); // ✅ ONLY ONCE
-      console.log("Retailers data: ", data)
-      setRows(data);
-
-      //setRows(await response.json());
+        const meta = data.pagination || {};
+        setPaginationMeta({
+          total: meta.total || retailerRows.length,
+          totalPages: meta.totalPages || 1,
+          hasNextPage: Boolean(meta.hasNextPage),
+          hasPreviousPage: Boolean(meta.hasPreviousPage),
+        });
+        if (meta.page) setPage(meta.page);
+      } catch (err) {
+        console.error("Failed to load retailers:", err);
+        setRows([]);
+      } finally {
+        setLoading(false);
+      }
     }
   
     async function loadSettings() {
@@ -69,9 +104,27 @@ import {
     }
   
     useEffect(() => {
-      loadRetailers();
       loadSettings();
     }, []);
+
+    useEffect(() => {
+      if (selectedTab === 0) {
+        loadRetailers({ targetPage: page, search: searchQuery });
+      }
+    }, [selectedTab, page, searchQuery]);
+
+    const runSearch = () => {
+      setPage(1);
+      setSearchQuery(searchInput.trim());
+    };
+
+    const clearSearch = () => {
+      setSearchInput("");
+      setSearchQuery("");
+      setPage(1);
+    };
+
+    const showPagination = !loading && paginationMeta.totalPages > 1;
   
     /* ---------------- SAMPLE EXCEL ---------------- */
     function downloadSample() {
@@ -250,67 +303,75 @@ import {
   
         {/* ---------------- TAB 1: RETAILERS ---------------- */}
         {selectedTab === 0 && (
-
-        // {rows.length === 0 ? (
-        //   <LegacyCard sectioned>
-        //     <LegacyStack vertical gap="200" align="center">
-        //       <Text variant="headingSm" tone="subdued">
-        //         No retailers added yet
-        //       </Text>
-
-        //       <Text as="p" tone="subdued">
-        //         Add retailers to show options in the product registration form.
-        //       </Text>
-
-        //       <Button primary onClick={() => setOpenImport(true)}>
-        //         Import retailers
-        //       </Button>
-        //     </LegacyStack>
-        //   </LegacyCard>
-        // ) : (
           <LegacyCard sectioned>
             <LegacyStack vertical gap="400">
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  runSearch();
+                }}
+              >
+                <TextField
+                  label="Search retailers"
+                  labelHidden
+                  placeholder="Search by name or city"
+                  value={searchInput}
+                  onChange={setSearchInput}
+                  clearButton
+                  onClearButtonClick={clearSearch}
+                  autoComplete="off"
+                  connectedRight={<Button onClick={runSearch}>Search</Button>}
+                />
+              </form>
+
               <Link removeUnderline onClick={downloadSample}>
                 Download sample Excel
               </Link>
   
               <DataTable
-                columnContentTypes={["text", "text","text"]}
-                headings={[
-                  "Retailer EN",
-                  "Retailer JA",
-                  "City"
-                ]}
-                // rows={tableRows}
+                columnContentTypes={["text", "text", "text"]}
+                headings={["Retailer EN", "Retailer JA", "City"]}
                 rows={rows}
               />
 
-
-            {/* <Card padding="0">
-                <IndexTable
-                    resourceName={{ singular: "retailer", plural: "retailers" }}
-                    itemCount={rows.length}
-                    selectedItemsCount={
-                    allResourcesSelected ? "All" : selectedResources.length
-                    }
-                    onSelectionChange={handleSelectionChange}
-                    headings={[
-                    { title: "Retailer" },
-                    { title: "Code" },
-                    { title: "Type" },
-                    { title: "City" },
-                    { title: "Actions" },
-                    ]}
-                    emptyState={
-                    <Text alignment="center" tone="subdued">
-                        No retailers found
-                    </Text>
-                    }
-                >
-                    {rowMarkup}
-                </IndexTable>
-            </Card> */}
-
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: 12,
+                }}
+              >
+                <Text as="p" tone="subdued">
+                  {paginationMeta.total} retailer
+                  {paginationMeta.total === 1 ? "" : "s"}
+                  {searchQuery ? ` matching "${searchQuery}"` : ""}
+                  {showPagination
+                    ? ` · Page ${page} of ${paginationMeta.totalPages}`
+                    : ""}
+                </Text>
+                {showPagination ? (
+                  <div gap="200" blockAlign="center">
+                    <Button disabled={page <= 1} onClick={() => setPage(1)}>
+                      First
+                    </Button>
+                    <Pagination
+                      hasPrevious={paginationMeta.hasPreviousPage}
+                      onPrevious={() => setPage(p => Math.max(1, p - 1))}
+                      hasNext={paginationMeta.hasNextPage}
+                      onNext={() => setPage(p => p + 1)}
+                      label={`Page ${page} of ${paginationMeta.totalPages}`}
+                    />
+                    <Button
+                      disabled={page >= paginationMeta.totalPages}
+                      onClick={() => setPage(paginationMeta.totalPages)}
+                    >
+                      Last
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
             </LegacyStack>
           </LegacyCard>
         )}

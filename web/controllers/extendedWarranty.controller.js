@@ -1,9 +1,9 @@
 import shopify from "../shopify.js";
 import { pool } from "../db/mysql.js";
 import {
-  getRefundSettings,
-  saveRefundSettings,
-} from "../services/extendedWarranty.service.js";
+  DEFAULT_COVERAGE_SUMMARY,
+  DEFAULT_COVERAGE_POINTS,
+} from "../constants/defaultCoverageTemplates.js";
 
 function getNumericIdFromGid(gid) {
   if (!gid) return null;
@@ -53,14 +53,17 @@ function formatVariantNode(variantNode, plansByVariantId = {}) {
 }
 
 const PRODUCTS_WITH_VARIANTS_QUERY = `
-  query ExtendedWarrantyProducts($cursor: String) {
+  query ExtendedWarrantyProducts($cursor: String, $query: String!, $first: Int!) {
     shop {
       currencyCode
     }
+    productsCount(query: $query) {
+      count
+    }
     products(
-      first: 25
+      first: $first
       after: $cursor
-      query: "status:active OR status:draft"
+      query: $query
     ) {
       edges {
         cursor
@@ -93,6 +96,14 @@ const PRODUCTS_WITH_VARIANTS_QUERY = `
     }
   }
 `;
+
+function buildShopifyProductSearchQuery(searchTerm) {
+  const statusFilter = "(status:active OR status:draft)";
+  const term = String(searchTerm || "").trim();
+  if (!term) return statusFilter;
+  const sanitized = term.replace(/["\\]/g, " ").trim();
+  return `${sanitized} AND ${statusFilter}`;
+}
 
 const PRODUCT_VARIANTS_QUERY = `
   query ExtendedWarrantyProductVariants($productId: ID!) {
@@ -273,15 +284,50 @@ export async function getWarrantyProducts(req, res) {
       return res.status(404).json({ error: "Shop not registered" });
     }
 
-    const cursor = req.query.cursor || null;
+    const jumpLast = req.query.last === "1";
+    const cursor = jumpLast ? null : req.query.cursor || null;
+    const searchTerm = req.query.q || req.query.search || "";
+    const pageSize = Math.min(
+      50,
+      Math.max(1, parseInt(req.query.limit, 10) || 25)
+    );
+    const productQuery = buildShopifyProductSearchQuery(searchTerm);
     const admin = new shopify.api.clients.Graphql({ session });
 
-    const response = await admin.request(PRODUCTS_WITH_VARIANTS_QUERY, {
-      variables: { cursor },
-    });
+    let response;
+    if (jumpLast) {
+      const countResponse = await admin.request(
+        `
+        query ProductCount($query: String!) {
+          productsCount(query: $query) { count }
+        }
+        `,
+        { variables: { query: productQuery } }
+      );
+      const totalCount = countResponse.data?.productsCount?.count ?? 0;
+      const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+      let walkCursor = null;
+      for (let i = 0; i < totalPages; i += 1) {
+        response = await admin.request(PRODUCTS_WITH_VARIANTS_QUERY, {
+          variables: { cursor: walkCursor, query: productQuery, first: pageSize },
+        });
+        const walkEdges = response.data?.products?.edges || [];
+        if (!response.data?.products?.pageInfo?.hasNextPage) break;
+        walkCursor = walkEdges.length ? walkEdges[walkEdges.length - 1].cursor : null;
+      }
+    } else {
+      response = await admin.request(PRODUCTS_WITH_VARIANTS_QUERY, {
+        variables: { cursor, query: productQuery, first: pageSize },
+      });
+    }
 
     const edges = response.data?.products?.edges || [];
     const currency = response.data?.shop?.currencyCode || "USD";
+    const totalCount = response.data?.productsCount?.count ?? edges.length;
+    const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+    const currentPage = jumpLast
+      ? totalPages
+      : Math.max(1, parseInt(req.query.page, 10) || 1);
 
     const productNumericIds = edges
       .map(e => getNumericIdFromGid(e.node.id))
@@ -335,6 +381,16 @@ export async function getWarrantyProducts(req, res) {
       products,
       nextCursor: edges.length ? edges[edges.length - 1].cursor : null,
       hasNextPage: Boolean(response.data?.products?.pageInfo?.hasNextPage),
+      pagination: {
+        total: totalCount,
+        totalPages,
+        pageSize,
+        page: currentPage,
+        hasNextPage: jumpLast
+          ? false
+          : Boolean(response.data?.products?.pageInfo?.hasNextPage),
+        hasPreviousPage: jumpLast ? totalPages > 1 : currentPage > 1,
+      },
     });
   } catch (err) {
     console.error("❌ getWarrantyProducts error:", err);
@@ -642,6 +698,8 @@ export async function getEWSettings(req, res) {
         terms_url: "",
         coverage_text: "",
       },
+      defaultCoverageSummary: DEFAULT_COVERAGE_SUMMARY,
+      defaultCoveragePoints: DEFAULT_COVERAGE_POINTS,
     });
   } catch (err) {
     console.error("❌ getEWSettings error:", err);
@@ -684,56 +742,6 @@ export async function saveEWSettings(req, res) {
   }
 }
 
-export async function getEWRefundSettings(req, res) {
-  try {
-    const session = res.locals.shopify.session;
-    if (!session?.shop) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    const shopId = await resolveShopId(session);
-    if (!shopId) {
-      return res.status(404).json({ error: "Shop not registered" });
-    }
-
-    const settings = await getRefundSettings(shopId);
-
-    return res.json({
-      success: true,
-      settings: {
-        refundEnabled: Boolean(settings.refund_enabled),
-        proRataEnabled: Boolean(settings.pro_rata_enabled),
-        refundPercentage: Number(settings.refund_percentage),
-        cancelOnRefund: Boolean(settings.cancel_on_refund),
-        minimumUsedDays: Number(settings.minimum_used_days),
-      },
-    });
-  } catch (err) {
-    console.error("❌ getEWRefundSettings error:", err);
-    return res.status(500).json({ error: "Failed to load refund settings" });
-  }
-}
-
-export async function saveEWRefundSettings(req, res) {
-  try {
-    const session = res.locals.shopify.session;
-    if (!session?.shop) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    const shopId = await resolveShopId(session);
-    if (!shopId) {
-      return res.status(404).json({ error: "Shop not registered" });
-    }
-
-    await saveRefundSettings(shopId, req.body);
-
-    return res.json({ success: true });
-  } catch (err) {
-    console.error("❌ saveEWRefundSettings error:", err);
-    return res.status(500).json({ error: "Failed to save refund settings" });
-  }
-}
 
 export async function deleteEWDuration(req, res) {
   try {

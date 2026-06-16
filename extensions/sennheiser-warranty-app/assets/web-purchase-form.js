@@ -84,7 +84,19 @@
     attachLiveValidation();
   }
 
-  loadOrders();
+  const myProductLink =
+    document.getElementById("my_products_link")?.value || "/pages/my-products";
+
+  (async function initRegistrationPage() {
+    const restored = await window.WarrantyFlowState?.restoreExtendedWarrantyOffer({
+      myProductsLink: myProductLink,
+    });
+    if (restored) {
+      window.WarrantyToast?.showInfo("Continue selecting your extended warranty plan.");
+      return;
+    }
+    await loadOrders();
+  })();
 
   /* ---------- ERROR HELPERS ---------- */
   function showError(el, msg) {
@@ -291,6 +303,16 @@
               console.log("outer if sucess msg", data.success);
 
       if (data.success === true) {
+        const primary = data.registrations?.[0];
+        if (primary?.registerId) {
+          window.WarrantyFlowState?.savePostRegistration({
+            registerId: primary.registerId,
+            customerEmail: emailInput?.value?.trim() || "",
+            customerName: nameInput?.value?.trim() || "",
+            myProductsLink: myProductLink,
+          });
+        }
+
         window.WarrantyToast?.showSuccess("Product registered successfully");
 
         if (
@@ -306,6 +328,7 @@
                 customerEmail: emailInput?.value?.trim() || "",
                 customerName: nameInput?.value?.trim() || "",
                 onSkip: () => {
+                  window.WarrantyFlowState?.clearPostRegistration();
                   window.location.href = myProductLink;
                 },
               }
@@ -317,6 +340,7 @@
         }
 
         window.setTimeout(() => {
+          window.WarrantyFlowState?.clearPostRegistration();
           window.location.href = myProductLink;
         }, 4500);
       }

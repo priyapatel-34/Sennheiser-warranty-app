@@ -9,14 +9,17 @@ import {
   Badge,
   Text,
   Checkbox,
-  useIndexResourceState,
+  Pagination,
   EmptyState,
+  useIndexResourceState,
 } from "@shopify/polaris";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useToast } from "../hooks/useToast.js";
 import LoadingPanel from "../components/LoadingPanel.jsx";
+import ExtendedWarrantyRefundsTab from "../components/ExtendedWarrantyRefundsTab.jsx";
 
 const API_BASE = "/app/extended-warranty";
+const PAGE_SIZE = 25;
 
 function countConfiguredPlans(product) {
   return (product.variants || []).reduce(
@@ -34,12 +37,18 @@ export default function ExtendedWarrantyAdmin() {
   const [durationsLoading, setDurationsLoading] = useState(true);
 
   const [products, setProducts] = useState([]);
-  const [cursor, setCursor] = useState(null);
-  const [hasNextPage, setHasNextPage] = useState(false);
   const [currency, setCurrency] = useState(null);
-  const [productSearch, setProductSearch] = useState("");
+  const [productSearchInput, setProductSearchInput] = useState("");
+  const [productSearchQuery, setProductSearchQuery] = useState("");
   const [productsLoading, setProductsLoading] = useState(false);
   const [productsLoaded, setProductsLoaded] = useState(false);
+  const [page, setPage] = useState(1);
+  const [cursorStack, setCursorStack] = useState([null]);
+  const [paginationMeta, setPaginationMeta] = useState({
+    total: 0,
+    totalPages: 1,
+    hasNextPage: false,
+  });
 
   const [settings, setSettings] = useState({
     enabled: true,
@@ -55,18 +64,12 @@ export default function ExtendedWarrantyAdmin() {
   const [variantPricing, setVariantPricing] = useState({});
   const [bulkDurationPricing, setBulkDurationPricing] = useState({});
 
-  const filteredProducts = useMemo(() => {
-    const q = productSearch.trim().toLowerCase();
-    if (!q) return products;
-    return products.filter(p => p.title?.toLowerCase().includes(q));
-  }, [products, productSearch]);
-
   const {
     selectedResources,
     allResourcesSelected,
     handleSelectionChange,
     clearSelection,
-  } = useIndexResourceState(filteredProducts, {
+  } = useIndexResourceState(products, {
     resourceIDResolver: p => p.id,
   });
 
@@ -85,26 +88,53 @@ export default function ExtendedWarrantyAdmin() {
     }
   };
 
-  const loadProducts = async (loadMore = false) => {
+  const loadProducts = async ({
+    targetPage = page,
+    search = productSearchQuery,
+    jumpLast = false,
+  } = {}) => {
     setProductsLoading(true);
     try {
-      const url = `${API_BASE}/products${
-        loadMore && cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""
-      }`;
-      const r = await fetch(url);
+      const params = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        page: String(targetPage),
+      });
+      if (jumpLast) {
+        params.set("last", "1");
+      } else {
+        const cursor = targetPage > 1 ? cursorStack[targetPage - 1] : null;
+        if (cursor) params.set("cursor", cursor);
+      }
+      if (search) params.set("q", search);
+
+      const r = await fetch(`${API_BASE}/products?${params.toString()}`);
       if (!r.ok) throw new Error();
       const data = await r.json();
-      const safeProducts = Array.isArray(data.products) ? data.products : [];
-      setProducts(prev =>
-        loadMore ? [...prev, ...safeProducts] : safeProducts
-      );
-      setCursor(data.nextCursor || null);
-      setHasNextPage(Boolean(data.hasNextPage));
+
+      setProducts(Array.isArray(data.products) ? data.products : []);
       if (data.currency) setCurrency(data.currency);
+
+      const meta = data.pagination || {};
+      setPaginationMeta({
+        total: meta.total || 0,
+        totalPages: meta.totalPages || 1,
+        hasNextPage: Boolean(meta.hasNextPage),
+      });
+
+      if (meta.page) setPage(meta.page);
+
+      if (data.nextCursor && meta.page) {
+        setCursorStack(prev => {
+          const next = [...prev];
+          next[meta.page] = data.nextCursor;
+          return next;
+        });
+      }
+
       setProductsLoaded(true);
     } catch {
       toast.showError("Unable to load products");
-      if (!loadMore) setProducts([]);
+      setProducts([]);
     } finally {
       setProductsLoading(false);
     }
@@ -134,9 +164,40 @@ export default function ExtendedWarrantyAdmin() {
   }, []);
 
   useEffect(() => {
-    if (tab === 1 && !productsLoaded) loadProducts();
-    if (tab === 2) loadSettings();
-  }, [tab]);
+    if (tab === 1) {
+      loadProducts({ targetPage: page, search: productSearchQuery });
+    }
+    if (tab === 3) loadSettings();
+  }, [tab, page, productSearchQuery]);
+
+  const runProductSearch = () => {
+    setPage(1);
+    setCursorStack([null]);
+    setProductSearchQuery(productSearchInput.trim());
+  };
+
+  const clearProductSearch = () => {
+    setProductSearchInput("");
+    setProductSearchQuery("");
+    setPage(1);
+    setCursorStack([null]);
+  };
+
+  const goToFirstPage = () => {
+    setPage(1);
+  };
+
+  const goToPreviousPage = () => {
+    setPage(p => Math.max(1, p - 1));
+  };
+
+  const goToNextPage = () => {
+    setPage(p => p + 1);
+  };
+
+  const goToLastPage = () => {
+    loadProducts({ jumpLast: true, search: productSearchQuery });
+  };
 
   const addDuration = async () => {
     const duration = Number(newDuration);
@@ -251,10 +312,7 @@ export default function ExtendedWarrantyAdmin() {
     setSaving(true);
     try {
       for (const product of configureProducts) {
-        const mappings = buildMappings(
-          product,
-          configureMode === "bulk"
-        );
+        const mappings = buildMappings(product, configureMode === "bulk");
         if (!mappings.length) continue;
         const r = await fetch(`${API_BASE}/plans`, {
           method: "POST",
@@ -269,7 +327,7 @@ export default function ExtendedWarrantyAdmin() {
       setModalOpen(false);
       clearSelection();
       toast.showSuccess("Pricing saved");
-      loadProducts();
+      loadProducts({ targetPage: page, search: productSearchQuery });
     } catch (err) {
       toast.showError(err.message || "Failed to save pricing");
     } finally {
@@ -294,14 +352,15 @@ export default function ExtendedWarrantyAdmin() {
     }
   };
 
-  const selectedProducts = filteredProducts.filter(p =>
-    selectedResources.includes(p.id)
-  );
+  const selectedProducts = products.filter(p => selectedResources.includes(p.id));
 
   const modalTitle =
     configureMode === "bulk"
       ? `Extended warranty pricing — ${configureProducts.length} products`
       : `Extended warranty — ${configureProducts[0]?.title || ""}`;
+
+  const showPagination =
+    productsLoaded && !productsLoading && paginationMeta.totalPages > 1;
 
   return (
     <Page title="Extended Warranty">
@@ -309,6 +368,7 @@ export default function ExtendedWarrantyAdmin() {
         tabs={[
           { id: "durations", content: "Durations" },
           { id: "products", content: "Products & Pricing" },
+          { id: "refunds", content: "Refund Requests" },
           { id: "settings", content: "Store Settings" },
         ]}
         selected={tab}
@@ -339,10 +399,7 @@ export default function ExtendedWarrantyAdmin() {
               </LegacyCard>
 
               {durations.length === 0 ? (
-                <EmptyState
-                  heading="No durations configured"
-                  image=""
-                >
+                <EmptyState heading="No durations configured" image="">
                   <p>Add +1 Year, +2 Year, or custom multiples of 12 months.</p>
                 </EmptyState>
               ) : (
@@ -392,96 +449,164 @@ export default function ExtendedWarrantyAdmin() {
                 <div style={{ padding: 16 }}>
                   <Button
                     variant="primary"
-                    onClick={() =>
-                      openConfigureModal(selectedProducts, "bulk")
-                    }
+                    onClick={() => openConfigureModal(selectedProducts, "bulk")}
                   >
                     Set pricing for {selectedResources.length} products
                   </Button>
                 </div>
               )}
 
-              <div style={{ padding: "0 16px 16px" }}>
+              <div style={{ padding: "16px 16px 16px" }}>
                 <TextField
                   label="Search products"
-                  value={productSearch}
-                  onChange={setProductSearch}
+                  labelHidden
+                  value={productSearchInput}
+                  onChange={setProductSearchInput}
+                  placeholder="Search entire catalog by product name or SKU..."
                   autoComplete="off"
+                  clearButton
+                  onClearButtonClick={clearProductSearch}
+                  onKeyDown={e => {
+                    if (e.key === "Enter") runProductSearch();
+                  }}
+                  connectedRight={
+                    <Button variant="primary" onClick={runProductSearch}>
+                      Search
+                    </Button>
+                  }
                 />
               </div>
 
-              <IndexTable
-                resourceName={{ singular: "product", plural: "products" }}
-                itemCount={filteredProducts.length}
-                selectedItemsCount={
-                  allResourcesSelected ? "All" : selectedResources.length
-                }
-                onSelectionChange={handleSelectionChange}
-                headings={[
-                  { title: "Product" },
-                  { title: "Status" },
-                  { title: "Inventory" },
-                  { title: "Category" },
-                  { title: "Variants" },
-                  { title: "Plans configured" },
-                  { title: "Pricing" },
-                ]}
-              >
-                {filteredProducts.map((product, index) => {
-                  const planCount = countConfiguredPlans(product);
-                  return (
-                    <IndexTable.Row
-                      id={product.id}
-                      key={product.id}
-                      selected={selectedResources.includes(product.id)}
-                      position={index}
-                    >
-                      <IndexTable.Cell>
-                        <Text as="span" fontWeight="semibold">
-                          {product.title}
-                        </Text>
-                      </IndexTable.Cell>
-                      <IndexTable.Cell>
-                        <Badge
-                          tone={
-                            product.status === "ACTIVE" ? "success" : "warning"
-                          }
+              {productsLoading ? (
+                <LoadingPanel label="Searching products..." />
+              ) : products.length === 0 ? (
+                <EmptyState heading="No products found" image="">
+                  <p>
+                    {productSearchQuery
+                      ? "Try a different search term."
+                      : "No products available."}
+                  </p>
+                </EmptyState>
+              ) : (
+                <>
+                  <IndexTable
+                    resourceName={{ singular: "product", plural: "products" }}
+                    itemCount={products.length}
+                    selectedItemsCount={
+                      allResourcesSelected ? "All" : selectedResources.length
+                    }
+                    onSelectionChange={handleSelectionChange}
+                    headings={[
+                      { title: "Product" },
+                      { title: "Status" },
+                      { title: "Inventory" },
+                      { title: "Category" },
+                      { title: "Variants" },
+                      { title: "Plans configured" },
+                      { title: "Pricing" },
+                    ]}
+                  >
+                    {products.map((product, index) => {
+                      const planCount = countConfiguredPlans(product);
+                      return (
+                        <IndexTable.Row
+                          id={product.id}
+                          key={product.id}
+                          selected={selectedResources.includes(product.id)}
+                          position={index}
                         >
-                          {product.status}
-                        </Badge>
-                      </IndexTable.Cell>
-                      <IndexTable.Cell>{product.inventory ?? "—"}</IndexTable.Cell>
-                      <IndexTable.Cell>{product.category || "—"}</IndexTable.Cell>
-                      <IndexTable.Cell>
-                        {(product.variants || []).length}
-                      </IndexTable.Cell>
-                      <IndexTable.Cell>{planCount}</IndexTable.Cell>
-                      <IndexTable.Cell>
-                        <Button
-                          size="slim"
-                          onClick={() =>
-                            openConfigureModal([product], "single")
-                          }
-                        >
-                          {planCount ? "Edit pricing" : "Set pricing"}
-                        </Button>
-                      </IndexTable.Cell>
-                    </IndexTable.Row>
-                  );
-                })}
-              </IndexTable>
+                          <IndexTable.Cell>
+                          <div
+                            style={{
+                              maxWidth: "250px",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                            title={product.title}
+                          >
+                            <Text as="span" fontWeight="semibold">
+                              {product.title}
+                            </Text>
+                          </div>
+                        </IndexTable.Cell>
+                          <IndexTable.Cell>
+                            <Badge
+                              tone={
+                                product.status === "ACTIVE" ? "success" : "warning"
+                              }
+                            >
+                              {product.status}
+                            </Badge>
+                          </IndexTable.Cell>
+                          <IndexTable.Cell>{product.inventory ?? "—"}</IndexTable.Cell>
+                          <IndexTable.Cell>{product.category || "—"}</IndexTable.Cell>
+                          <IndexTable.Cell>
+                            {(product.variants || []).length}
+                          </IndexTable.Cell>
+                          <IndexTable.Cell>{planCount}</IndexTable.Cell>
+                          <IndexTable.Cell>
+                            <Button
+                              size="slim"
+                              onClick={() => openConfigureModal([product], "single")}
+                            >
+                              {planCount ? "Edit pricing" : "Set pricing"}
+                            </Button>
+                          </IndexTable.Cell>
+                        </IndexTable.Row>
+                      );
+                    })}
+                  </IndexTable>
 
-              {hasNextPage && (
-                <Button fullWidth loading={productsLoading} onClick={() => loadProducts(true)}>
-                  Load more
-                </Button>
+                  <div
+                    style={{
+                      padding: 16,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                      gap: 12,
+                    }}
+                  >
+                    <Text as="p" tone="subdued">
+                      {paginationMeta.total} product
+                      {paginationMeta.total === 1 ? "" : "s"}
+                      {productSearchQuery ? ` matching "${productSearchQuery}"` : ""}
+                      {showPagination
+                        ? ` · Page ${page} of ${paginationMeta.totalPages}`
+                        : ""}
+                    </Text>
+                    {showPagination ? (
+                      <div gap="200" blockAlign="center">
+                        <Button disabled={page <= 1} onClick={goToFirstPage}>
+                          First
+                        </Button>
+                        <Pagination
+                          hasPrevious={page > 1}
+                          onPrevious={goToPreviousPage}
+                          hasNext={paginationMeta.hasNextPage}
+                          onNext={goToNextPage}
+                          label={`Page ${page} of ${paginationMeta.totalPages}`}
+                        />
+                        <Button
+                          disabled={page >= paginationMeta.totalPages}
+                          onClick={goToLastPage}
+                        >
+                          Last
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                </>
               )}
             </>
           )}
         </LegacyCard>
       )}
 
-      {tab === 2 && (
+      {tab === 2 && <ExtendedWarrantyRefundsTab />}
+
+      {tab === 3 && (
         <LegacyCard sectioned>
           {settingsLoading ? (
             <LoadingPanel label="Loading settings..." />
@@ -502,8 +627,9 @@ export default function ExtendedWarrantyAdmin() {
                 label="Default coverage summary (shown on offer screen)"
                 value={settings.coverageText}
                 onChange={v => setSettings(p => ({ ...p, coverageText: v }))}
-                multiline={4}
+                multiline={6}
                 autoComplete="off"
+                helpText="One coverage point per line. Shown to customers on the extended warranty offer screen."
               />
               <div style={{ marginTop: 16 }}>
                 <Button variant="primary" onClick={saveSettings} loading={saving}>

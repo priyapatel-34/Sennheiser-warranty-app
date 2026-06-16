@@ -55,6 +55,150 @@ async function ensureSchemaUpdates() {
       console.log(`✅ Added extended_warranty_entitlements.${col}`);
     }
   }
+
+  const searchIndexes = [
+    ["registered_products", "idx_rp_shop_customer_email", "shop_id, customer_email"],
+    ["registered_products", "idx_rp_shop_serial", "shop_id, serial_number"],
+    ["registered_products", "idx_rp_shop_product_name", "shop_id, product_name"],
+    ["registered_products", "idx_rp_shop_created", "shop_id, created_at"],
+  ];
+
+  for (const [table, indexName, columns] of searchIndexes) {
+    const [[exists]] = await pool.query(
+      `
+      SELECT COUNT(*) AS cnt
+      FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+        AND INDEX_NAME = ?
+      `,
+      [table, indexName]
+    );
+    if (!exists.cnt) {
+      await pool.query(`CREATE INDEX ${indexName} ON ${table} (${columns})`);
+      console.log(`✅ Added index ${indexName}`);
+    }
+  }
+
+  const refundRecordColumns = [
+    ["customer_email", "VARCHAR(255) NULL AFTER shopify_refund_id"],
+    ["customer_name", "VARCHAR(255) NULL AFTER customer_email"],
+    ["product_name", "VARCHAR(255) NULL AFTER customer_name"],
+    ["product_sku", "VARCHAR(100) NULL AFTER product_name"],
+    ["serial_number", "VARCHAR(100) NULL AFTER product_sku"],
+    ["warranty_plan", "VARCHAR(255) NULL AFTER serial_number"],
+    ["purchase_price", "DECIMAL(10, 2) NULL AFTER warranty_plan"],
+    ["purchase_date", "DATE NULL AFTER purchase_price"],
+    ["cancellation_date", "DATE NULL AFTER purchase_date"],
+    ["coverage_start_date", "DATE NULL AFTER cancellation_date"],
+    ["coverage_end_date", "DATE NULL AFTER coverage_start_date"],
+    ["days_total", "INT NULL AFTER coverage_end_date"],
+    ["days_used", "INT NOT NULL DEFAULT 0 AFTER days_total"],
+    ["used_value", "DECIMAL(10, 2) NULL AFTER remaining_days"],
+    ["remaining_value", "DECIMAL(10, 2) NULL AFTER used_value"],
+    ["pro_rata_refund_amount", "DECIMAL(10, 2) NULL AFTER remaining_value"],
+    ["claim_cost_deducted", "DECIMAL(10, 2) NOT NULL DEFAULT 0 AFTER pro_rata_refund_amount"],
+    ["net_refund_amount", "DECIMAL(10, 2) NULL AFTER claim_cost_deducted"],
+    ["refund_type", "ENUM('full','pro_rata','net') NULL AFTER currency"],
+    ["refund_trigger", "VARCHAR(50) NULL AFTER refund_type"],
+    ["refund_reason", "TEXT NULL AFTER refund_trigger"],
+    ["calculation_breakdown", "JSON NULL AFTER calculation_notes"],
+    ["admin_notes", "TEXT NULL AFTER calculation_breakdown"],
+    ["approved_at", "TIMESTAMP NULL AFTER admin_notes"],
+    ["approved_by", "VARCHAR(255) NULL AFTER approved_at"],
+    ["rejected_at", "TIMESTAMP NULL AFTER approved_by"],
+    ["rejected_by", "VARCHAR(255) NULL AFTER rejected_at"],
+    ["rejection_reason", "TEXT NULL AFTER rejected_by"],
+    ["completed_at", "TIMESTAMP NULL AFTER rejection_reason"],
+    ["completed_by", "VARCHAR(255) NULL AFTER completed_at"],
+    [
+      "updated_at",
+      "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at",
+    ],
+  ];
+
+  for (const [col, definition] of refundRecordColumns) {
+    if (!(await columnExists("extended_warranty_refund_records", col))) {
+      await pool.query(
+        `ALTER TABLE extended_warranty_refund_records ADD COLUMN ${col} ${definition}`
+      );
+      console.log(`✅ Added extended_warranty_refund_records.${col}`);
+    }
+  }
+
+  const refundSettingsColumns = [
+    ["eligibility_window_days", "INT NULL AFTER minimum_used_days"],
+    ["auto_cancel_entitlement", "TINYINT(1) NOT NULL DEFAULT 1 AFTER cancel_on_refund"],
+    [
+      "finance_notification_emails",
+      "TEXT NULL AFTER auto_cancel_entitlement",
+    ],
+  ];
+
+  for (const [col, definition] of refundSettingsColumns) {
+    if (!(await columnExists("extended_warranty_refund_settings", col))) {
+      await pool.query(
+        `ALTER TABLE extended_warranty_refund_settings ADD COLUMN ${col} ${definition}`
+      );
+      console.log(`✅ Added extended_warranty_refund_settings.${col}`);
+    }
+  }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS extended_warranty_refund_audit (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      refund_record_id BIGINT UNSIGNED NOT NULL,
+      shop_id BIGINT UNSIGNED NOT NULL,
+      action VARCHAR(50) NOT NULL,
+      actor VARCHAR(255) NULL,
+      details JSON NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_refund_audit_refund (refund_record_id),
+      INDEX idx_refund_audit_shop (shop_id),
+      FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+    )
+  `);
+
+  try {
+    await pool.query(`
+      ALTER TABLE extended_warranty_refund_records
+      MODIFY status ENUM(
+        'pending_review',
+        'approved',
+        'rejected',
+        'refunded',
+        'cancelled',
+        'disputed',
+        'calculated',
+        'processed',
+        'pending_finance_action'
+      ) NOT NULL DEFAULT 'pending_review'
+    `);
+  } catch (err) {
+    console.warn("⚠️ Refund status enum update skipped:", err.message);
+  }
+
+  const refundIndexes = [
+    ["extended_warranty_refund_records", "idx_ew_refund_shop_status", "shop_id, status"],
+    ["extended_warranty_refund_records", "idx_ew_refund_created", "shop_id, created_at"],
+  ];
+
+  for (const [table, indexName, columns] of refundIndexes) {
+    const [[exists]] = await pool.query(
+      `
+      SELECT COUNT(*) AS cnt
+      FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+        AND INDEX_NAME = ?
+      `,
+      [table, indexName]
+    );
+    if (!exists.cnt) {
+      await pool.query(`CREATE INDEX ${indexName} ON ${table} (${columns})`);
+      console.log(`✅ Added index ${indexName}`);
+    }
+  }
 }
 
 export async function initDb() {

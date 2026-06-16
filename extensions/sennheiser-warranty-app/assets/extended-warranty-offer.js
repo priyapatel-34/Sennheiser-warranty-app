@@ -65,6 +65,9 @@
     document.querySelectorAll(FORM_PANEL_SELECTOR).forEach(el => {
       el.classList.remove("hidden");
     });
+    document
+      .querySelector(".register-warranty-form-section")
+      ?.classList.remove("ew-offer-active");
     const section = document.getElementById("ew-offer-section");
     if (section) {
       section.classList.add("hidden");
@@ -108,11 +111,23 @@
 
     hideFormPanel();
     section.classList.remove("hidden");
+    document
+      .querySelector(".register-warranty-form-section")
+      ?.classList.add("ew-offer-active");
 
     const reg = offerData.registration;
     const settings = offerData.settings || {};
     const plans = offerData.plans || [];
     const currency = offerData.currency || plans[0]?.currency;
+
+    const coverageLines = (settings.coverageText || "")
+      .split("\n")
+      .map(line => line.trim())
+      .filter(Boolean);
+
+    const coverageHtml = coverageLines.length
+      ? `<ul>${coverageLines.map(line => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
+      : `<p>${escapeHtml("Extended protection after your standard warranty ends.")}</p>`;
 
     const recommendedIndex =
       plans.length > 1 ? Math.min(1, plans.length - 1) : 0;
@@ -142,7 +157,7 @@
                     ? `<li>Coverage: ${formatDate(plan.extendedWarrantyStartDate)} – ${formatDate(plan.extendedWarrantyEndDate)}</li>`
                     : "<li>Starts after standard warranty</li>"
                 }
-                <li>Instant activation after payment</li>
+                <li>Coverage begins when standard warranty ends</li>
               </ul>
             </div>
           </label>
@@ -151,47 +166,53 @@
       .join("");
 
     section.innerHTML = `
-      <div class="ew-offer-shell">
+      <section class="product-outer-wrapper ew-outer-wrapper">
+        <div class="title-wrapper">
+          <h2>Extended Warranty</h2>
+        </div>
+        <p class="ew-subtitle">
+          Protect your ${escapeHtml(reg.productName || "product")} with extended coverage that begins when your standard warranty ends.
+        </p>
+
         <div class="ew-offer-grid">
           <aside class="ew-offer-sidebar">
-            <h2 class="ew-offer-title">Extended Warranty</h2>
+            <p class="ew-section-label">Registered product</p>
             <div class="ew-product-card">
-              <p class="ew-product-label">Registered product</p>
               <h3>${escapeHtml(reg.productName || "Product")}</h3>
               <dl class="ew-meta-list">
-                <div><dt>Serial</dt><dd>${escapeHtml(reg.serialNumber || "-")}</dd></div>
+                <div><dt>Serial number</dt><dd>${escapeHtml(reg.serialNumber || "-")}</dd></div>
                 <div><dt>Standard warranty ends</dt><dd>${formatDate(reg.standardWarrantyEnd)}</dd></div>
                 ${reg.sku ? `<div><dt>SKU</dt><dd>${escapeHtml(reg.sku)}</dd></div>` : ""}
               </dl>
             </div>
-            ${
-              settings.coverageText
-                ? `<div class="ew-coverage-box"><h4>What's covered</h4><p>${escapeHtml(settings.coverageText)}</p></div>`
-                : ""
-            }
+            <div class="ew-coverage-box">
+              <h4>What's covered</h4>
+              ${coverageHtml}
+            </div>
           </aside>
 
-          <main class="ew-offer-main">
-            <h3 class="ew-choose-title">Choose your plan</h3>
+          <div class="ew-plan-panel">
+            <p class="ew-section-label">Choose your plan</p>
             <div class="ew-plan-grid">${plansHtml || "<p>No plans available.</p>"}</div>
             ${
               settings.termsUrl
                 ? `<p class="ew-terms">By continuing you agree to the <a href="${escapeHtml(settings.termsUrl)}" target="_blank" rel="noopener">Terms &amp; Conditions</a>.</p>`
                 : ""
             }
-          </main>
+          </div>
         </div>
 
-        <div class="ew-sticky-actions">
+        <div class="ew-actions-row">
           <button type="button" class="btn bordered-btn" id="ew-skip-btn">Skip for now</button>
           <button type="button" class="btn ew-primary-btn" id="ew-purchase-btn" ${
             plans.length ? "" : "disabled"
           }>Continue to checkout</button>
         </div>
-      </div>
+      </section>
     `;
 
     section.querySelector("#ew-skip-btn")?.addEventListener("click", () => {
+      window.WarrantyFlowState?.clearPostRegistration();
       if (typeof onSkip === "function") onSkip();
       else window.location.href = myProductsLink;
     });
@@ -208,6 +229,7 @@
       showLoader(section, "Preparing secure checkout...");
 
       try {
+        window.WarrantyFlowState?.clearPostRegistration();
         await purchasePlan(
           reg.registerId,
           Number(selected.value),

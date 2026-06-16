@@ -145,6 +145,43 @@ export async function addSWuration(req, res) {
     }
 }  
 
+function buildShopifyProductSearchQuery(searchTerm) {
+  const statusFilter = "(status:active OR status:draft)";
+  const term = String(searchTerm || "").trim();
+  if (!term) return statusFilter;
+  const sanitized = term.replace(/["\\]/g, " ").trim();
+  return `${sanitized} AND ${statusFilter}`;
+}
+
+const STANDARD_PRODUCTS_QUERY = `
+  query StandardWarrantyProducts($cursor: String, $query: String!, $first: Int!) {
+    productsCount(query: $query) {
+      count
+    }
+    products(first: $first, after: $cursor, query: $query) {
+      edges {
+        cursor
+        node {
+          id
+          title
+          status
+          totalInventory
+          productType
+          metafield(
+            namespace: "warranty"
+            key: "standard_duration"
+          ) {
+            value
+          }
+        }
+      }
+      pageInfo {
+        hasNextPage
+      }
+    }
+  }
+`;
+
 export async function getAllProducts(req, res) {
   try {
     const session = res.locals.shopify.session;
@@ -154,9 +191,15 @@ export async function getAllProducts(req, res) {
     }
 
     const shopDomain = session.shop;
-    const cursor = req.query.cursor || null;
+    const jumpLast = req.query.last === "1";
+    const cursor = jumpLast ? null : req.query.cursor || null;
+    const searchTerm = req.query.q || req.query.search || "";
+    const pageSize = Math.min(
+      50,
+      Math.max(1, parseInt(req.query.limit, 10) || 25)
+    );
+    const productQuery = buildShopifyProductSearchQuery(searchTerm);
 
-    // 1️⃣ Get shop_id
     const [[shopRow]] = await pool.query(
       `SELECT id FROM shops WHERE shop_domain = ? AND is_installed = TRUE`,
       [shopDomain]
@@ -166,43 +209,41 @@ export async function getAllProducts(req, res) {
       return res.status(404).json({ error: "Shop not registered" });
     }
 
-    // 2️⃣ Shopify GraphQL client
     const admin = new shopify.api.clients.Graphql({ session });
 
-    // 3️⃣ GraphQL request (NEW API)
-    const response = await admin.request(
-      `
-      query ($cursor: String) {
-        products(first: 25, after: $cursor) {
-          edges {
-            cursor
-            node {
-              id
-              title
-              status
-              totalInventory
-              productType
-              metafield(
-                namespace: "warranty"
-                key: "standard_duration"
-              ) {
-                value
-              }
-            }
-          }
-          pageInfo {
-            hasNextPage
-          }
+    let response;
+    if (jumpLast) {
+      const countResponse = await admin.request(
+        `
+        query ProductCount($query: String!) {
+          productsCount(query: $query) { count }
         }
+        `,
+        { variables: { query: productQuery } }
+      );
+      const totalCount = countResponse.data?.productsCount?.count ?? 0;
+      const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+      let walkCursor = null;
+      for (let i = 0; i < totalPages; i += 1) {
+        response = await admin.request(STANDARD_PRODUCTS_QUERY, {
+          variables: { cursor: walkCursor, query: productQuery, first: pageSize },
+        });
+        const walkEdges = response.data?.products?.edges || [];
+        if (!response.data?.products?.pageInfo?.hasNextPage) break;
+        walkCursor = walkEdges.length ? walkEdges[walkEdges.length - 1].cursor : null;
       }
-      `,
-      { variables: { cursor } }
-    );
+    } else {
+      response = await admin.request(STANDARD_PRODUCTS_QUERY, {
+        variables: { cursor, query: productQuery, first: pageSize },
+      });
+    }
 
-
-    
-
-    const edges = response.data.products.edges;
+    const edges = response.data?.products?.edges || [];
+    const totalCount = response.data?.productsCount?.count ?? edges.length;
+    const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+    const currentPage = jumpLast
+      ? totalPages
+      : Math.max(1, parseInt(req.query.page, 10) || 1);
 
     return res.json({
       products: edges.map(edge => ({
@@ -215,14 +256,21 @@ export async function getAllProducts(req, res) {
           ? Number(edge.node.metafield.value)
           : null,
       })),
-      nextCursor: edges.length
-        ? edges[edges.length - 1].cursor
-        : null,
-      hasNextPage: response.data.products.pageInfo.hasNextPage,
+      nextCursor: edges.length ? edges[edges.length - 1].cursor : null,
+      hasNextPage: Boolean(response.data?.products?.pageInfo?.hasNextPage),
+      pagination: {
+        total: totalCount,
+        totalPages,
+        pageSize,
+        page: currentPage,
+        hasNextPage: jumpLast
+          ? false
+          : Boolean(response.data?.products?.pageInfo?.hasNextPage),
+        hasPreviousPage: jumpLast ? totalPages > 1 : currentPage > 1,
+      },
     });
-
   } catch (err) {
-    console.error("❌ getWarrantyProducts error:", err);
+    console.error("❌ getAllProducts error:", err);
     return res.status(500).json({ error: "Failed to load products" });
   }
 }
