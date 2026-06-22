@@ -12,6 +12,7 @@ import {
   Pagination,
   EmptyState,
   useIndexResourceState,
+  Select,
 } from "@shopify/polaris";
 import { useEffect, useState } from "react";
 import { useToast } from "../hooks/useToast.js";
@@ -20,6 +21,14 @@ import ExtendedWarrantyRefundsTab from "../components/ExtendedWarrantyRefundsTab
 
 const API_BASE = "/app/extended-warranty";
 const PAGE_SIZE = 25;
+
+const PRICE_BADGE_OPTIONS = [
+  { label: "None", value: "" },
+  { label: "Most Popular", value: "most_popular" },
+  { label: "Best Seller", value: "best_seller" },
+  { label: "Recommended", value: "recommended" },
+  { label: "Limited Offer", value: "limited_offer" },
+];
 
 function countConfiguredPlans(product) {
   return (product.variants || []).reduce(
@@ -52,11 +61,13 @@ export default function ExtendedWarrantyAdmin() {
 
   const [settings, setSettings] = useState({
     enabled: true,
+    offerAfterRegistration: true,
     termsUrl: "",
     coverageText: "",
+    extendedWarrantyPurchaseDays: "",
+    expiryReminderConfigs: [],
   });
   const [settingsLoading, setSettingsLoading] = useState(false);
-
   const [saving, setSaving] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [configureProducts, setConfigureProducts] = useState([]);
@@ -149,8 +160,17 @@ export default function ExtendedWarrantyAdmin() {
       const s = data.settings || {};
       setSettings({
         enabled: Boolean(s.enabled ?? true),
-        termsUrl: s.terms_url || "",
-        coverageText: s.coverage_text || "",
+        offerAfterRegistration: Boolean(s.offerAfterRegistration ?? true),
+        termsUrl: s.termsUrl || "",
+        coverageText: s.coverageText || "",
+        extendedWarrantyPurchaseDays:
+          s.extendedWarrantyPurchaseDays == null
+            ? ""
+            : String(s.extendedWarrantyPurchaseDays),
+        expiryReminderConfigs: (s.expiryReminderConfigs || []).map(entry => ({
+          countryCode: entry.countryCode || null,
+          reminderDays: (entry.reminderDays || []).map(String),
+        })),
       });
     } catch {
       toast.showError("Unable to load settings");
@@ -308,25 +328,68 @@ export default function ExtendedWarrantyAdmin() {
     return mappings;
   };
 
+  const updateDurationBadge = async (durationId, merchandisingBadge) => {
+    try {
+      const r = await fetch(`${API_BASE}/durations/${durationId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ merchandisingBadge }),
+      });
+      if (!r.ok) throw new Error();
+      setDurations(prev =>
+        prev.map(d =>
+          d.id === durationId ? { ...d, merchandisingBadge } : d
+        )
+      );
+      toast.showSuccess("Plan badge updated");
+    } catch {
+      toast.showError("Failed to update plan badge");
+    }
+  };
+
   const savePricing = async () => {
     setSaving(true);
     try {
-      for (const product of configureProducts) {
-        const mappings = buildMappings(product, configureMode === "bulk");
-        if (!mappings.length) continue;
-        const r = await fetch(`${API_BASE}/plans`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ productId: product.id, mappings }),
-        });
-        if (!r.ok) {
-          const err = await r.json();
-          throw new Error(err.error || `Failed for ${product.title}`);
-        }
+      const payload =
+        configureProducts.length === 1
+          ? {
+              products: [
+                {
+                  productId: configureProducts[0].id,
+                  mappings: buildMappings(
+                    configureProducts[0],
+                    configureMode === "bulk"
+                  ),
+                },
+              ],
+            }
+          : {
+              products: configureProducts
+                .map(product => ({
+                  productId: product.id,
+                  mappings: buildMappings(product, configureMode === "bulk"),
+                }))
+                .filter(item => item.mappings.length > 0),
+            };
+
+      const r = await fetch(`${API_BASE}/plans/bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || "Failed to save pricing");
+
+      if (data.errors?.length) {
+        toast.showError(
+          `Saved ${data.saved} products. ${data.errors.length} failed.`
+        );
+      } else {
+        toast.showSuccess(`Pricing saved for ${data.saved} product(s)`);
       }
+
       setModalOpen(false);
       clearSelection();
-      toast.showSuccess("Pricing saved");
       loadProducts({ targetPage: page, search: productSearchQuery });
     } catch (err) {
       toast.showError(err.message || "Failed to save pricing");
@@ -338,18 +401,71 @@ export default function ExtendedWarrantyAdmin() {
   const saveSettings = async () => {
     setSaving(true);
     try {
+      const expiryReminderConfigs = (settings.expiryReminderConfigs || [])
+        .map(entry => ({
+          countryCode: entry.countryCode?.trim().toUpperCase() || null,
+          reminderDays: (entry.reminderDays || [])
+            .map(d => Number(d))
+            .filter(d => Number.isInteger(d) && d > 0),
+        }))
+        .filter(entry => entry.reminderDays.length);
+
       const r = await fetch(`${API_BASE}/settings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
+        body: JSON.stringify({
+          enabled: settings.enabled,
+          offerAfterRegistration: settings.offerAfterRegistration,
+          termsUrl: settings.termsUrl,
+          coverageText: settings.coverageText,
+          extendedWarrantyPurchaseDays:
+            settings.extendedWarrantyPurchaseDays === ""
+              ? null
+              : Number(settings.extendedWarrantyPurchaseDays),
+          expiryReminderConfigs,
+        }),
       });
-      if (!r.ok) throw new Error();
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || "Failed to save settings");
       toast.showSuccess("Settings saved");
-    } catch {
-      toast.showError("Failed to save settings");
+      loadSettings();
+    } catch (err) {
+      toast.showError(err.message || "Failed to save settings");
     } finally {
       setSaving(false);
     }
+  };
+
+  const addExpiryReminderDay = countryIndex => {
+    setSettings(p => {
+      const next = [...(p.expiryReminderConfigs || [])];
+      next[countryIndex] = {
+        ...next[countryIndex],
+        reminderDays: [...(next[countryIndex].reminderDays || []), ""],
+      };
+      return { ...p, expiryReminderConfigs: next };
+    });
+  };
+
+  const updateExpiryReminderDay = (countryIndex, dayIndex, value) => {
+    setSettings(p => {
+      const next = [...(p.expiryReminderConfigs || [])];
+      const days = [...(next[countryIndex].reminderDays || [])];
+      days[dayIndex] = value;
+      next[countryIndex] = { ...next[countryIndex], reminderDays: days };
+      return { ...p, expiryReminderConfigs: next };
+    });
+  };
+
+  const removeExpiryReminderDay = (countryIndex, dayIndex) => {
+    setSettings(p => {
+      const next = [...(p.expiryReminderConfigs || [])];
+      const days = (next[countryIndex].reminderDays || []).filter(
+        (_, i) => i !== dayIndex
+      );
+      next[countryIndex] = { ...next[countryIndex], reminderDays: days };
+      return { ...p, expiryReminderConfigs: next };
+    });
   };
 
   const selectedProducts = products.filter(p => selectedResources.includes(p.id));
@@ -410,6 +526,7 @@ export default function ExtendedWarrantyAdmin() {
                     { title: "Plan name" },
                     { title: "Years" },
                     { title: "Months" },
+                    { title: "Price badge" },
                     { title: "Actions" },
                   ]}
                   selectable={false}
@@ -421,6 +538,15 @@ export default function ExtendedWarrantyAdmin() {
                       </IndexTable.Cell>
                       <IndexTable.Cell>{d.durationYears}</IndexTable.Cell>
                       <IndexTable.Cell>{d.durationMonths}</IndexTable.Cell>
+                      <IndexTable.Cell>
+                        <Select
+                          label="Price badge"
+                          labelHidden
+                          options={PRICE_BADGE_OPTIONS}
+                          value={d.merchandisingBadge || ""}
+                          onChange={v => updateDurationBadge(d.id, v)}
+                        />
+                      </IndexTable.Cell>
                       <IndexTable.Cell>
                         <Button
                           tone="critical"
@@ -617,6 +743,13 @@ export default function ExtendedWarrantyAdmin() {
                 checked={settings.enabled}
                 onChange={v => setSettings(p => ({ ...p, enabled: v }))}
               />
+              <Checkbox
+                label="Offer extended warranty after registration"
+                checked={settings.offerAfterRegistration}
+                onChange={v =>
+                  setSettings(p => ({ ...p, offerAfterRegistration: v }))
+                }
+              />
               <TextField
                 label="Terms & Conditions URL"
                 value={settings.termsUrl}
@@ -629,8 +762,79 @@ export default function ExtendedWarrantyAdmin() {
                 onChange={v => setSettings(p => ({ ...p, coverageText: v }))}
                 multiline={6}
                 autoComplete="off"
-                helpText="One coverage point per line. Shown to customers on the extended warranty offer screen."
               />
+              <TextField
+                label="Extended Warranty Purchase Days"
+                type="number"
+                value={settings.extendedWarrantyPurchaseDays}
+                onChange={v =>
+                  setSettings(p => ({ ...p, extendedWarrantyPurchaseDays: v }))
+                }
+                autoComplete="off"
+                helpText="Days after standard warranty registration when customers can purchase extended warranty. Leave empty for no time limit."
+              />
+
+              <div style={{ marginTop: 24, marginBottom: 8 }}>
+                <Text as="h3" variant="headingMd">
+                  Expiry reminder emails
+                </Text>
+                <Text as="p" tone="subdued">
+                  Configure how many days before the purchase window closes to send
+                  reminder emails. Country schedules are determined automatically from
+                  your warranty plan regions.
+                </Text>
+              </div>
+
+              {(settings.expiryReminderConfigs || []).map((entry, countryIndex) => (
+                <LegacyCard
+                  key={`reminder-${entry.countryCode || countryIndex}`}
+                  sectioned
+                >
+                  {entry.countryCode ? (
+                    <Text as="p" fontWeight="semibold" style={{ marginBottom: 12 }}>
+                      Country: {entry.countryCode}
+                    </Text>
+                  ) : null}
+
+                  {(entry.reminderDays || []).map((day, dayIndex) => (
+                    <div
+                      key={`reminder-day-${countryIndex}-${dayIndex}`}
+                      style={{
+                        display: "flex",
+                        gap: 12,
+                        alignItems: "flex-end",
+                        marginBottom: 8,
+                      }}
+                    >
+                      <div style={{ flex: "1 1 200px" }}>
+                        <TextField
+                          label={`Reminder ${dayIndex + 1} (days before expiry)`}
+                          type="number"
+                          value={day}
+                          onChange={v =>
+                            updateExpiryReminderDay(countryIndex, dayIndex, v)
+                          }
+                          autoComplete="off"
+                          min={1}
+                        />
+                      </div>
+                      <Button
+                        disabled={(entry.reminderDays || []).length <= 1}
+                        onClick={() =>
+                          removeExpiryReminderDay(countryIndex, dayIndex)
+                        }
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+
+                  <Button onClick={() => addExpiryReminderDay(countryIndex)}>
+                    Add reminder day
+                  </Button>
+                </LegacyCard>
+              ))}
+
               <div style={{ marginTop: 16 }}>
                 <Button variant="primary" onClick={saveSettings} loading={saving}>
                   Save settings

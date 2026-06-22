@@ -7,9 +7,11 @@ import {
   getProductVariants,
   getWarrantyPlans,
   saveWarrantyPlanMapping,
+  bulkSaveWarrantyPlanMapping,
   deleteEWPlan,
   getEWSettings,
   saveEWSettings,
+  updateEWDuration,
 } from "../controllers/extendedWarranty.controller.js";
 import {
   listEWRefundRequests,
@@ -38,7 +40,10 @@ router.get("/products", getWarrantyProducts);
 router.get("/products/:productId/variants", getProductVariants);
 router.get("/variants/:variantId/plans", getWarrantyPlans);
 router.post("/plans", saveWarrantyPlanMapping);
+router.post("/plans/bulk", bulkSaveWarrantyPlanMapping);
 router.delete("/plans/:id", deleteEWPlan);
+
+router.patch("/durations/:id", updateEWDuration);
 
 router.get("/refunds/export", exportEWRefundRequests);
 router.get("/refunds", listEWRefundRequests);

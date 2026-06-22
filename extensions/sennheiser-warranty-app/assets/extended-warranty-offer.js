@@ -119,6 +119,7 @@
     const settings = offerData.settings || {};
     const plans = offerData.plans || [];
     const currency = offerData.currency || plans[0]?.currency;
+    const productImageUrl = reg.productImageUrl || null;
 
     const coverageLines = (settings.coverageText || "")
       .split("\n")
@@ -129,85 +130,86 @@
       ? `<ul>${coverageLines.map(line => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
       : `<p>${escapeHtml("Extended protection after your standard warranty ends.")}</p>`;
 
-    const recommendedIndex =
-      plans.length > 1 ? Math.min(1, plans.length - 1) : 0;
-
     const plansHtml = plans
       .map((plan, index) => {
-        const isRecommended = index === recommendedIndex && plans.length > 1;
+        const isDefaultSelected = index === 0;
+        const badgeLabel = plan.badgeLabel || null;
+        const showBadge = Boolean(badgeLabel);
         return `
-          <label class="ew-plan-option ${isRecommended ? "ew-plan-recommended" : ""}">
-            <input type="radio" name="ew_plan" value="${plan.planId}" ${
-              index === recommendedIndex ? "checked" : ""
-            } />
-            <div class="ew-plan-option-inner">
-              ${
-                isRecommended
-                  ? '<span class="ew-plan-badge">Most popular</span>'
-                  : ""
-              }
-              <div class="ew-plan-option-header">
-                <span class="ew-plan-name">${escapeHtml(plan.planName)}</span>
-                <span class="ew-plan-price">${formatPrice(plan.price, plan.currency || currency)}</span>
-              </div>
-              <ul class="ew-plan-features">
-                <li>${plan.durationMonths} months extended coverage</li>
-                ${
-                  plan.extendedWarrantyStartDate && plan.extendedWarrantyEndDate
-                    ? `<li>Coverage: ${formatDate(plan.extendedWarrantyStartDate)} – ${formatDate(plan.extendedWarrantyEndDate)}</li>`
-                    : "<li>Starts after standard warranty</li>"
-                }
-                <li>Coverage begins when standard warranty ends</li>
-              </ul>
-            </div>
-          </label>
+          <label class="ew-plan-option">
+    <input type="radio" name="ew_plan" value="${plan.planId}" ${isDefaultSelected ? "checked" : ""
+          } />                        
+    <div class="ew-plan-option-inner">
+        ${showBadge
+            ? `<span class="ew-plan-badge">${escapeHtml(badgeLabel)}</span>`
+            : ""
+          }
+        <span class="ew-plan-name">${escapeHtml(plan.planName)}</span>
+        <div class="ew-plan-meta-row">
+            <ul class="ew-plan-features">
+                ${plan.extendedWarrantyStartDate && plan.extendedWarrantyEndDate
+            ? `<li>Coverage: ${formatDate(plan.extendedWarrantyStartDate)} – ${formatDate(plan.extendedWarrantyEndDate)}</li>`
+            : "<li>Starts after standard warranty</li>"
+          }
+            </ul>
+            <span class="ew-plan-price">${formatPrice(plan.price, plan.currency || currency)}</span>
+        </div>
+    </div>
+</label>
         `;
       })
       .join("");
 
     section.innerHTML = `
       <section class="product-outer-wrapper ew-outer-wrapper">
-        <div class="title-wrapper">
-          <h2>Extended Warranty</h2>
-        </div>
-        <p class="ew-subtitle">
-          Protect your ${escapeHtml(reg.productName || "product")} with extended coverage that begins when your standard warranty ends.
-        </p>
-
-        <div class="ew-offer-grid">
-          <aside class="ew-offer-sidebar">
-            <p class="ew-section-label">Registered product</p>
-            <div class="ew-product-card">
-              <h3>${escapeHtml(reg.productName || "Product")}</h3>
-              <dl class="ew-meta-list">
-                <div><dt>Serial number</dt><dd>${escapeHtml(reg.serialNumber || "-")}</dd></div>
-                <div><dt>Standard warranty ends</dt><dd>${formatDate(reg.standardWarrantyEnd)}</dd></div>
-                ${reg.sku ? `<div><dt>SKU</dt><dd>${escapeHtml(reg.sku)}</dd></div>` : ""}
-              </dl>
-            </div>
-            <div class="ew-coverage-box">
-              <h4>What's covered</h4>
-              ${coverageHtml}
-            </div>
-          </aside>
-
-          <div class="ew-plan-panel">
-            <p class="ew-section-label">Choose your plan</p>
-            <div class="ew-plan-grid">${plansHtml || "<p>No plans available.</p>"}</div>
-            ${
-              settings.termsUrl
-                ? `<p class="ew-terms">By continuing you agree to the <a href="${escapeHtml(settings.termsUrl)}" target="_blank" rel="noopener">Terms &amp; Conditions</a>.</p>`
-                : ""
-            }
+          <div class="upper-block">
+              <div class="title-wrapper">
+                  <h2>Extended Warranty</h2>
+                  <p class="ew-subtitle">
+                      Protect your ${escapeHtml(reg.productName || "product")} with extended coverage that begins when your standard warranty ends.
+                  </p>
+              </div>
+              <p class="ew-section-label">Registered Product</p>
+              <div class="ew-product-card">
+                  ${productImageUrl
+        ? `<div class="ew-product-image-wrap"><img class="ew-product-image" src="${escapeHtml(productImageUrl)}" alt="${escapeHtml(reg.productName || "Product")}" loading="lazy" /></div>`
+        : ""
+      }
+                  <div class="ew-product-info">
+                      <h3>${escapeHtml(reg.productName || "Product")}</h3>
+                      <dl class="ew-meta-list">
+                          <div><dt>Serial number</dt><dd>${escapeHtml(reg.serialNumber || "-")}</dd></div>
+                          <div><dt>Standard warranty ends</dt><dd>${formatDate(reg.standardWarrantyEnd)}</dd></div>
+                          ${reg.sku ? `<div><dt>SKU</dt><dd>${escapeHtml(reg.sku)}</dd></div>` : ""}
+                      </dl>
+                  </div>
+              </div>
           </div>
-        </div>
 
-        <div class="ew-actions-row">
-          <button type="button" class="btn bordered-btn" id="ew-skip-btn">Skip for now</button>
-          <button type="button" class="btn ew-primary-btn" id="ew-purchase-btn" ${
-            plans.length ? "" : "disabled"
-          }>Continue to checkout</button>
-        </div>
+          <div class="ew-offer-grid">
+              <div class="ew-coverage-box">
+                  <h4 class="ew-section-label">What’s Covered</h4>
+                  ${coverageHtml}
+              </div>
+              <div class="divider"></div>
+              <div class="ew-plan-panel">
+                  <div class="upper-block">
+                      <p class="ew-section-label">Choose Your Plan</p>
+                      <div class="ew-plan-grid">${plansHtml || "<p>No plans available.</p>"}</div>
+                  </div>
+                  <div class="lower-block">
+                      ${settings.termsUrl
+        ? `<p class="ew-terms">By continuing you agree to the <a href="${escapeHtml(settings.termsUrl)}" target="_blank" rel="noopener">Terms &amp; Conditions</a>.</p>`
+        : ""
+      }
+                      <div class="ew-actions-row">
+                          <button type="button" class="btn bordered-btn" id="ew-skip-btn">Skip for now</button>
+                          <button type="button" class="btn btn-primary ew-primary-btn" id="ew-purchase-btn" ${plans.length ? "" : "disabled"
+      }>Continue to checkout</button>
+                      </div>
+                  </div>
+              </div>
+          </div>
       </section>
     `;
 

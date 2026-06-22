@@ -32,6 +32,7 @@ import { registerProductUpdateWebhook } from "./shopify/webhookCreation.js";
 
 
 import { initDb } from "./db/initDb.js";
+import { startExtendedWarrantyReminderScheduler } from "./services/extendedWarrantyReminder.service.js";
 
 import { pool } from "./db/mysql.js";
 import { fileURLToPath } from "url";
@@ -123,7 +124,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 await initDb();
-
+startExtendedWarrantyReminderScheduler();
 
 app.use("/app/retailers", shopify.validateAuthenticatedSession(), retailersRoutes);
 

@@ -523,12 +523,25 @@ export async function createRefundRequest({
   return { refundId, calculation, record: mapRefundRow(record) };
 }
 
+function normalizeShopifyOrderId(value) {
+  if (value == null || value === "") return null;
+  const str = String(value).trim();
+  const last = str.includes("/") ? str.split("/").pop() : str;
+  const digits = last.replace(/\D/g, "");
+  return digits || last;
+}
+
 export async function cancelEntitlementFromRefund({
   shopId,
   shopifyOrderId,
   shopifyRefundId = null,
   trigger = "product_return",
 }) {
+  const normalizedOrderId = normalizeShopifyOrderId(shopifyOrderId);
+  if (!normalizedOrderId) {
+    return { matched: 0, results: [], reason: "missing_order_id" };
+  }
+
   const [entitlements] = await pool.query(
     `
     SELECT
@@ -538,15 +551,19 @@ export async function cancelEntitlementFromRefund({
       r.product_name,
       r.serial_number,
       r.sku,
-      r.warranty_end
+      r.warranty_end,
+      r.shopify_order_id AS registration_order_id
     FROM extended_warranty_entitlements e
     LEFT JOIN registered_products r
       ON r.id = e.registered_product_id AND r.shop_id = e.shop_id
     WHERE e.shop_id = ?
-      AND e.shopify_order_id = ?
       AND e.status IN ('active', 'pending_payment')
+      AND (
+        CAST(e.shopify_order_id AS CHAR) = ?
+        OR CAST(r.shopify_order_id AS CHAR) = ?
+      )
     `,
-    [shopId, shopifyOrderId]
+    [shopId, normalizedOrderId, normalizedOrderId]
   );
 
   const results = [];
@@ -570,16 +587,22 @@ export async function cancelEntitlementFromRefund({
       shopId,
       entitlement,
       trigger,
-      shopifyOrderId,
+      shopifyOrderId: normalizedOrderId,
       shopifyRefundId,
     });
 
     if (created) {
       results.push({ entitlementId: entitlement.id, ...created });
+    } else {
+      results.push({
+        entitlementId: entitlement.id,
+        skipped: true,
+        reason: "refund_disabled",
+      });
     }
   }
 
-  return results;
+  return { matched: entitlements.length, results };
 }
 
 export async function createManualRefundRequest({

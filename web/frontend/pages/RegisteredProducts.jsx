@@ -10,12 +10,45 @@ import {
   TextField,
   Pagination,
   EmptyState,
+  Select,
 } from "@shopify/polaris";
 import { useEffect, useState } from "react";
 import LoadingPanel from "../components/LoadingPanel.jsx";
 import { useToast } from "../hooks/useToast.js";
 
 const PAGE_SIZE = 10;
+
+const WARRANTY_TYPE_OPTIONS = [
+  { label: "All warranty types", value: "all" },
+  { label: "Standard Warranty", value: "standard" },
+  { label: "Extended Warranty", value: "extended" },
+];
+
+const PURCHASE_TYPE_OPTIONS = [
+  { label: "All purchase types", value: "all" },
+  { label: "Shopify Purchase", value: "shopify" },
+  { label: "External Purchase", value: "external" },
+];
+
+function TruncatedProductName({ name }) {
+  if (!name) return "—";
+  return (
+    <span
+      title={name}
+      style={{
+        display: "block",
+        maxWidth: "220px",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <Text as="span" fontWeight="semibold">
+        {name}
+      </Text>
+    </span>
+  );
+}
 
 function formatWarrantyType(item) {
   const status = item.extended_warranty_status;
@@ -39,6 +72,8 @@ export default function RegisteredProductsTable() {
 
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [warrantyTypeFilter, setWarrantyTypeFilter] = useState("all");
+  const [purchaseTypeFilter, setPurchaseTypeFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [paginationMeta, setPaginationMeta] = useState({
     total: 0,
@@ -69,6 +104,12 @@ export default function RegisteredProductsTable() {
 
         if (searchQuery) {
           params.set("q", searchQuery);
+        }
+        if (warrantyTypeFilter !== "all") {
+          params.set("warrantyType", warrantyTypeFilter);
+        }
+        if (purchaseTypeFilter !== "all") {
+          params.set("purchaseType", purchaseTypeFilter);
         }
 
         const res = await fetch(`/app/registered-products?${params.toString()}`);
@@ -107,11 +148,19 @@ export default function RegisteredProductsTable() {
     return () => {
       cancelled = true;
     };
-  }, [page, searchQuery, refreshKey]);
+  }, [page, searchQuery, warrantyTypeFilter, purchaseTypeFilter, refreshKey]);
 
   const runSearch = () => {
     setPage(1);
     setSearchQuery(searchInput.trim());
+  };
+
+  const clearFilters = () => {
+    setSearchInput("");
+    setSearchQuery("");
+    setWarrantyTypeFilter("all");
+    setPurchaseTypeFilter("all");
+    setPage(1);
   };
 
   const clearSearch = () => {
@@ -184,8 +233,34 @@ export default function RegisteredProductsTable() {
                     }
                   />
                 </div>
-                {searchQuery ? (
-                  <Button onClick={clearSearch}>Clear</Button>
+                <div style={{ minWidth: 180 }}>
+                  <Select
+                    label="Warranty type"
+                    labelHidden
+                    options={WARRANTY_TYPE_OPTIONS}
+                    value={warrantyTypeFilter}
+                    onChange={v => {
+                      setPage(1);
+                      setWarrantyTypeFilter(v);
+                    }}
+                  />
+                </div>
+                <div style={{ minWidth: 180 }}>
+                  <Select
+                    label="Purchase type"
+                    labelHidden
+                    options={PURCHASE_TYPE_OPTIONS}
+                    value={purchaseTypeFilter}
+                    onChange={v => {
+                      setPage(1);
+                      setPurchaseTypeFilter(v);
+                    }}
+                  />
+                </div>
+                {searchQuery ||
+                warrantyTypeFilter !== "all" ||
+                purchaseTypeFilter !== "all" ? (
+                  <Button onClick={clearFilters}>Clear all</Button>
                 ) : null}
               </div>
             </LegacyCard>
@@ -209,7 +284,7 @@ export default function RegisteredProductsTable() {
                   </p>
                 </EmptyState>
               ) : (
-                <>
+                <div style={{ overflowX: "auto" }}>
                   <IndexTable
                     resourceName={{ singular: "product", plural: "products" }}
                     itemCount={products.length}
@@ -236,9 +311,7 @@ export default function RegisteredProductsTable() {
                       >
                         <IndexTable.Cell>{item.id}</IndexTable.Cell>
                         <IndexTable.Cell>
-                          <Text as="span" fontWeight="semibold">
-                            {item.product_name}
-                          </Text>
+                          <TruncatedProductName name={item.product_name} />
                         </IndexTable.Cell>
                         <IndexTable.Cell>{item.serial_number}</IndexTable.Cell>
                         <IndexTable.Cell>{item.sku || "—"}</IndexTable.Cell>
@@ -251,7 +324,9 @@ export default function RegisteredProductsTable() {
                         </IndexTable.Cell>
                         <IndexTable.Cell>
                           <Badge tone={item.purchase_type === "shopify" ? "success" : "info"}>
-                            {item.purchase_type}
+                            {item.purchase_type === "shopify"
+                              ? "Shopify Purchase"
+                              : "External Purchase"}
                           </Badge>
                         </IndexTable.Cell>
                         <IndexTable.Cell>{item.warranty_end || "—"}</IndexTable.Cell>
@@ -295,7 +370,7 @@ export default function RegisteredProductsTable() {
                       />
                     ) : null}
                   </div>
-                </>
+                </div>
               )}
             </LegacyCard>
           </Layout.Section>

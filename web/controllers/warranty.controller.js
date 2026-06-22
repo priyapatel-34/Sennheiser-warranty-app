@@ -9,6 +9,7 @@ import {
   buildExtendedWarrantyOffer,
   getNumericIdFromGid,
   trySyncPendingEntitlementActivation,
+  canPurchaseExtendedWarranty,
 } from "../services/extendedWarranty.service.js";
 import {
   getLatestRefundForEntitlements,
@@ -66,7 +67,12 @@ async function resolveEntitlementWithSync({
   return synced || entitlement;
 }
 
-async function enrichProductWarrantyFields(product, shopId, entitlementRow = null, refundRecord = null) {
+async function enrichProductWarrantyFields(
+  product,
+  shopId,
+  entitlementRow = null,
+  refundRecord = null
+) {
   product.standard_warranty = {
     status: product.is_registered
       ? getStandardWarrantyStatus(product.warranty_end)
@@ -74,6 +80,8 @@ async function enrichProductWarrantyFields(product, shopId, entitlementRow = nul
     start: product.warranty_start || null,
     end: product.warranty_end || null,
   };
+
+  const hasActiveExtendedWarranty = entitlementRow?.status === "active";
 
   if (entitlementRow) {
     const registeredProduct = {
@@ -90,6 +98,20 @@ async function enrichProductWarrantyFields(product, shopId, entitlementRow = nul
       status: null,
       displayStatus: "Not Purchased",
     };
+  }
+
+  product.can_extend_warranty = false;
+  if (
+    product.is_registered &&
+    product.register_id &&
+    !hasActiveExtendedWarranty
+  ) {
+    const eligibility = await canPurchaseExtendedWarranty(
+      shopId,
+      product.register_id
+    );
+    product.can_extend_warranty = Boolean(eligibility.eligible);
+    product.extended_warranty_eligibility = eligibility;
   }
 
   return product;
@@ -966,7 +988,11 @@ export async function getProductDetail(req, res) {
         is_registered: !!registered,
       };
 
-      await enrichProductWarrantyFields(productPayload, shopId, entitlement);
+      await enrichProductWarrantyFields(
+        productPayload,
+        shopId,
+        entitlement
+      );
 
       return res.json({
         success: true,
@@ -1069,7 +1095,11 @@ export async function getProductDetail(req, res) {
         is_registered: true,
       };
 
-      await enrichProductWarrantyFields(productPayload, shopId, entitlement);
+      await enrichProductWarrantyFields(
+        productPayload,
+        shopId,
+        entitlement
+      );
 
       return res.json({
         success: true,
@@ -2769,7 +2799,8 @@ export async function registerProducts(req, res) {
       if (ewSettings.enabled && primaryRegistration?.registerId) {
         extendedWarrantyOffer = await buildExtendedWarrantyOffer(
           shopId,
-          primaryRegistration.registerId
+          primaryRegistration.registerId,
+          { session }
         );
       }
 
@@ -2777,7 +2808,9 @@ export async function registerProducts(req, res) {
         success: true,
         registrations: createdProducts,
         showExtendedWarrantyOffer: Boolean(
-          extendedWarrantyOffer?.eligible && ewSettings.enabled
+          extendedWarrantyOffer?.eligible &&
+            ewSettings.enabled &&
+            ewSettings.offer_after_registration
         ),
         extendedWarrantyOffer,
       });

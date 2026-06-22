@@ -4,6 +4,11 @@ import {
   DEFAULT_COVERAGE_SUMMARY,
   DEFAULT_COVERAGE_POINTS,
 } from "../constants/defaultCoverageTemplates.js";
+import {
+  MERCHANDISING_BADGE_LABELS,
+  buildExpiryReminderAdminConfigs,
+  saveExpiryReminderConfigs,
+} from "../services/extendedWarranty.service.js";
 
 function getNumericIdFromGid(gid) {
   if (!gid) return null;
@@ -202,7 +207,7 @@ export async function getEWDurations(req, res) {
 
     const [rows] = await pool.query(
       `
-      SELECT id, duration_months, duration_years, plan_name
+      SELECT id, duration_months, duration_years, plan_name, merchandising_badge
       FROM extended_warranty_durations
       WHERE shop_id = ?
       ORDER BY duration_months
@@ -216,6 +221,7 @@ export async function getEWDurations(req, res) {
         durationMonths: r.duration_months,
         durationYears: r.duration_years,
         planName: r.plan_name,
+        merchandisingBadge: r.merchandising_badge || "",
       }))
     );
   } catch (err) {
@@ -528,6 +534,183 @@ export async function getWarrantyPlans(req, res) {
    API 4 – SAVE WARRANTY PLAN MAPPING
    ===================================================== */
 
+async function applyProductPlanMappings(
+  connection,
+  shopId,
+  productId,
+  mappings,
+  shopCurrency
+) {
+  const productGid = productId.startsWith("gid://")
+    ? productId
+    : `gid://shopify/Product/${productId}`;
+  const productNumericId = getNumericIdFromGid(productGid);
+
+  if (!productNumericId) {
+    throw new Error("Invalid productId");
+  }
+
+  for (const mapping of mappings) {
+    const {
+      variantId,
+      durationMonths,
+      planName,
+      price,
+      currency,
+      status = "active",
+    } = mapping;
+
+    const variantGid = variantId?.startsWith("gid://")
+      ? variantId
+      : `gid://shopify/ProductVariant/${variantId}`;
+    const variantNumericId = getNumericIdFromGid(variantGid);
+    const months = Number(durationMonths);
+    const planPrice = Number(price);
+
+    if (!variantNumericId) {
+      throw new Error("Invalid variantId in mapping");
+    }
+    if (!months || months <= 0) {
+      throw new Error("Invalid durationMonths in mapping");
+    }
+    if (!Number.isFinite(planPrice) || planPrice < 0) {
+      throw new Error("Invalid price in mapping");
+    }
+
+    const normalizedStatus = status === "inactive" ? "inactive" : "active";
+    const years = monthsToYears(months);
+    const name = planName?.trim() || buildPlanName(months);
+    const planCurrency = currency?.trim() || shopCurrency;
+
+    if (planPrice === 0 && normalizedStatus === "active") {
+      await connection.query(
+        `
+        DELETE FROM extended_warranty_plans
+        WHERE shop_id = ?
+          AND shopify_variant_id = ?
+          AND duration_months = ?
+        `,
+        [shopId, variantNumericId, months]
+      );
+      continue;
+    }
+
+    await connection.query(
+      `
+      INSERT INTO extended_warranty_plans (
+        shop_id,
+        shopify_product_id,
+        shopify_variant_id,
+        plan_name,
+        duration_years,
+        duration_months,
+        price,
+        currency,
+        status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        plan_name = VALUES(plan_name),
+        duration_years = VALUES(duration_years),
+        price = VALUES(price),
+        currency = VALUES(currency),
+        status = VALUES(status),
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      [
+        shopId,
+        productNumericId,
+        variantNumericId,
+        name,
+        years,
+        months,
+        planPrice,
+        planCurrency,
+        normalizedStatus,
+      ]
+    );
+  }
+}
+
+export async function bulkSaveWarrantyPlanMapping(req, res) {
+  try {
+    const session = res.locals.shopify.session;
+    if (!session?.shop) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const shopId = await resolveShopId(session);
+    if (!shopId) {
+      return res.status(404).json({ error: "Shop not registered" });
+    }
+
+    const { products } = req.body;
+    if (!Array.isArray(products) || !products.length) {
+      return res.status(400).json({ error: "products array is required" });
+    }
+
+    const admin = new shopify.api.clients.Graphql({ session });
+    const shopResponse = await admin.request(`query { shop { currencyCode } }`);
+    const shopCurrency = shopResponse.data?.shop?.currencyCode || "USD";
+
+    const connection = await pool.getConnection();
+    const errors = [];
+    let saved = 0;
+
+    try {
+      await connection.beginTransaction();
+
+      for (const item of products) {
+        try {
+          if (!item?.productId || !Array.isArray(item.mappings)) {
+            throw new Error("Each product requires productId and mappings");
+          }
+          if (!item.mappings.length) continue;
+          await applyProductPlanMappings(
+            connection,
+            shopId,
+            item.productId,
+            item.mappings,
+            shopCurrency
+          );
+          saved += 1;
+        } catch (itemErr) {
+          errors.push({
+            productId: item.productId,
+            message: itemErr.message,
+          });
+        }
+      }
+
+      if (errors.length && saved === 0) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          saved: 0,
+          errors,
+        });
+      }
+
+      await connection.commit();
+      return res.json({
+        success: errors.length === 0,
+        saved,
+        errors,
+      });
+    } catch (txErr) {
+      await connection.rollback();
+      console.error("❌ bulkSaveWarrantyPlanMapping error:", txErr);
+      return res.status(400).json({
+        error: txErr.message || "Bulk save failed",
+      });
+    } finally {
+      connection.release();
+    }
+  } catch (err) {
+    console.error("❌ bulkSaveWarrantyPlanMapping error:", err);
+    return res.status(500).json({ error: "Failed to bulk save pricing" });
+  }
+}
+
 export async function saveWarrantyPlanMapping(req, res) {
   try {
     const session = res.locals.shopify.session;
@@ -570,89 +753,13 @@ export async function saveWarrantyPlanMapping(req, res) {
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
-
-      for (const mapping of mappings) {
-        const {
-          variantId,
-          durationMonths,
-          planName,
-          price,
-          currency,
-          status = "active",
-        } = mapping;
-
-        const variantGid = variantId?.startsWith("gid://")
-          ? variantId
-          : `gid://shopify/ProductVariant/${variantId}`;
-        const variantNumericId = getNumericIdFromGid(variantGid);
-        const months = Number(durationMonths);
-        const planPrice = Number(price);
-
-        if (!variantNumericId) {
-          throw new Error("Invalid variantId in mapping");
-        }
-        if (!months || months <= 0) {
-          throw new Error("Invalid durationMonths in mapping");
-        }
-        if (!Number.isFinite(planPrice) || planPrice < 0) {
-          throw new Error("Invalid price in mapping");
-        }
-
-        const normalizedStatus =
-          status === "inactive" ? "inactive" : "active";
-        const years = monthsToYears(months);
-        const name = planName?.trim() || buildPlanName(months);
-        const planCurrency = currency?.trim() || shopCurrency;
-
-        if (planPrice === 0 && normalizedStatus === "active") {
-          // Remove plan when price cleared (admin UI sends empty as 0)
-          await connection.query(
-            `
-            DELETE FROM extended_warranty_plans
-            WHERE shop_id = ?
-              AND shopify_variant_id = ?
-              AND duration_months = ?
-            `,
-            [shopId, variantNumericId, months]
-          );
-          continue;
-        }
-
-        await connection.query(
-          `
-          INSERT INTO extended_warranty_plans (
-            shop_id,
-            shopify_product_id,
-            shopify_variant_id,
-            plan_name,
-            duration_years,
-            duration_months,
-            price,
-            currency,
-            status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON DUPLICATE KEY UPDATE
-            plan_name = VALUES(plan_name),
-            duration_years = VALUES(duration_years),
-            price = VALUES(price),
-            currency = VALUES(currency),
-            status = VALUES(status),
-            updated_at = CURRENT_TIMESTAMP
-          `,
-          [
-            shopId,
-            productNumericId,
-            variantNumericId,
-            name,
-            years,
-            months,
-            planPrice,
-            planCurrency,
-            normalizedStatus,
-          ]
-        );
-      }
-
+      await applyProductPlanMappings(
+        connection,
+        shopId,
+        productId,
+        mappings,
+        shopCurrency
+      );
       await connection.commit();
       return res.json({ success: true });
     } catch (txErr) {
@@ -674,6 +781,72 @@ export async function saveWarrantyPlanMapping(req, res) {
    STORE SETTINGS (terms, coverage, branding)
    ===================================================== */
 
+export async function updateEWDuration(req, res) {
+  try {
+    const session = res.locals.shopify.session;
+    if (!session?.shop) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const shopId = await resolveShopId(session);
+    if (!shopId) {
+      return res.status(404).json({ error: "Shop not registered" });
+    }
+
+    const durationId = Number(req.params.id);
+    if (!durationId) {
+      return res.status(400).json({ error: "Invalid duration id" });
+    }
+
+    const { merchandisingBadge = "" } = req.body;
+    const badge = String(merchandisingBadge || "").trim();
+
+    if (badge && !MERCHANDISING_BADGE_LABELS[badge]) {
+      return res.status(400).json({ error: "Invalid merchandising badge" });
+    }
+
+    const [result] = await pool.query(
+      `
+      UPDATE extended_warranty_durations
+      SET merchandising_badge = ?
+      WHERE shop_id = ? AND id = ?
+      `,
+      [badge || null, shopId, durationId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Duration not found" });
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("❌ updateEWDuration error:", err);
+    return res.status(500).json({ error: "Failed to update duration" });
+  }
+}
+
+function mapSettingsRow(row, expiryReminderConfigs = []) {
+  if (!row) {
+    return {
+      enabled: true,
+      offerAfterRegistration: true,
+      termsUrl: "",
+      coverageText: "",
+      extendedWarrantyPurchaseDays: null,
+      expiryReminderConfigs: [],
+    };
+  }
+
+  return {
+    enabled: Boolean(row.enabled),
+    offerAfterRegistration: Boolean(row.offer_after_registration ?? true),
+    termsUrl: row.terms_url || "",
+    coverageText: row.coverage_text || "",
+    extendedWarrantyPurchaseDays: row.extended_warranty_purchase_days ?? null,
+    expiryReminderConfigs,
+  };
+}
+
 export async function getEWSettings(req, res) {
   try {
     const session = res.locals.shopify.session;
@@ -690,14 +863,11 @@ export async function getEWSettings(req, res) {
       `SELECT * FROM extended_warranty_settings WHERE shop_id = ?`,
       [shopId]
     );
+    const expiryReminderConfigs = await buildExpiryReminderAdminConfigs(shopId);
 
     return res.json({
       success: true,
-      settings: row || {
-        enabled: 1,
-        terms_url: "",
-        coverage_text: "",
-      },
+      settings: mapSettingsRow(row, expiryReminderConfigs),
       defaultCoverageSummary: DEFAULT_COVERAGE_SUMMARY,
       defaultCoveragePoints: DEFAULT_COVERAGE_POINTS,
     });
@@ -719,21 +889,62 @@ export async function saveEWSettings(req, res) {
       return res.status(404).json({ error: "Shop not registered" });
     }
 
-    const { enabled = true, termsUrl = "", coverageText = "" } = req.body;
+    const {
+      enabled = true,
+      offerAfterRegistration = true,
+      termsUrl = "",
+      coverageText = "",
+      extendedWarrantyPurchaseDays = null,
+      expiryReminderConfigs = [],
+    } = req.body;
+
+    const purchaseDays =
+      extendedWarrantyPurchaseDays == null || extendedWarrantyPurchaseDays === ""
+        ? null
+        : Number(extendedWarrantyPurchaseDays);
+
+    if (
+      purchaseDays != null &&
+      (!Number.isInteger(purchaseDays) || purchaseDays < 1 || purchaseDays > 3650)
+    ) {
+      return res.status(400).json({
+        error: "Extended Warranty Purchase Days must be a whole number between 1 and 3650",
+      });
+    }
 
     await pool.query(
       `
       INSERT INTO extended_warranty_settings (
-        shop_id, enabled, offer_after_registration, terms_url, coverage_text
-      ) VALUES (?, ?, 1, ?, ?)
+        shop_id,
+        enabled,
+        offer_after_registration,
+        terms_url,
+        coverage_text,
+        extended_warranty_purchase_days
+      ) VALUES (?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         enabled = VALUES(enabled),
+        offer_after_registration = VALUES(offer_after_registration),
         terms_url = VALUES(terms_url),
         coverage_text = VALUES(coverage_text),
+        extended_warranty_purchase_days = VALUES(extended_warranty_purchase_days),
         updated_at = CURRENT_TIMESTAMP
       `,
-      [shopId, enabled ? 1 : 0, termsUrl || null, coverageText || null]
+      [
+        shopId,
+        enabled ? 1 : 0,
+        offerAfterRegistration ? 1 : 0,
+        termsUrl || null,
+        coverageText || null,
+        purchaseDays,
+      ]
     );
+
+    try {
+      await saveExpiryReminderConfigs(shopId, expiryReminderConfigs);
+    } catch (configErr) {
+      return res.status(400).json({ error: configErr.message });
+    }
 
     return res.json({ success: true });
   } catch (err) {
@@ -741,7 +952,6 @@ export async function saveEWSettings(req, res) {
     return res.status(500).json({ error: "Failed to save settings" });
   }
 }
-
 
 export async function deleteEWDuration(req, res) {
   try {

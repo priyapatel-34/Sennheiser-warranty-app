@@ -199,14 +199,32 @@ export const OrderWebhookHandlers = {
       if (!shopId) return;
 
       const orderId = payload.order_id;
-      if (!orderId) return;
+      if (!orderId) {
+        console.warn("⚠️ REFUNDS_CREATE webhook: missing order_id in payload");
+        return;
+      }
 
-      await cancelEntitlementFromRefund({
+      const outcome = await cancelEntitlementFromRefund({
         shopId,
         shopifyOrderId: String(orderId),
         shopifyRefundId: payload.id ? String(payload.id) : null,
+        trigger: "shopify_refund",
       });
-      console.log(`✅ Extended warranty cancelled for refunded order ${orderId}`);
+
+      if (!outcome.matched) {
+        console.warn(
+          `⚠️ REFUNDS_CREATE: no active EW entitlement for order ${orderId} (shop ${shop}). ` +
+            "Refund requests are created only when the refunded order matches the EW purchase order " +
+            "or the original product registration order."
+        );
+        return;
+      }
+
+      const created = outcome.results.filter(r => r.refundId);
+      console.log(
+        `✅ REFUNDS_CREATE processed order ${orderId}: ${created.length} refund request(s), ` +
+          `${outcome.results.length - created.length} skipped`
+      );
     },
   },
 };

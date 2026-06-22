@@ -99,6 +99,14 @@ function buildSearchQuery(shopId, query) {
     conditions.push("ew.status = 'pending_payment'");
   }
 
+  const pt = String(query.purchaseType || query.purchase_type || "")
+    .trim()
+    .toLowerCase();
+  if (pt === "shopify" || pt === "external") {
+    conditions.push("rp.purchase_type = ?");
+    params.push(pt);
+  }
+
   const whereClause = conditions.join(" AND ");
 
   const baseFrom = `

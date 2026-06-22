@@ -9,6 +9,7 @@ import {
   createPendingEntitlement,
   getExtendedWarrantySettings,
   getNumericIdFromGid,
+  canPurchaseExtendedWarranty,
 } from "../services/extendedWarranty.service.js";
 
 /** GET offer data after standard registration. */
@@ -29,8 +30,7 @@ export async function getExtendedWarrantyOffer(req, res) {
       return res.status(404).json({ error: "Shop not registered" });
     }
 
-    const regionCode = req.query.region || req.body?.region || null;
-    const offer = await buildExtendedWarrantyOffer(shopId, registerId, regionCode);
+    const offer = await buildExtendedWarrantyOffer(shopId, registerId, { session });
 
     return res.json({ success: true, ...offer });
   } catch (err) {
@@ -85,9 +85,24 @@ export async function initiateExtendedWarrantyCheckout(req, res) {
       return res.status(404).json({ error: "Warranty plan not found" });
     }
 
-    const eligiblePlans = await loadEligiblePlans(shopId, registered);
+    const eligiblePlans = await loadEligiblePlans(
+      shopId,
+      registered,
+      settings.region_code || null
+    );
     if (!eligiblePlans.some(p => p.plan_id === planId)) {
       return res.status(400).json({ error: "Plan not eligible for this registration" });
+    }
+
+    const eligibility = await canPurchaseExtendedWarranty(shopId, registerId);
+    if (!eligibility.eligible) {
+      return res.status(400).json({
+        error:
+          eligibility.reason === "purchase_window_expired"
+            ? "Extended warranty purchase window has expired"
+            : "Extended warranty is not available for this registration",
+        reason: eligibility.reason,
+      });
     }
 
     const customerGid = logged_in_customer_id
@@ -158,20 +173,32 @@ export async function getCartCheckoutPayload(req, res) {
       return res.status(404).json({ error: "Registration or plan not found" });
     }
 
+    const eligibility = await canPurchaseExtendedWarranty(shopId, registerId);
+    if (!eligibility.eligible) {
+      return res.status(400).json({
+        error: "Extended warranty is not available for this registration",
+        reason: eligibility.reason,
+      });
+    }
+
     if (!planRow.shopify_checkout_variant_id) {
       return res.status(400).json({
         error: "Checkout variant not configured for this plan. Use draft order checkout.",
       });
     }
 
+    const settings = await getExtendedWarrantySettings(shopId);
+
     return res.json({
       success: true,
       method: "cart",
       variantId: planRow.shopify_checkout_variant_id,
       properties: {
+        _ew_type: "extended_warranty",
         _ew_register_id: String(registerId),
         _ew_plan_id: String(planId),
         _ew_serial: registered.serial_number,
+        _parent_product_id: String(registered.shopify_product_id || ""),
       },
     });
   } catch (err) {

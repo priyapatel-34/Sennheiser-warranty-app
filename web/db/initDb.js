@@ -61,6 +61,7 @@ async function ensureSchemaUpdates() {
     ["registered_products", "idx_rp_shop_serial", "shop_id, serial_number"],
     ["registered_products", "idx_rp_shop_product_name", "shop_id, product_name"],
     ["registered_products", "idx_rp_shop_created", "shop_id, created_at"],
+    ["registered_products", "idx_rp_shop_purchase_type", "shop_id, purchase_type"],
   ];
 
   for (const [table, indexName, columns] of searchIndexes) {
@@ -76,7 +77,6 @@ async function ensureSchemaUpdates() {
     );
     if (!exists.cnt) {
       await pool.query(`CREATE INDEX ${indexName} ON ${table} (${columns})`);
-      console.log(`✅ Added index ${indexName}`);
     }
   }
 
@@ -196,8 +196,114 @@ async function ensureSchemaUpdates() {
     );
     if (!exists.cnt) {
       await pool.query(`CREATE INDEX ${indexName} ON ${table} (${columns})`);
-      console.log(`✅ Added index ${indexName}`);
     }
+  }
+
+  if (!(await columnExists("extended_warranty_durations", "merchandising_badge"))) {
+    await pool.query(`
+      ALTER TABLE extended_warranty_durations
+      ADD COLUMN merchandising_badge VARCHAR(50) NULL AFTER plan_name
+    `);
+    console.log("✅ Added extended_warranty_durations.merchandising_badge");
+  }
+
+  const ewSettingsColumns = [
+    ["extended_warranty_purchase_days", "INT NULL AFTER region_code"],
+  ];
+
+  for (const [col, definition] of ewSettingsColumns) {
+    if (!(await columnExists("extended_warranty_settings", col))) {
+      if (
+        col === "extended_warranty_purchase_days" &&
+        (await columnExists("extended_warranty_settings", "default_purchase_window_days"))
+      ) {
+        await pool.query(`
+          ALTER TABLE extended_warranty_settings
+          CHANGE COLUMN default_purchase_window_days extended_warranty_purchase_days INT NULL
+        `);
+        console.log("✅ Renamed default_purchase_window_days to extended_warranty_purchase_days");
+      } else {
+        await pool.query(
+          `ALTER TABLE extended_warranty_settings ADD COLUMN ${col} ${definition}`
+        );
+        console.log(`✅ Added extended_warranty_settings.${col}`);
+      }
+    }
+  }
+
+  const ewSettingsDropColumns = [
+    "use_dynamic_plan_badges",
+    "default_warranty_image_url",
+    "store_display_name",
+    "default_purchase_window_days",
+  ];
+
+  for (const col of ewSettingsDropColumns) {
+    if (await columnExists("extended_warranty_settings", col)) {
+      await pool.query(
+        `ALTER TABLE extended_warranty_settings DROP COLUMN ${col}`
+      );
+      console.log(`✅ Removed extended_warranty_settings.${col}`);
+    }
+  }
+
+  try {
+    await pool.query(`DROP TABLE IF EXISTS extended_warranty_purchase_windows`);
+    console.log("✅ Removed extended_warranty_purchase_windows table (if existed)");
+  } catch (err) {
+    console.warn("⚠️ Purchase windows table drop skipped:", err.message);
+  }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS extended_warranty_eligibility_reminders (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      shop_id BIGINT UNSIGNED NOT NULL,
+      registered_product_id BIGINT NOT NULL,
+      reminder_days INT UNSIGNED NOT NULL,
+      sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_ew_eligibility_reminder (registered_product_id, reminder_days),
+      INDEX idx_ew_reminder_shop (shop_id),
+      FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+      FOREIGN KEY (registered_product_id) REFERENCES registered_products(id) ON DELETE CASCADE
+    )
+  `);
+  console.log("✅ Extended warranty eligibility reminders table ready");
+
+  if (
+    await columnExists("extended_warranty_eligibility_reminders", "reminder_days")
+  ) {
+    try {
+      await pool.query(`
+        ALTER TABLE extended_warranty_eligibility_reminders
+        MODIFY reminder_days INT UNSIGNED NOT NULL
+      `);
+    } catch (err) {
+      console.warn("⚠️ eligibility reminder_days column widen skipped:", err.message);
+    }
+  }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS extended_warranty_expiry_reminder_configs (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      shop_id BIGINT UNSIGNED NOT NULL,
+      country_code VARCHAR(10) NOT NULL,
+      reminder_days INT UNSIGNED NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_ew_expiry_reminder (shop_id, country_code, reminder_days),
+      INDEX idx_ew_expiry_reminder_shop (shop_id),
+      FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+    )
+  `);
+  console.log("✅ Extended warranty expiry reminder configs table ready");
+
+  if (!(await columnExists("registered_products", "country_code"))) {
+    await pool.query(`
+      ALTER TABLE registered_products
+      ADD COLUMN country_code VARCHAR(10) NULL AFTER purchase_type
+    `);
+    console.log("✅ Added registered_products.country_code");
   }
 }
 
@@ -364,6 +470,7 @@ export async function initDb() {
         duration_months INT NOT NULL,
         duration_years INT NOT NULL,
         plan_name VARCHAR(255) NOT NULL,
+        merchandising_badge VARCHAR(50) NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
         UNIQUE KEY uk_shop_ew_duration (shop_id, duration_months),
@@ -416,8 +523,8 @@ export async function initDb() {
         offer_after_registration TINYINT(1) NOT NULL DEFAULT 1,
         terms_url VARCHAR(500) NULL,
         coverage_text TEXT NULL,
-        store_display_name VARCHAR(255) NULL,
         region_code VARCHAR(10) NULL,
+        extended_warranty_purchase_days INT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
           ON UPDATE CURRENT_TIMESTAMP,

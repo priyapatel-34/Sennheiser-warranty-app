@@ -28,6 +28,295 @@ export function addMonthsSafe(startDate, months) {
   return new Date(year, targetMonth, safeDay);
 }
 
+export const MERCHANDISING_BADGE_LABELS = {
+  most_popular: "Most Popular",
+  best_seller: "Best Seller",
+  recommended: "Recommended",
+  limited_offer: "Limited Offer",
+};
+
+export function normalizeCountryCode(value) {
+  if (!value) return null;
+  const code = String(value).trim().toUpperCase();
+  return code.length >= 2 ? code.slice(0, 10) : null;
+}
+
+export async function getConfiguredCountryCodes(shopId) {
+  const codes = new Set();
+
+  const [planRows] = await pool.query(
+    `
+    SELECT DISTINCT UPPER(TRIM(region_code)) AS country_code
+    FROM extended_warranty_plans
+    WHERE shop_id = ?
+      AND region_code IS NOT NULL
+      AND TRIM(region_code) != ''
+    ORDER BY country_code
+    `,
+    [shopId]
+  );
+
+  for (const row of planRows) {
+    codes.add(row.country_code);
+  }
+
+  const settings = await getExtendedWarrantySettings(shopId);
+  const settingsCode = normalizeCountryCode(settings.region_code);
+  if (settingsCode) {
+    codes.add(settingsCode);
+  }
+
+  return [...codes].sort();
+}
+
+export async function resolveRegistrationCountryCode(shopId, registered) {
+  const direct = normalizeCountryCode(registered.country_code);
+  if (direct) return direct;
+
+  const productId = registered.shopify_product_id
+    ? Number(registered.shopify_product_id)
+    : null;
+
+  if (productId) {
+    const [planRegions] = await pool.query(
+      `
+      SELECT DISTINCT UPPER(TRIM(region_code)) AS country_code
+      FROM extended_warranty_plans
+      WHERE shop_id = ?
+        AND shopify_product_id = ?
+        AND region_code IS NOT NULL
+        AND TRIM(region_code) != ''
+      `,
+      [shopId, productId]
+    );
+
+    if (planRegions.length === 1) {
+      return planRegions[0].country_code;
+    }
+  }
+
+  const settings = await getExtendedWarrantySettings(shopId);
+  return normalizeCountryCode(settings.region_code);
+}
+
+export async function getExpiryReminderConfigs(shopId) {
+  const [rows] = await pool.query(
+    `
+    SELECT country_code, reminder_days
+    FROM extended_warranty_expiry_reminder_configs
+    WHERE shop_id = ?
+    ORDER BY country_code, reminder_days DESC
+    `,
+    [shopId]
+  );
+
+  const byCountry = new Map();
+  for (const row of rows) {
+    const code = row.country_code;
+    if (!byCountry.has(code)) {
+      byCountry.set(code, []);
+    }
+    byCountry.get(code).push(row.reminder_days);
+  }
+
+  return [...byCountry.entries()].map(([countryCode, reminderDays]) => ({
+    countryCode,
+    reminderDays,
+  }));
+}
+
+export async function buildExpiryReminderAdminConfigs(shopId) {
+  const countryCodes = await getConfiguredCountryCodes(shopId);
+  const saved = await getExpiryReminderConfigs(shopId);
+  const savedMap = new Map(saved.map(entry => [entry.countryCode, entry.reminderDays]));
+
+  if (!countryCodes.length) {
+    const fallbackDays = saved[0]?.reminderDays?.length ? saved[0].reminderDays : [""];
+    return [
+      {
+        countryCode: saved[0]?.countryCode || null,
+        reminderDays: fallbackDays,
+      },
+    ];
+  }
+
+  return countryCodes.map(countryCode => ({
+    countryCode,
+    reminderDays: savedMap.get(countryCode)?.length ? savedMap.get(countryCode) : [""],
+  }));
+}
+
+export async function saveExpiryReminderConfigs(shopId, configs = []) {
+  if (!Array.isArray(configs)) {
+    throw new Error("expiryReminderConfigs must be an array");
+  }
+
+  const allowedCountries = new Set(await getConfiguredCountryCodes(shopId));
+  const settings = await getExtendedWarrantySettings(shopId);
+  const settingsCountry = normalizeCountryCode(settings.region_code);
+
+  const normalized = [];
+  const seenCountries = new Set();
+
+  for (const entry of configs) {
+    let countryCode = normalizeCountryCode(
+      entry.countryCode || entry.country_code
+    );
+
+    if (!countryCode) {
+      if (allowedCountries.size === 1) {
+        countryCode = [...allowedCountries][0];
+      } else if (settingsCountry) {
+        countryCode = settingsCountry;
+      } else if (!allowedCountries.size && configs.length === 1) {
+        countryCode = settingsCountry || "DEFAULT";
+      } else {
+        throw new Error("Each reminder configuration requires a country");
+      }
+    }
+
+    if (allowedCountries.size && !allowedCountries.has(countryCode)) {
+      throw new Error(
+        `Country ${countryCode} is not configured for this store`
+      );
+    }
+
+    const rawDays = entry.reminderDays ?? entry.reminder_days;
+    if (!Array.isArray(rawDays) || !rawDays.length) {
+      throw new Error(
+        `Country ${countryCode} must have at least one reminder day configured`
+      );
+    }
+
+    const daySet = new Set();
+    for (const raw of rawDays) {
+      const days = Number(raw);
+      if (!Number.isInteger(days) || days < 1 || days > 3650) {
+        throw new Error(
+          `Reminder days for ${countryCode} must be whole numbers between 1 and 3650`
+        );
+      }
+      if (daySet.has(days)) {
+        throw new Error(`Duplicate reminder day ${days} for country ${countryCode}`);
+      }
+      daySet.add(days);
+      normalized.push({ countryCode, days });
+    }
+    seenCountries.add(countryCode);
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query(
+      `DELETE FROM extended_warranty_expiry_reminder_configs WHERE shop_id = ?`,
+      [shopId]
+    );
+
+    for (const { countryCode, days } of normalized) {
+      await conn.query(
+        `
+        INSERT INTO extended_warranty_expiry_reminder_configs (
+          shop_id, country_code, reminder_days
+        ) VALUES (?, ?, ?)
+        `,
+        [shopId, countryCode, days]
+      );
+    }
+
+    await conn.commit();
+    return getExpiryReminderConfigs(shopId);
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function getReminderDaysForCountry(shopId, countryCode) {
+  const normalized = normalizeCountryCode(countryCode);
+  if (normalized) {
+    const [rows] = await pool.query(
+      `
+      SELECT reminder_days
+      FROM extended_warranty_expiry_reminder_configs
+      WHERE shop_id = ? AND country_code = ?
+      ORDER BY reminder_days DESC
+      `,
+      [shopId, normalized]
+    );
+
+    if (rows.length) {
+      return rows.map(r => r.reminder_days);
+    }
+  }
+
+  const [fallbackRows] = await pool.query(
+    `
+    SELECT reminder_days
+    FROM extended_warranty_expiry_reminder_configs
+    WHERE shop_id = ?
+    ORDER BY reminder_days DESC
+    LIMIT 10
+    `,
+    [shopId]
+  );
+
+  return fallbackRows.map(r => r.reminder_days);
+}
+
+function daysSinceDate(value, referenceDate = new Date()) {
+  const start = value instanceof Date ? new Date(value) : new Date(value);
+  if (Number.isNaN(start.getTime())) return null;
+
+  const today = new Date(referenceDate);
+  start.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+
+  return Math.floor((today - start) / 86400000);
+}
+
+export async function evaluatePurchaseWindowEligibility(shopId, registered) {
+  const settings = await getExtendedWarrantySettings(shopId);
+  const purchaseDays = settings.extended_warranty_purchase_days;
+
+  if (purchaseDays == null) {
+    return { allowed: true, configured: false };
+  }
+
+  const referenceDate = registered.created_at || registered.warranty_start;
+  const elapsedDays = daysSinceDate(referenceDate);
+  if (elapsedDays == null) {
+    return {
+      allowed: false,
+      configured: true,
+      reason: "registration_date_missing",
+      extendedWarrantyPurchaseDays: purchaseDays,
+    };
+  }
+
+  if (elapsedDays > purchaseDays) {
+    return {
+      allowed: false,
+      configured: true,
+      reason: "purchase_window_expired",
+      extendedWarrantyPurchaseDays: purchaseDays,
+      daysSinceRegistration: elapsedDays,
+      daysRemaining: 0,
+    };
+  }
+
+  return {
+    allowed: true,
+    configured: true,
+    extendedWarrantyPurchaseDays: purchaseDays,
+    daysSinceRegistration: elapsedDays,
+    daysRemaining: purchaseDays - elapsedDays,
+    regionCode: settings.region_code || null,
+  };
+}
+
 export async function getExtendedWarrantySettings(shopId) {
   const [[row]] = await pool.query(
     `
@@ -36,8 +325,8 @@ export async function getExtendedWarrantySettings(shopId) {
       offer_after_registration,
       terms_url,
       coverage_text,
-      store_display_name,
-      region_code
+      region_code,
+      extended_warranty_purchase_days
     FROM extended_warranty_settings
     WHERE shop_id = ?
     `,
@@ -50,10 +339,86 @@ export async function getExtendedWarrantySettings(shopId) {
       offer_after_registration: 1,
       terms_url: null,
       coverage_text: null,
-      store_display_name: null,
       region_code: null,
+      extended_warranty_purchase_days: null,
     }
   );
+}
+
+export async function fetchRegistrationProductImage(session, registered) {
+  const productId = registered?.shopify_product_id;
+  if (!session?.shop || !productId) return null;
+
+  try {
+    const admin = new shopify.api.clients.Graphql({ session });
+    const productGid = String(productId).startsWith("gid://")
+      ? productId
+      : `gid://shopify/Product/${productId}`;
+    const variantId = registered.shopify_variant_id
+      ? Number(registered.shopify_variant_id)
+      : null;
+
+    const response = await admin.request(
+      `
+      query ProductImage($id: ID!) {
+        product(id: $id) {
+          featuredImage { url }
+          variants(first: 100) {
+            edges {
+              node {
+                id
+                image { url }
+              }
+            }
+          }
+        }
+      }
+      `,
+      { variables: { id: productGid } }
+    );
+
+    const product = response.data?.product;
+    if (!product) return null;
+
+    if (variantId) {
+      const suffix = `/${variantId}`;
+      const variantEdge = (product.variants?.edges || []).find(edge =>
+        edge.node.id.endsWith(suffix)
+      );
+      if (variantEdge?.node?.image?.url) {
+        return variantEdge.node.image.url;
+      }
+    }
+
+    return product.featuredImage?.url || null;
+  } catch (err) {
+    console.warn("Failed to fetch EW offer product image:", err.message);
+    return null;
+  }
+}
+
+async function attachMerchandisingBadges(shopId, plans) {
+  const [durations] = await pool.query(
+    `
+    SELECT duration_months, merchandising_badge
+    FROM extended_warranty_durations
+    WHERE shop_id = ?
+    `,
+    [shopId]
+  );
+
+  const badgeByMonths = new Map();
+  for (const duration of durations) {
+    const badgeKey = duration.merchandising_badge?.trim();
+    if (badgeKey && MERCHANDISING_BADGE_LABELS[badgeKey]) {
+      badgeByMonths.set(duration.duration_months, MERCHANDISING_BADGE_LABELS[badgeKey]);
+    }
+  }
+
+  return plans.map(plan => {
+    const badgeLabel = badgeByMonths.get(plan.durationMonths);
+    return badgeLabel ? { ...plan, badgeLabel } : plan;
+  });
 }
 
 export async function loadRegisteredProduct(shopId, registerId) {
@@ -471,7 +836,7 @@ export async function activateEntitlementFromPayment({
     await conn.commit();
 
     const settings = await getExtendedWarrantySettings(shopId);
-    const storeName = shopDisplayName || settings.store_display_name || "Sonova Team";
+    const storeName = shopDisplayName || "Sonova Team";
 
     const purchaseHtml = ExtendedWarrantyPurchaseTemplate({
       customerName: customerName || registered.customer_name || "Customer",
@@ -539,8 +904,10 @@ export function formatMoney(amount, currency, locale) {
   }
 }
 
-export async function buildExtendedWarrantyOffer(shopId, registerId) {
+export async function buildExtendedWarrantyOffer(shopId, registerId, options = {}) {
+  const { session = null } = options;
   const settings = await getExtendedWarrantySettings(shopId);
+  const regionCode = settings.region_code || null;
 
   if (!settings.enabled) {
     return { eligible: false, reason: "extended_warranty_disabled" };
@@ -560,16 +927,51 @@ export async function buildExtendedWarrantyOffer(shopId, registerId) {
     };
   }
 
-  const plans = await loadEligiblePlans(shopId, registered);
+  const purchaseWindow = await evaluatePurchaseWindowEligibility(shopId, registered);
+  if (!purchaseWindow.allowed) {
+    return {
+      eligible: false,
+      reason: purchaseWindow.reason || "purchase_window_expired",
+      purchaseWindow,
+    };
+  }
+
+  const plans = await loadEligiblePlans(shopId, registered, regionCode);
   if (!plans.length) {
     return { eligible: false, reason: "no_plans_configured" };
   }
 
   const shopCurrency = plans[0]?.currency || null;
 
+  const basePlans = plans.map(p => {
+    const projected = computeExtendedWarrantyDates(registered, {
+      duration_months: p.duration_months,
+    });
+    return {
+      planId: p.plan_id,
+      planName: p.plan_name,
+      durationYears: p.duration_years,
+      durationMonths: p.duration_months,
+      price: String(p.price),
+      currency: p.currency,
+      coverageText: p.coverage_text || settings.coverage_text,
+      startDate: formatDateOnly(projected.startDate),
+      endDate: formatDateOnly(projected.endDate),
+      extendedWarrantyStartDate: formatDateOnly(projected.startDate),
+      extendedWarrantyEndDate: formatDateOnly(projected.endDate),
+    };
+  });
+
+  const enrichedPlans = await attachMerchandisingBadges(shopId, basePlans);
+  const productImageUrl = session
+    ? await fetchRegistrationProductImage(session, registered)
+    : null;
+
   return {
     eligible: true,
     currency: shopCurrency,
+    plans: enrichedPlans,
+    purchaseWindow,
     settings: {
       termsUrl: settings.terms_url,
       coverageText: settings.coverage_text,
@@ -579,34 +981,26 @@ export async function buildExtendedWarrantyOffer(shopId, registerId) {
       productName: registered.product_name,
       serialNumber: registered.serial_number,
       sku: registered.sku,
+      productImageUrl,
       standardWarrantyStart: registered.warranty_start,
       standardWarrantyEnd: registered.warranty_end,
       purchaseDate: registered.purchase_date,
       variantId: registered.shopify_variant_id,
       productId: registered.shopify_product_id,
     },
-    plans: plans.map(p => {
-      const projected = computeExtendedWarrantyDates(registered, {
-        duration_months: p.duration_months,
-      });
-      return {
-        planId: p.plan_id,
-        planName: p.plan_name,
-        durationYears: p.duration_years,
-        durationMonths: p.duration_months,
-        price: String(p.price),
-        currency: p.currency,
-        coverageText: p.coverage_text || settings.coverage_text,
-        startDate: formatDateOnly(projected.startDate),
-        endDate: formatDateOnly(projected.endDate),
-        extendedWarrantyStartDate: formatDateOnly(projected.startDate),
-        extendedWarrantyEndDate: formatDateOnly(projected.endDate),
-      };
-    }),
     pendingEntitlement:
       existing?.status === "pending_payment"
         ? formatEntitlementForApi(existing, registered)
         : null,
+  };
+}
+
+export async function canPurchaseExtendedWarranty(shopId, registerId) {
+  const offer = await buildExtendedWarrantyOffer(shopId, registerId);
+  return {
+    eligible: Boolean(offer.eligible),
+    reason: offer.reason || null,
+    purchaseWindow: offer.purchaseWindow || null,
   };
 }
 

@@ -3,43 +3,48 @@
 <div id="tws-warranty" class="register-warranty-form-section">
 
   <!-- HEADER -->
-<section class="mp-header">
-  <div class="mp-user-info">
-
-    <div class="mp-avatar">
-      {{ customer.first_name | default: 'U' | slice: 0, 1 }}
-    </div>
-
-    <div class="mp-user-text">
-      <h1>
-        {{ block.settings.greeting_text }}
-
+  <section class="mp-header">
+    <div class="mp-user-info"> 
+    <div class="avatar-wrap">
+      <div class="mp-avatar">
+      
         {% if customer.first_name != blank %}
-          {{ customer.first_name }}
+          {{ customer.first_name | slice: 0, 1 }}
         {% else %}
-          Customer
+          U
         {% endif %}
-      </h1>
+      </div>
+</div>
+<div class="mp-user-text">
+  <h1>
+    {{ block.settings.greeting_text }}
 
-      <p>{{ customer.email }}</p>
+    {% if customer.first_name != blank %}
+      {{ customer.first_name }}
+    {% else %}
+      Customer
+    {% endif %}
+  </h1>
 
-      <a href="{{ routes.account_logout_url }}" class="mp-logout">
-        <em class="logout-icon">
-            <img src="{{ 'logout-icon.svg' | asset_url }}" alt="Logout Icon"/>
-        </em>
-        <span>Logout</span>
-      </a>
-    </div>
+  <p>{{ customer.email }}</p>
+  <a href="{{ routes.account_logout_url }}" class="mp-logout">
+    <em class="logout-icon">
+    <img
+  src="{{ 'logout-icon.svg' | asset_url }}"
+  alt="Logout Icon"
+/>
+    </em>
+    <span>Logout</span>
+</a>
+</div>
 
     <div class="mp-header-desc">
       <p>
         Welcome to your account. Check your order history,
-          register your products, and manage your personal data – all in one place!
+        register your products, and manage your personal data – all in one place!
       </p>
     </div>
-
-  </div>
-</section>
+  </section>
 
 <div id="ew-offer-section" class="ew-offer-section hidden"></div>
 
