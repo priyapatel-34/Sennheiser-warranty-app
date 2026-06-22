@@ -30,6 +30,45 @@ const PRICE_BADGE_OPTIONS = [
   { label: "Limited Offer", value: "limited_offer" },
 ];
 
+const styles = {
+  stack: (gap = 16) => ({
+    display: "flex",
+    flexDirection: "column",
+    gap,
+  }),
+  row: (gap = 12, align = "center") => ({
+    display: "flex",
+    flexDirection: "row",
+    alignItems: align,
+    gap,
+    flexWrap: "wrap",
+  }),
+  grid2: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+    gap: 16,
+  },
+  infoBanner: {
+    background: "#f1f8ff",
+    border: "1px solid #b3d4f5",
+    borderRadius: 8,
+    padding: "12px 16px",
+    color: "#1a5276",
+    fontSize: 14,
+  },
+  sectionDivider: {
+    borderTop: "1px solid #e1e3e5",
+    margin: "16px 0",
+  },
+  cardSection: {
+    padding: "16px 20px",
+  },
+  cardSectionBorder: {
+    padding: "16px 20px",
+    borderBottom: "1px solid #e1e3e5",
+  },
+};
+
 function countConfiguredPlans(product) {
   return (product.variants || []).reduce(
     (sum, v) => sum + (v.warrantyPlans || []).length,
@@ -81,7 +120,7 @@ export default function ExtendedWarrantyAdmin() {
     handleSelectionChange,
     clearSelection,
   } = useIndexResourceState(products, {
-    resourceIDResolver: p => p.id,
+    resourceIDResolver: (p) => p.id,
   });
 
   const loadDurations = async () => {
@@ -135,7 +174,7 @@ export default function ExtendedWarrantyAdmin() {
       if (meta.page) setPage(meta.page);
 
       if (data.nextCursor && meta.page) {
-        setCursorStack(prev => {
+        setCursorStack((prev) => {
           const next = [...prev];
           next[meta.page] = data.nextCursor;
           return next;
@@ -167,7 +206,7 @@ export default function ExtendedWarrantyAdmin() {
           s.extendedWarrantyPurchaseDays == null
             ? ""
             : String(s.extendedWarrantyPurchaseDays),
-        expiryReminderConfigs: (s.expiryReminderConfigs || []).map(entry => ({
+        expiryReminderConfigs: (s.expiryReminderConfigs || []).map((entry) => ({
           countryCode: entry.countryCode || null,
           reminderDays: (entry.reminderDays || []).map(String),
         })),
@@ -203,21 +242,11 @@ export default function ExtendedWarrantyAdmin() {
     setCursorStack([null]);
   };
 
-  const goToFirstPage = () => {
-    setPage(1);
-  };
-
-  const goToPreviousPage = () => {
-    setPage(p => Math.max(1, p - 1));
-  };
-
-  const goToNextPage = () => {
-    setPage(p => p + 1);
-  };
-
-  const goToLastPage = () => {
+  const goToFirstPage = () => setPage(1);
+  const goToPreviousPage = () => setPage((p) => Math.max(1, p - 1));
+  const goToNextPage = () => setPage((p) => p + 1);
+  const goToLastPage = () =>
     loadProducts({ jumpLast: true, search: productSearchQuery });
-  };
 
   const addDuration = async () => {
     const duration = Number(newDuration);
@@ -246,7 +275,7 @@ export default function ExtendedWarrantyAdmin() {
     }
   };
 
-  const deleteDuration = async id => {
+  const deleteDuration = async (id) => {
     if (!window.confirm("Delete this duration option?")) return;
     setSaving(true);
     try {
@@ -271,11 +300,11 @@ export default function ExtendedWarrantyAdmin() {
     if (mode === "single" && targets.length === 1) {
       const product = targets[0];
       const vp = {};
-      durations.forEach(d => {
-        (product.variants || []).forEach(v => {
+      durations.forEach((d) => {
+        (product.variants || []).forEach((v) => {
           if (!vp[v.id]) vp[v.id] = {};
           const existing = (v.warrantyPlans || []).find(
-            p => p.durationMonths === d.durationMonths
+            (p) => p.durationMonths === d.durationMonths
           );
           vp[v.id][d.durationMonths] = existing ? existing.price : "";
         });
@@ -283,9 +312,7 @@ export default function ExtendedWarrantyAdmin() {
       setVariantPricing(vp);
     } else {
       const bulk = {};
-      durations.forEach(d => {
-        bulk[d.durationMonths] = "";
-      });
+      durations.forEach((d) => { bulk[d.durationMonths] = ""; });
       setBulkDurationPricing(bulk);
     }
     setModalOpen(true);
@@ -293,14 +320,14 @@ export default function ExtendedWarrantyAdmin() {
 
   const buildMappings = (product, isBulk) => {
     const mappings = [];
-    (product.variants || []).forEach(variant => {
-      durations.forEach(d => {
+    (product.variants || []).forEach((variant) => {
+      durations.forEach((d) => {
         const months = d.durationMonths;
         const priceValue = isBulk
           ? bulkDurationPricing[months]
           : variantPricing[variant.id]?.[months];
         const existing = (variant.warrantyPlans || []).find(
-          p => p.durationMonths === months
+          (p) => p.durationMonths === months
         );
         if (priceValue === "" || priceValue == null) {
           if (existing) {
@@ -336,8 +363,8 @@ export default function ExtendedWarrantyAdmin() {
         body: JSON.stringify({ merchandisingBadge }),
       });
       if (!r.ok) throw new Error();
-      setDurations(prev =>
-        prev.map(d =>
+      setDurations((prev) =>
+        prev.map((d) =>
           d.id === durationId ? { ...d, merchandisingBadge } : d
         )
       );
@@ -365,11 +392,11 @@ export default function ExtendedWarrantyAdmin() {
             }
           : {
               products: configureProducts
-                .map(product => ({
+                .map((product) => ({
                   productId: product.id,
                   mappings: buildMappings(product, configureMode === "bulk"),
                 }))
-                .filter(item => item.mappings.length > 0),
+                .filter((item) => item.mappings.length > 0),
             };
 
       const r = await fetch(`${API_BASE}/plans/bulk`, {
@@ -402,13 +429,13 @@ export default function ExtendedWarrantyAdmin() {
     setSaving(true);
     try {
       const expiryReminderConfigs = (settings.expiryReminderConfigs || [])
-        .map(entry => ({
+        .map((entry) => ({
           countryCode: entry.countryCode?.trim().toUpperCase() || null,
           reminderDays: (entry.reminderDays || [])
-            .map(d => Number(d))
-            .filter(d => Number.isInteger(d) && d > 0),
+            .map((d) => Number(d))
+            .filter((d) => Number.isInteger(d) && d > 0),
         }))
-        .filter(entry => entry.reminderDays.length);
+        .filter((entry) => entry.reminderDays.length);
 
       const r = await fetch(`${API_BASE}/settings`, {
         method: "POST",
@@ -436,8 +463,8 @@ export default function ExtendedWarrantyAdmin() {
     }
   };
 
-  const addExpiryReminderDay = countryIndex => {
-    setSettings(p => {
+  const addExpiryReminderDay = (countryIndex) => {
+    setSettings((p) => {
       const next = [...(p.expiryReminderConfigs || [])];
       next[countryIndex] = {
         ...next[countryIndex],
@@ -448,7 +475,7 @@ export default function ExtendedWarrantyAdmin() {
   };
 
   const updateExpiryReminderDay = (countryIndex, dayIndex, value) => {
-    setSettings(p => {
+    setSettings((p) => {
       const next = [...(p.expiryReminderConfigs || [])];
       const days = [...(next[countryIndex].reminderDays || [])];
       days[dayIndex] = value;
@@ -458,7 +485,7 @@ export default function ExtendedWarrantyAdmin() {
   };
 
   const removeExpiryReminderDay = (countryIndex, dayIndex) => {
-    setSettings(p => {
+    setSettings((p) => {
       const next = [...(p.expiryReminderConfigs || [])];
       const days = (next[countryIndex].reminderDays || []).filter(
         (_, i) => i !== dayIndex
@@ -468,7 +495,9 @@ export default function ExtendedWarrantyAdmin() {
     });
   };
 
-  const selectedProducts = products.filter(p => selectedResources.includes(p.id));
+  const selectedProducts = products.filter((p) =>
+    selectedResources.includes(p.id)
+  );
 
   const modalTitle =
     configureMode === "bulk"
@@ -491,6 +520,7 @@ export default function ExtendedWarrantyAdmin() {
         onSelect={setTab}
       />
 
+      {/* ── TAB 0: Durations ── */}
       {tab === 0 && (
         <LegacyCard>
           {durationsLoading ? (
@@ -498,19 +528,26 @@ export default function ExtendedWarrantyAdmin() {
           ) : (
             <>
               <LegacyCard sectioned>
-                <TextField
-                  label="Add duration (months)"
-                  type="number"
-                  value={newDuration}
-                  onChange={setNewDuration}
-                  placeholder="12, 24, 36"
-                  helpText="Must be multiples of 12 months"
-                  autoComplete="off"
-                />
-                <div style={{ marginTop: 12 }}>
-                  <Button variant="primary" onClick={addDuration} loading={saving}>
-                    Add duration
-                  </Button>
+                <div style={styles.stack(16)}>
+                  <Text as="h2" variant="headingMd">
+                    Add new duration
+                  </Text>
+                  <div style={{ maxWidth: 320 }}>
+                    <TextField
+                      label="Duration (months)"
+                      type="number"
+                      value={newDuration}
+                      onChange={setNewDuration}
+                      placeholder="e.g. 12, 24, 36"
+                      helpText="Must be a multiple of 12 months"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div>
+                    <Button variant="primary" onClick={addDuration} loading={saving}>
+                      Add duration
+                    </Button>
+                  </div>
                 </div>
               </LegacyCard>
 
@@ -539,13 +576,15 @@ export default function ExtendedWarrantyAdmin() {
                       <IndexTable.Cell>{d.durationYears}</IndexTable.Cell>
                       <IndexTable.Cell>{d.durationMonths}</IndexTable.Cell>
                       <IndexTable.Cell>
-                        <Select
-                          label="Price badge"
-                          labelHidden
-                          options={PRICE_BADGE_OPTIONS}
-                          value={d.merchandisingBadge || ""}
-                          onChange={v => updateDurationBadge(d.id, v)}
-                        />
+                        <div style={{ minWidth: 160 }}>
+                          <Select
+                            label="Price badge"
+                            labelHidden
+                            options={PRICE_BADGE_OPTIONS}
+                            value={d.merchandisingBadge || ""}
+                            onChange={(v) => updateDurationBadge(d.id, v)}
+                          />
+                        </div>
                       </IndexTable.Cell>
                       <IndexTable.Cell>
                         <Button
@@ -565,6 +604,7 @@ export default function ExtendedWarrantyAdmin() {
         </LegacyCard>
       )}
 
+      {/* ── TAB 1: Products & Pricing ── */}
       {tab === 1 && (
         <LegacyCard>
           {productsLoading && !productsLoaded ? (
@@ -572,7 +612,19 @@ export default function ExtendedWarrantyAdmin() {
           ) : (
             <>
               {selectedResources.length > 0 && (
-                <div style={{ padding: 16 }}>
+                <div
+                  style={{
+                    ...styles.row(12, "center"),
+                    justifyContent: "space-between",
+                    padding: "12px 16px",
+                    background: "#f1f8ff",
+                    borderBottom: "1px solid #b3d4f5",
+                  }}
+                >
+                  <Text as="span" tone="subdued">
+                    {selectedResources.length} product
+                    {selectedResources.length !== 1 ? "s" : ""} selected
+                  </Text>
                   <Button
                     variant="primary"
                     onClick={() => openConfigureModal(selectedProducts, "bulk")}
@@ -582,17 +634,22 @@ export default function ExtendedWarrantyAdmin() {
                 </div>
               )}
 
-              <div style={{ padding: "16px 16px 16px" }}>
+              <div
+                style={{
+                  padding: "12px 16px",
+                  borderBottom: "1px solid #e1e3e5",
+                }}
+              >
                 <TextField
                   label="Search products"
                   labelHidden
                   value={productSearchInput}
                   onChange={setProductSearchInput}
-                  placeholder="Search entire catalog by product name or SKU..."
+                  placeholder="Search by product name or SKU…"
                   autoComplete="off"
                   clearButton
                   onClearButtonClick={clearProductSearch}
-                  onKeyDown={e => {
+                  onKeyDown={(e) => {
                     if (e.key === "Enter") runProductSearch();
                   }}
                   connectedRight={
@@ -642,20 +699,20 @@ export default function ExtendedWarrantyAdmin() {
                           position={index}
                         >
                           <IndexTable.Cell>
-                          <div
-                            style={{
-                              maxWidth: "250px",
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                            }}
-                            title={product.title}
-                          >
-                            <Text as="span" fontWeight="semibold">
-                              {product.title}
-                            </Text>
-                          </div>
-                        </IndexTable.Cell>
+                            <div
+                              style={{
+                                maxWidth: 250,
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}
+                              title={product.title}
+                            >
+                              <Text as="span" fontWeight="semibold">
+                                {product.title}
+                              </Text>
+                            </div>
+                          </IndexTable.Cell>
                           <IndexTable.Cell>
                             <Badge
                               tone={
@@ -665,16 +722,28 @@ export default function ExtendedWarrantyAdmin() {
                               {product.status}
                             </Badge>
                           </IndexTable.Cell>
-                          <IndexTable.Cell>{product.inventory ?? "—"}</IndexTable.Cell>
-                          <IndexTable.Cell>{product.category || "—"}</IndexTable.Cell>
+                          <IndexTable.Cell>
+                            {product.inventory ?? "—"}
+                          </IndexTable.Cell>
+                          <IndexTable.Cell>
+                            {product.category || "—"}
+                          </IndexTable.Cell>
                           <IndexTable.Cell>
                             {(product.variants || []).length}
                           </IndexTable.Cell>
-                          <IndexTable.Cell>{planCount}</IndexTable.Cell>
+                          <IndexTable.Cell>
+                            {planCount > 0 ? (
+                              <Badge tone="success">{planCount} plans</Badge>
+                            ) : (
+                              <Badge tone="attention">None</Badge>
+                            )}
+                          </IndexTable.Cell>
                           <IndexTable.Cell>
                             <Button
                               size="slim"
-                              onClick={() => openConfigureModal([product], "single")}
+                              onClick={() =>
+                                openConfigureModal([product], "single")
+                              }
                             >
                               {planCount ? "Edit pricing" : "Set pricing"}
                             </Button>
@@ -686,25 +755,30 @@ export default function ExtendedWarrantyAdmin() {
 
                   <div
                     style={{
-                      padding: 16,
-                      display: "flex",
+                      ...styles.row(12, "center"),
                       justifyContent: "space-between",
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                      gap: 12,
+                      padding: "12px 16px",
+                      borderTop: "1px solid #e1e3e5",
                     }}
                   >
                     <Text as="p" tone="subdued">
                       {paginationMeta.total} product
                       {paginationMeta.total === 1 ? "" : "s"}
-                      {productSearchQuery ? ` matching "${productSearchQuery}"` : ""}
+                      {productSearchQuery
+                        ? ` matching "${productSearchQuery}"`
+                        : ""}
                       {showPagination
                         ? ` · Page ${page} of ${paginationMeta.totalPages}`
                         : ""}
                     </Text>
-                    {showPagination ? (
-                      <div gap="200" blockAlign="center">
-                        <Button disabled={page <= 1} onClick={goToFirstPage}>
+
+                    {showPagination && (
+                      <div style={styles.row(8, "center")}>
+                        <Button
+                          size="slim"
+                          disabled={page <= 1}
+                          onClick={goToFirstPage}
+                        >
                           First
                         </Button>
                         <Pagination
@@ -715,13 +789,14 @@ export default function ExtendedWarrantyAdmin() {
                           label={`Page ${page} of ${paginationMeta.totalPages}`}
                         />
                         <Button
+                          size="slim"
                           disabled={page >= paginationMeta.totalPages}
                           onClick={goToLastPage}
                         >
                           Last
                         </Button>
                       </div>
-                    ) : null}
+                    )}
                   </div>
                 </>
               )}
@@ -730,121 +805,224 @@ export default function ExtendedWarrantyAdmin() {
         </LegacyCard>
       )}
 
+      {/* ── TAB 2: Refunds ── */}
       {tab === 2 && <ExtendedWarrantyRefundsTab />}
 
+      {/* ── TAB 3: Store Settings ── */}
       {tab === 3 && (
-        <LegacyCard sectioned>
+        <div style={styles.stack(16)}>
           {settingsLoading ? (
-            <LoadingPanel label="Loading settings..." />
+            <LegacyCard sectioned>
+              <LoadingPanel label="Loading settings..." />
+            </LegacyCard>
           ) : (
             <>
-              <Checkbox
-                label="Extended warranty enabled"
-                checked={settings.enabled}
-                onChange={v => setSettings(p => ({ ...p, enabled: v }))}
-              />
-              <Checkbox
-                label="Offer extended warranty after registration"
-                checked={settings.offerAfterRegistration}
-                onChange={v =>
-                  setSettings(p => ({ ...p, offerAfterRegistration: v }))
-                }
-              />
-              <TextField
-                label="Terms & Conditions URL"
-                value={settings.termsUrl}
-                onChange={v => setSettings(p => ({ ...p, termsUrl: v }))}
-                autoComplete="off"
-              />
-              <TextField
-                label="Default coverage summary (shown on offer screen)"
-                value={settings.coverageText}
-                onChange={v => setSettings(p => ({ ...p, coverageText: v }))}
-                multiline={6}
-                autoComplete="off"
-              />
-              <TextField
-                label="Extended Warranty Purchase Days"
-                type="number"
-                value={settings.extendedWarrantyPurchaseDays}
-                onChange={v =>
-                  setSettings(p => ({ ...p, extendedWarrantyPurchaseDays: v }))
-                }
-                autoComplete="off"
-                helpText="Days after standard warranty registration when customers can purchase extended warranty. Leave empty for no time limit."
-              />
+              {/* General */}
+              <LegacyCard sectioned>
+                <div style={styles.stack(16)}>
+                  <Text as="h2" variant="headingMd">
+                    General
+                  </Text>
+                  <Checkbox
+                    label="Extended warranty enabled"
+                    helpText="Show warranty offers to customers across your store."
+                    checked={settings.enabled}
+                    onChange={(v) =>
+                      setSettings((p) => ({ ...p, enabled: v }))
+                    }
+                  />
+                  <Checkbox
+                    label="Offer extended warranty after product registration"
+                    helpText="Prompt customers to purchase a warranty when they register a product."
+                    checked={settings.offerAfterRegistration}
+                    onChange={(v) =>
+                      setSettings((p) => ({ ...p, offerAfterRegistration: v }))
+                    }
+                  />
+                </div>
+              </LegacyCard>
 
-              <div style={{ marginTop: 24, marginBottom: 8 }}>
-                <Text as="h3" variant="headingMd">
-                  Expiry reminder emails
-                </Text>
-                <Text as="p" tone="subdued">
-                  Configure how many days before the purchase window closes to send
-                  reminder emails. Country schedules are determined automatically from
-                  your warranty plan regions.
-                </Text>
-              </div>
+              {/* Content & legal */}
+              <LegacyCard sectioned>
+                <div style={styles.stack(16)}>
+                  <Text as="h2" variant="headingMd">
+                    Content &amp; legal
+                  </Text>
+                  <TextField
+                    label="Terms & Conditions URL"
+                    value={settings.termsUrl}
+                    onChange={(v) =>
+                      setSettings((p) => ({ ...p, termsUrl: v }))
+                    }
+                    autoComplete="off"
+                    placeholder="https://yourstore.com/warranty-terms"
+                  />
+                  <TextField
+                    label="Coverage summary"
+                    helpText="Shown on the warranty offer screen."
+                    value={settings.coverageText}
+                    onChange={(v) =>
+                      setSettings((p) => ({ ...p, coverageText: v }))
+                    }
+                    multiline={5}
+                    autoComplete="off"
+                    placeholder="Describe what the extended warranty covers…"
+                  />
+                </div>
+              </LegacyCard>
 
-              {(settings.expiryReminderConfigs || []).map((entry, countryIndex) => (
-                <LegacyCard
-                  key={`reminder-${entry.countryCode || countryIndex}`}
-                  sectioned
-                >
-                  {entry.countryCode ? (
-                    <Text as="p" fontWeight="semibold" style={{ marginBottom: 12 }}>
-                      Country: {entry.countryCode}
+              {/* Purchase window */}
+              <LegacyCard sectioned>
+                <div style={styles.stack(16)}>
+                  <Text as="h2" variant="headingMd">
+                    Purchase window
+                  </Text>
+                  <div style={{ maxWidth: 320 }}>
+                    <TextField
+                      label="Days after registration to allow purchase"
+                      type="number"
+                      value={settings.extendedWarrantyPurchaseDays}
+                      onChange={(v) =>
+                        setSettings((p) => ({
+                          ...p,
+                          extendedWarrantyPurchaseDays: v,
+                        }))
+                      }
+                      autoComplete="off"
+                      helpText="Leave empty to allow purchase at any time."
+                      placeholder="e.g. 90"
+                    />
+                  </div>
+                </div>
+              </LegacyCard>
+
+              {/* Expiry reminder emails */}
+              <LegacyCard sectioned>
+                <div style={styles.stack(16)}>
+                  <div style={styles.stack(4)}>
+                    <Text as="h2" variant="headingMd">
+                      Expiry reminder emails
                     </Text>
-                  ) : null}
+                    <Text as="p" tone="subdued">
+                      Set how many days before the purchase window closes to
+                      send each reminder.
+                    </Text>
+                  </div>
 
-                  {(entry.reminderDays || []).map((day, dayIndex) => (
-                    <div
-                      key={`reminder-day-${countryIndex}-${dayIndex}`}
-                      style={{
-                        display: "flex",
-                        gap: 12,
-                        alignItems: "flex-end",
-                        marginBottom: 8,
-                      }}
-                    >
-                      <div style={{ flex: "1 1 200px" }}>
-                        <TextField
-                          label={`Reminder ${dayIndex + 1} (days before expiry)`}
-                          type="number"
-                          value={day}
-                          onChange={v =>
-                            updateExpiryReminderDay(countryIndex, dayIndex, v)
-                          }
-                          autoComplete="off"
-                          min={1}
-                        />
-                      </div>
-                      <Button
-                        disabled={(entry.reminderDays || []).length <= 1}
-                        onClick={() =>
-                          removeExpiryReminderDay(countryIndex, dayIndex)
-                        }
-                      >
-                        Remove
-                      </Button>
+                  {(settings.expiryReminderConfigs || []).length === 0 ? (
+                    <div style={styles.infoBanner}>
+                      No reminder schedules configured. They will appear here
+                      once warranty plan regions are set up.
                     </div>
-                  ))}
+                  ) : (
+                    <div style={styles.stack(12)}>
+                      {(settings.expiryReminderConfigs || []).map(
+                        (entry, countryIndex) => (
+                          <div
+                            key={`reminder-${entry.countryCode || countryIndex}`}
+                            style={{
+                              border: "1px solid #e1e3e5",
+                              borderRadius: 8,
+                              padding: "12px 14px",
+                            }}
+                          >
+                            {entry.countryCode && (
+                              <div style={{ marginBottom: 8 }}>
+                                <Text as="p" variant="bodySm" fontWeight="semibold">
+                                  Country: {entry.countryCode}
+                                </Text>
+                              </div>
+                            )}
+                            <div style={{ ...styles.row(8, "center"), flexWrap: "wrap" }}>
+                              {(entry.reminderDays || []).map((day, dayIndex) => (
+                                <div
+                                  key={`reminder-day-${countryIndex}-${dayIndex}`}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                    background: "#f6f6f7",
+                                    border: "1px solid #c9cccf",
+                                    borderRadius: 6,
+                                    padding: "3px 4px 3px 8px",
+                                  }}
+                                >
+                                  <input
+                                    type="number"
+                                    value={day}
+                                    min={1}
+                                    onChange={(e) =>
+                                      updateExpiryReminderDay(
+                                        countryIndex,
+                                        dayIndex,
+                                        e.target.value
+                                      )
+                                    }
+                                    style={{
+                                      width: 48,
+                                      border: "none",
+                                      background: "transparent",
+                                      fontSize: 13,
+                                      fontFamily: "inherit",
+                                      outline: "none",
+                                      padding: 0,
+                                      MozAppearance: "textfield",
+                                    }}
+                                  />
+                                  <Text as="span" variant="bodySm" tone="subdued">
+                                    days
+                                  </Text>
+                                  <button
+                                    disabled={(entry.reminderDays || []).length <= 1}
+                                    onClick={() =>
+                                      removeExpiryReminderDay(countryIndex, dayIndex)
+                                    }
+                                    style={{
+                                      marginLeft: 2,
+                                      background: "none",
+                                      border: "none",
+                                      cursor: (entry.reminderDays || []).length <= 1
+                                        ? "not-allowed"
+                                        : "pointer",
+                                      color: (entry.reminderDays || []).length <= 1
+                                        ? "#c9cccf"
+                                        : "#d72c0d",
+                                      fontSize: 14,
+                                      lineHeight: 1,
+                                      padding: "0 2px",
+                                    }}
+                                    title="Remove"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              ))}
+                              <Button
+                                size="slim"
+                                onClick={() => addExpiryReminderDay(countryIndex)}
+                              >
+                                + Add day
+                              </Button>
+                            </div>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  )}
+                </div>
+              </LegacyCard>
 
-                  <Button onClick={() => addExpiryReminderDay(countryIndex)}>
-                    Add reminder day
-                  </Button>
-                </LegacyCard>
-              ))}
-
-              <div style={{ marginTop: 16 }}>
+              <div style={{ paddingBottom: 24 }}>
                 <Button variant="primary" onClick={saveSettings} loading={saving}>
                   Save settings
                 </Button>
               </div>
             </>
           )}
-        </LegacyCard>
+        </div>
       )}
 
+      {/* ── Pricing Modal ── */}
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -861,59 +1039,82 @@ export default function ExtendedWarrantyAdmin() {
       >
         <Modal.Section>
           {configureMode === "bulk" ? (
-            <>
-              <Text as="p" tone="subdued">
-                Same price applies to all variants of each selected product.
-              </Text>
-              {durations.map(d => (
-                <TextField
-                  key={d.durationMonths}
-                  label={`${d.planName} (${d.durationMonths} months)`}
-                  type="number"
-                  value={bulkDurationPricing[d.durationMonths] || ""}
-                  onChange={v =>
-                    setBulkDurationPricing(p => ({
-                      ...p,
-                      [d.durationMonths]: v,
-                    }))
-                  }
-                  autoComplete="off"
-                  helpText={currency ? `Amount in ${currency}` : undefined}
-                />
-              ))}
-            </>
-          ) : (
-            (configureProducts[0]?.variants || []).map(variant => (
-              <LegacyCard key={variant.id} sectioned>
-                <Text as="h4" variant="headingSm">
-                  {variant.name || variant.title}
-                </Text>
-                {variant.sku && (
-                  <Text as="p" tone="subdued" variant="bodySm">
-                    SKU: {variant.sku}
-                  </Text>
-                )}
-                {durations.map(d => (
+            <div style={styles.stack(16)}>
+              <div style={styles.infoBanner}>
+                Prices apply to all variants of each selected product. Leave a
+                field empty to skip that duration.
+              </div>
+              <div style={styles.grid2}>
+                {durations.map((d) => (
                   <TextField
-                    key={`${variant.id}-${d.durationMonths}`}
-                    label={d.planName}
+                    key={d.durationMonths}
+                    label={`${d.planName} (${d.durationMonths} months)`}
                     type="number"
-                    value={variantPricing[variant.id]?.[d.durationMonths] || ""}
-                    onChange={v =>
-                      setVariantPricing(p => ({
+                    value={bulkDurationPricing[d.durationMonths] || ""}
+                    onChange={(v) =>
+                      setBulkDurationPricing((p) => ({
                         ...p,
-                        [variant.id]: {
-                          ...p[variant.id],
-                          [d.durationMonths]: v,
-                        },
+                        [d.durationMonths]: v,
                       }))
                     }
                     autoComplete="off"
                     helpText={currency ? `Amount in ${currency}` : undefined}
+                    placeholder="0.00"
                   />
                 ))}
-              </LegacyCard>
-            ))
+              </div>
+            </div>
+          ) : (
+            <div style={styles.stack(0)}>
+              {(configureProducts[0]?.variants || []).map((variant, vIdx) => (
+                <div key={variant.id}>
+                  {vIdx > 0 && (
+                    <div style={styles.sectionDivider} />
+                  )}
+                  <div
+                    style={{
+                      ...styles.stack(12),
+                      paddingTop: vIdx > 0 ? 16 : 0,
+                    }}
+                  >
+                    <div style={styles.stack(2)}>
+                      <Text as="h4" variant="headingSm">
+                        {variant.name || variant.title}
+                      </Text>
+                      {variant.sku && (
+                        <Text as="p" tone="subdued" variant="bodySm">
+                          SKU: {variant.sku}
+                        </Text>
+                      )}
+                    </div>
+                    <div style={styles.grid2}>
+                      {durations.map((d) => (
+                        <TextField
+                          key={`${variant.id}-${d.durationMonths}`}
+                          label={d.planName}
+                          type="number"
+                          value={
+                            variantPricing[variant.id]?.[d.durationMonths] || ""
+                          }
+                          onChange={(v) =>
+                            setVariantPricing((p) => ({
+                              ...p,
+                              [variant.id]: {
+                                ...p[variant.id],
+                                [d.durationMonths]: v,
+                              },
+                            }))
+                          }
+                          autoComplete="off"
+                          helpText={currency ? `Amount in ${currency}` : undefined}
+                          placeholder="0.00"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </Modal.Section>
       </Modal>

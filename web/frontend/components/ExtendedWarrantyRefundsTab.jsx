@@ -30,24 +30,19 @@ const STATUS_OPTIONS = [
 
 function statusTone(status) {
   switch (status) {
-    case "pending_review":
-      return "attention";
-    case "approved":
-      return "info";
-    case "refunded":
-      return "success";
+    case "pending_review": return "attention";
+    case "approved":       return "info";
+    case "refunded":       return "success";
     case "rejected":
-    case "cancelled":
-      return "critical";
-    default:
-      return undefined;
+    case "cancelled":      return "critical";
+    default:               return undefined;
   }
 }
 
 function formatStatusLabel(status) {
   return String(status || "")
     .replace(/_/g, " ")
-    .replace(/\b\w/g, c => c.toUpperCase());
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function formatMoney(amount, currency) {
@@ -59,6 +54,69 @@ function formatMoney(amount, currency) {
   } catch {
     return `${Number(amount).toFixed(2)} ${currency || ""}`.trim();
   }
+}
+
+/* ── shared style helpers ─────────────────────────────────── */
+const s = {
+  stack: (gap = 16) => ({
+    display: "flex",
+    flexDirection: "column",
+    gap,
+  }),
+  row: (gap = 12, align = "center") => ({
+    display: "flex",
+    alignItems: align,
+    gap,
+    flexWrap: "wrap",
+  }),
+  divider: {
+    borderTop: "1px solid #e1e3e5",
+    margin: "16px 0",
+  },
+  panel: {
+    background: "#f9fafb",
+    border: "1px solid #e1e3e5",
+    borderRadius: 8,
+    padding: "4px 14px",
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: 600,
+    color: "#6d7175",
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+    marginBottom: 8,
+  },
+};
+
+/* ── small reusable detail field ──────────────────────────── */
+function DetailField({ label, children }) {
+  return (
+    <div style={{ minWidth: 130 }}>
+      <div style={s.sectionLabel}>{label}</div>
+      <div style={{ fontSize: 14, color: "#202223" }}>{children || "—"}</div>
+    </div>
+  );
+}
+
+/* ── breakdown line ───────────────────────────────────────── */
+function BreakdownRow({ label, value, bold }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "6px 0",
+        borderBottom: bold ? "none" : "1px solid #f1f1f1",
+        fontSize: 14,
+        fontWeight: bold ? 600 : 400,
+      }}
+    >
+      <span style={{ color: bold ? "#202223" : "#6d7175" }}>{label}</span>
+      <span>{value}</span>
+    </div>
+  );
 }
 
 export default function ExtendedWarrantyRefundsTab() {
@@ -228,78 +286,84 @@ export default function ExtendedWarrantyRefundsTab() {
 
   return (
     <>
-      <LegacyCard sectioned>
-        <div align="space-between" blockAlign="center" wrap>
-          <Button onClick={() => { setSettingsOpen(true); loadSettings(); }}>
-            Refund settings
-          </Button>
+      {/* ── Single card: toolbar + table ── */}
+      <LegacyCard>
+        {/* Toolbar */}
+        <div
+          style={{
+            ...s.row(10, "center"),
+            justifyContent: "space-between",
+            padding: "12px 16px",
+            borderBottom: "1px solid #e1e3e5",
+          }}
+        >
+          {/* Search + status */}
+          <div style={{ ...s.row(10, "center"), flex: 1 }}>
+            <div style={{ flex: 1, minWidth: 240, maxWidth: 420 }}>
+              <TextField
+                label="Search"
+                labelHidden
+                placeholder="Customer, email, serial, SKU, request ID…"
+                value={searchInput}
+                onChange={setSearchInput}
+                clearButton
+                onClearButtonClick={clearSearch}
+                autoComplete="off"
+                onKeyDown={(e) => e.key === "Enter" && runSearch()}
+                connectedRight={
+                  <Button onClick={runSearch}>Search</Button>
+                }
+              />
+            </div>
+            <div style={{ minWidth: 160 }}>
+              <Select
+                label="Status"
+                labelHidden
+                options={STATUS_OPTIONS}
+                value={statusFilter}
+                onChange={(v) => {
+                  setPage(1);
+                  setStatusFilter(v);
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Settings */}
           <Button
             onClick={() => {
-              const params = new URLSearchParams({ status: statusFilter });
-              if (searchQuery) params.set("q", searchQuery);
-              window.open(
-                `${API_BASE}/refunds/export?${params.toString()}`,
-                "_blank"
-              );
+              setSettingsOpen(true);
+              loadSettings();
             }}
           >
-            Export CSV
+            Refund settings
           </Button>
         </div>
-      </LegacyCard>
 
-      <LegacyCard>
-        <div style={{ padding: "16px 16px 0" }}>
-          <div gap="300" wrap blockAlign="end">
-            <div style={{ flex: 1, minWidth: 240 }}>
-              <form
-                onSubmit={e => {
-                  e.preventDefault();
-                  runSearch();
-                }}
-              >
-                <TextField
-                  label="Search refund requests"
-                  labelHidden
-                  placeholder="Customer, email, serial, SKU, request ID..."
-                  value={searchInput}
-                  onChange={setSearchInput}
-                  clearButton
-                  onClearButtonClick={clearSearch}
-                  autoComplete="off"
-                  connectedRight={<Button onClick={runSearch}>Search</Button>}
-                />
-              </form>
-            </div>
-            <Select
-              label="Status"
-              options={STATUS_OPTIONS}
-              value={statusFilter}
-              onChange={v => {
-                setPage(1);
-                setStatusFilter(v);
-              }}
-            />
-          </div>
-        </div>
-
+        {/* Table body */}
         {loading ? (
           <LoadingPanel label="Loading refund requests..." />
         ) : refunds.length === 0 ? (
           <EmptyState heading="No refund requests" image="">
-            <p>Refund requests appear here when a product return triggers an extended warranty cancellation.</p>
+            <p>
+              Refund requests appear here when a product return triggers an
+              extended warranty cancellation.
+            </p>
           </EmptyState>
         ) : (
           <>
             <IndexTable
-              resourceName={{ singular: "refund request", plural: "refund requests" }}
+              resourceName={{
+                singular: "refund request",
+                plural: "refund requests",
+              }}
               itemCount={refunds.length}
               headings={[
-                { title: "Request ID" },
+                { title: "Request" },
                 { title: "Customer" },
                 { title: "Product" },
                 { title: "Plan" },
-                { title: "Refund amount" },
+                { title: "Net refund" },
                 { title: "Status" },
                 { title: "Created" },
                 { title: "Actions" },
@@ -307,46 +371,65 @@ export default function ExtendedWarrantyRefundsTab() {
               selectable={false}
             >
               {refunds.map((row, index) => (
-                <IndexTable.Row id={String(row.id)} key={row.id} position={index}>
-                  <IndexTable.Cell>#{row.id}</IndexTable.Cell>
+                <IndexTable.Row
+                  id={String(row.id)}
+                  key={row.id}
+                  position={index}
+                >
                   <IndexTable.Cell>
-                    <Text as="span" fontWeight="semibold">
-                      {row.customerName || "—"}
-                    </Text>
-                    <br />
                     <Text as="span" tone="subdued">
-                      {row.customerEmail || "—"}
+                      #{row.id}
                     </Text>
                   </IndexTable.Cell>
+
                   <IndexTable.Cell>
-                    {row.productName || "—"}
-                    {row.serialNumber ? (
-                      <>
-                        <br />
-                        <Text as="span" tone="subdued">
+                    <div style={s.stack(1)}>
+                      <Text as="span" fontWeight="semibold">
+                        {row.customerName || "—"}
+                      </Text>
+                      <Text as="span" tone="subdued" variant="bodySm">
+                        {row.customerEmail || ""}
+                      </Text>
+                    </div>
+                  </IndexTable.Cell>
+
+                  <IndexTable.Cell>
+                    <div style={s.stack(1)}>
+                      <span>{row.productName || "—"}</span>
+                      {row.serialNumber && (
+                        <Text as="span" tone="subdued" variant="bodySm">
                           SN: {row.serialNumber}
                         </Text>
-                      </>
-                    ) : null}
+                      )}
+                    </div>
                   </IndexTable.Cell>
+
                   <IndexTable.Cell>{row.warrantyPlan || "—"}</IndexTable.Cell>
+
                   <IndexTable.Cell>
-                    {formatMoney(row.netRefundAmount, row.currency)}
+                    <Text as="span" fontWeight="semibold">
+                      {formatMoney(row.netRefundAmount, row.currency)}
+                    </Text>
                   </IndexTable.Cell>
+
                   <IndexTable.Cell>
                     <Badge tone={statusTone(row.status)}>
                       {formatStatusLabel(row.status)}
                     </Badge>
                   </IndexTable.Cell>
+
                   <IndexTable.Cell>
                     {row.createdAt
                       ? new Date(row.createdAt).toLocaleDateString()
                       : "—"}
                   </IndexTable.Cell>
+
                   <IndexTable.Cell>
                     <Button
                       size="slim"
-                      loading={detailLoading && selectedRefund?.id === row.id}
+                      loading={
+                        detailLoading && selectedRefund?.id === row.id
+                      }
                       onClick={() => loadRefundDetail(row.id)}
                     >
                       Review
@@ -356,14 +439,13 @@ export default function ExtendedWarrantyRefundsTab() {
               ))}
             </IndexTable>
 
+            {/* Pagination footer */}
             <div
               style={{
-                padding: 16,
-                display: "flex",
+                ...s.row(12, "center"),
                 justifyContent: "space-between",
-                alignItems: "center",
-                flexWrap: "wrap",
-                gap: 12,
+                padding: "12px 16px",
+                borderTop: "1px solid #e1e3e5",
               }}
             >
               <Text as="p" tone="subdued">
@@ -373,20 +455,21 @@ export default function ExtendedWarrantyRefundsTab() {
                   ? ` · Page ${page} of ${paginationMeta.totalPages}`
                   : ""}
               </Text>
-              {showPagination ? (
+              {showPagination && (
                 <Pagination
                   hasPrevious={paginationMeta.hasPreviousPage}
-                  onPrevious={() => setPage(p => Math.max(1, p - 1))}
+                  onPrevious={() => setPage((p) => Math.max(1, p - 1))}
                   hasNext={paginationMeta.hasNextPage}
-                  onNext={() => setPage(p => p + 1)}
+                  onNext={() => setPage((p) => p + 1)}
                   label={`Page ${page} of ${paginationMeta.totalPages}`}
                 />
-              ) : null}
+              )}
             </div>
           </>
         )}
       </LegacyCard>
 
+      {/* ── Refund detail modal ── */}
       {selectedRefund && (
         <Modal
           open={detailOpen}
@@ -396,16 +479,18 @@ export default function ExtendedWarrantyRefundsTab() {
             selectedRefund.status === "pending_review"
               ? {
                   content: "Approve",
-                  onAction: () => performAction("approve", { adminNotes }),
+                  onAction: () =>
+                    performAction("approve", { adminNotes }),
                   loading: actionLoading,
                 }
               : selectedRefund.status === "approved"
-                ? {
-                    content: "Mark as refunded",
-                    onAction: () => performAction("complete", { adminNotes }),
-                    loading: actionLoading,
-                  }
-                : undefined
+              ? {
+                  content: "Mark as refunded",
+                  onAction: () =>
+                    performAction("complete", { adminNotes }),
+                  loading: actionLoading,
+                }
+              : undefined
           }
           secondaryActions={[
             ...(selectedRefund.status === "pending_review"
@@ -416,110 +501,211 @@ export default function ExtendedWarrantyRefundsTab() {
                     onAction: () =>
                       performAction("reject", {
                         rejectionReason:
-                          rejectReason || "Refund request rejected by finance",
+                          rejectReason ||
+                          "Refund request rejected by finance",
                       }),
                     loading: actionLoading,
                   },
                 ]
               : []),
-            {
-              content: "Close",
-              onAction: () => setDetailOpen(false),
-            },
+            { content: "Close", onAction: () => setDetailOpen(false) },
           ]}
           large
         >
           <Modal.Section>
-            <Text as="h3" variant="headingSm">
-              Customer & product
-            </Text>
-            <Text as="p">
-              {selectedRefund.customerName} · {selectedRefund.customerEmail}
-              <br />
-              {selectedRefund.productName} · SN {selectedRefund.serialNumber || "—"}
-              <br />
-              Plan: {selectedRefund.warrantyPlan}
-            </Text>
+            <div style={s.stack(20)}>
 
-            <div style={{ marginTop: 16 }}>
-              <Text as="h3" variant="headingSm">
-                Calculation breakdown (PRD §5.2)
-              </Text>
-              <Text as="p" tone="subdued">
-                Original value: {formatMoney(selectedRefund.purchasePrice, selectedRefund.currency)}
-                <br />
-                Used value:{" "}
-                {selectedRefund.usedValue != null
-                  ? formatMoney(selectedRefund.usedValue, selectedRefund.currency)
-                  : "—"}
-                <br />
-                Remaining value:{" "}
-                {selectedRefund.remainingValue != null
-                  ? formatMoney(selectedRefund.remainingValue, selectedRefund.currency)
-                  : "—"}
-                <br />
-                Days total: {selectedRefund.daysTotal ?? "—"} · Days used:{" "}
-                {selectedRefund.daysUsed ?? 0}
-                <br />
-                Pro-rata amount:{" "}
-                {formatMoney(
-                  selectedRefund.proRataRefundAmount,
-                  selectedRefund.currency
+              {/* Customer & product */}
+              <div>
+                <div style={s.sectionLabel}>Customer &amp; product</div>
+                <div style={{ ...s.row(24, "flex-start"), flexWrap: "wrap" }}>
+                  <DetailField label="Name">
+                    {selectedRefund.customerName}
+                  </DetailField>
+                  <DetailField label="Email">
+                    {selectedRefund.customerEmail}
+                  </DetailField>
+                  <DetailField label="Product">
+                    {selectedRefund.productName}
+                  </DetailField>
+                  <DetailField label="Serial number">
+                    {selectedRefund.serialNumber}
+                  </DetailField>
+                  <DetailField label="Warranty plan">
+                    {selectedRefund.warrantyPlan}
+                  </DetailField>
+                  <DetailField label="Status">
+                    <Badge tone={statusTone(selectedRefund.status)}>
+                      {formatStatusLabel(selectedRefund.status)}
+                    </Badge>
+                  </DetailField>
+                </div>
+              </div>
+
+              <div style={s.divider} />
+
+              {/* Calculation breakdown */}
+              <div>
+                <div style={s.sectionLabel}>
+                  Calculation breakdown
+                  <span
+                    style={{
+                      marginLeft: 6,
+                      fontWeight: 400,
+                      textTransform: "none",
+                      letterSpacing: 0,
+                      color: "#8c9196",
+                    }}
+                  >
+                    PRD §5.2
+                  </span>
+                </div>
+                <div style={s.panel}>
+                  <BreakdownRow
+                    label="Original value"
+                    value={formatMoney(
+                      selectedRefund.purchasePrice,
+                      selectedRefund.currency
+                    )}
+                  />
+                  <BreakdownRow
+                    label="Days total"
+                    value={selectedRefund.daysTotal ?? "—"}
+                  />
+                  <BreakdownRow
+                    label="Days used"
+                    value={selectedRefund.daysUsed ?? 0}
+                  />
+                  <BreakdownRow
+                    label="Used value"
+                    value={
+                      selectedRefund.usedValue != null
+                        ? formatMoney(
+                            selectedRefund.usedValue,
+                            selectedRefund.currency
+                          )
+                        : "—"
+                    }
+                  />
+                  <BreakdownRow
+                    label="Remaining value"
+                    value={
+                      selectedRefund.remainingValue != null
+                        ? formatMoney(
+                            selectedRefund.remainingValue,
+                            selectedRefund.currency
+                          )
+                        : "—"
+                    }
+                  />
+                  <BreakdownRow
+                    label="Pro-rata amount"
+                    value={formatMoney(
+                      selectedRefund.proRataRefundAmount,
+                      selectedRefund.currency
+                    )}
+                  />
+                  <BreakdownRow
+                    label="Claim cost deducted"
+                    value={formatMoney(
+                      selectedRefund.claimCostDeducted || 0,
+                      selectedRefund.currency
+                    )}
+                  />
+                  <BreakdownRow
+                    label="Net refund"
+                    value={formatMoney(
+                      selectedRefund.netRefundAmount,
+                      selectedRefund.currency
+                    )}
+                    bold
+                  />
+                </div>
+                {selectedRefund.calculationNotes && (
+                  <div style={{ marginTop: 6 }}>
+                    <Text as="p" tone="subdued" variant="bodySm">
+                      {selectedRefund.calculationNotes}
+                    </Text>
+                  </div>
                 )}
-                <br />
-                Claim cost deducted:{" "}
-                {formatMoney(
-                  selectedRefund.claimCostDeducted || 0,
-                  selectedRefund.currency
-                )}
-                <br />
-                <strong>
-                  Net refund:{" "}
-                  {formatMoney(selectedRefund.netRefundAmount, selectedRefund.currency)}
-                </strong>
-              </Text>
-              {selectedRefund.calculationNotes ? (
-                <Text as="p" tone="subdued">
-                  {selectedRefund.calculationNotes}
-                </Text>
-              ) : null}
+              </div>
+
+              {/* Review fields — only when pending */}
+              {selectedRefund.status === "pending_review" && (
+                <>
+                  <div style={s.divider} />
+                  <div style={s.stack(12)}>
+                    <div style={s.sectionLabel}>Review</div>
+                    <TextField
+                      label="Rejection reason"
+                      helpText="Required only if rejecting."
+                      value={rejectReason}
+                      onChange={setRejectReason}
+                      autoComplete="off"
+                      placeholder="e.g. Outside eligibility window"
+                    />
+                    <TextField
+                      label="Admin notes"
+                      value={adminNotes}
+                      onChange={setAdminNotes}
+                      multiline={3}
+                      autoComplete="off"
+                      placeholder="Optional internal notes…"
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* Audit trail */}
+              {selectedRefund.auditTrail?.length > 0 && (
+                <>
+                  <div style={s.divider} />
+                  <div>
+                    <div style={s.sectionLabel}>Audit trail</div>
+                    <div style={s.panel}>
+                      {selectedRefund.auditTrail.map((entry, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            display: "flex",
+                            gap: 16,
+                            padding: "6px 0",
+                            borderBottom:
+                              i < selectedRefund.auditTrail.length - 1
+                                ? "1px solid #f1f1f1"
+                                : "none",
+                            fontSize: 13,
+                          }}
+                        >
+                          <span
+                            style={{
+                              color: "#6d7175",
+                              whiteSpace: "nowrap",
+                              minWidth: 150,
+                            }}
+                          >
+                            {new Date(entry.createdAt).toLocaleString()}
+                          </span>
+                          <span style={{ color: "#202223" }}>
+                            {entry.action}
+                            {entry.actor && (
+                              <span style={{ color: "#6d7175" }}>
+                                {" "}by {entry.actor}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-
-            {selectedRefund.status === "pending_review" ? (
-              <div style={{ marginTop: 16 }}>
-                <TextField
-                  label="Rejection reason (if rejecting)"
-                  value={rejectReason}
-                  onChange={setRejectReason}
-                  autoComplete="off"
-                />
-                <TextField
-                  label="Admin notes"
-                  value={adminNotes}
-                  onChange={setAdminNotes}
-                  multiline={3}
-                  autoComplete="off"
-                />
-              </div>
-            ) : null}
-
-            {selectedRefund.auditTrail?.length ? (
-              <div style={{ marginTop: 16 }}>
-                <Text as="h3" variant="headingSm">
-                  Audit trail
-                </Text>
-                {selectedRefund.auditTrail.map((entry, i) => (
-                  <Text as="p" tone="subdued" key={i}>
-                    {new Date(entry.createdAt).toLocaleString()} — {entry.action}{" "}
-                    {entry.actor ? `by ${entry.actor}` : ""}
-                  </Text>
-                ))}
-              </div>
-            ) : null}
           </Modal.Section>
         </Modal>
       )}
 
+      {/* ── Refund settings modal ── */}
       <Modal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -537,47 +723,79 @@ export default function ExtendedWarrantyRefundsTab() {
           {settingsLoading ? (
             <LoadingPanel label="Loading settings..." />
           ) : (
-            <>
-              <Checkbox
-                label="Refund processing enabled"
-                checked={refundSettings.refundEnabled}
-                onChange={v => setRefundSettings(p => ({ ...p, refundEnabled: v }))}
-              />
-              <Checkbox
-                label="Pro-rata calculation enabled"
-                checked={refundSettings.proRataEnabled}
-                onChange={v => setRefundSettings(p => ({ ...p, proRataEnabled: v }))}
-              />
-              <Checkbox
-                label="Auto-cancel entitlement on refund request"
-                checked={refundSettings.autoCancelEntitlement}
-                onChange={v =>
-                  setRefundSettings(p => ({ ...p, autoCancelEntitlement: v }))
-                }
-              />
-              <TextField
-                label="Finance notification emails"
-                helpText="Comma-separated emails notified when a new refund request is created"
-                value={refundSettings.financeNotificationEmails}
-                onChange={v =>
-                  setRefundSettings(p => ({ ...p, financeNotificationEmails: v }))
-                }
-                autoComplete="off"
-              />
-              <TextField
-                label="Refund eligibility window (days)"
-                helpText="Optional. Leave blank for no window limit."
-                type="number"
-                value={refundSettings.eligibilityWindowDays}
-                onChange={v =>
-                  setRefundSettings(p => ({ ...p, eligibilityWindowDays: v }))
-                }
-                autoComplete="off"
-              />
-              <Text as="p" tone="subdued">
-                Pro-rata formula is fixed per PRD Section 5.2 and cannot be changed.
-              </Text>
-            </>
+            <div style={s.stack(16)}>
+              {/* Behaviour group */}
+              <div style={s.stack(10)}>
+                <div style={s.sectionLabel}>Behaviour</div>
+                <Checkbox
+                  label="Refund processing enabled"
+                  helpText="Allow refund requests to be created and processed."
+                  checked={refundSettings.refundEnabled}
+                  onChange={(v) =>
+                    setRefundSettings((p) => ({ ...p, refundEnabled: v }))
+                  }
+                />
+                <Checkbox
+                  label="Pro-rata calculation enabled"
+                  helpText="Calculate refunds based on remaining warranty period."
+                  checked={refundSettings.proRataEnabled}
+                  onChange={(v) =>
+                    setRefundSettings((p) => ({ ...p, proRataEnabled: v }))
+                  }
+                />
+              </div>
+
+              <div style={s.divider} />
+
+              {/* Notifications & limits group */}
+              <div style={s.stack(12)}>
+                <div style={s.sectionLabel}>Notifications &amp; limits</div>
+                <TextField
+                  label="Finance notification emails"
+                  helpText="Comma-separated. Notified when a new refund request is created."
+                  value={refundSettings.financeNotificationEmails}
+                  onChange={(v) =>
+                    setRefundSettings((p) => ({
+                      ...p,
+                      financeNotificationEmails: v,
+                    }))
+                  }
+                  autoComplete="off"
+                  placeholder="finance@example.com, ops@example.com"
+                />
+                <div style={{ maxWidth: 200 }}>
+                  <TextField
+                    label="Eligibility window (days)"
+                    helpText="Leave blank for no limit."
+                    type="number"
+                    value={refundSettings.eligibilityWindowDays}
+                    onChange={(v) =>
+                      setRefundSettings((p) => ({
+                        ...p,
+                        eligibilityWindowDays: v,
+                      }))
+                    }
+                    autoComplete="off"
+                    placeholder="e.g. 30"
+                  />
+                </div>
+              </div>
+
+              {/* PRD note */}
+              <div
+                style={{
+                  background: "#f9fafb",
+                  border: "1px solid #e1e3e5",
+                  borderRadius: 6,
+                  padding: "8px 12px",
+                }}
+              >
+                <Text as="p" tone="subdued" variant="bodySm">
+                  Pro-rata formula is fixed per PRD Section 5.2 and cannot be
+                  changed here.
+                </Text>
+              </div>
+            </div>
           )}
         </Modal.Section>
       </Modal>
