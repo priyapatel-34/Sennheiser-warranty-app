@@ -135,6 +135,27 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
     productsSection?.querySelector(".mp-products-loader")?.classList.add("hidden");
   }
 
+  function initMpSlider() {
+    if (window.mpProductsSwiper) {
+      window.mpProductsSwiper.destroy(true, true);
+    }
+
+    window.mpProductsSwiper = new Swiper(".mp-slider", {
+      slidesPerView: 1,
+      spaceBetween: 16,
+      watchOverflow: true,
+      breakpoints: {
+        576: { slidesPerView: 2, spaceBetween: 16 },
+        768: { slidesPerView: 2, spaceBetween: 20 },
+        991: { slidesPerView: 3, spaceBetween: 20 },
+      },
+      navigation: {
+        nextEl: ".mp-nav.swiper-button-next",
+        prevEl: ".mp-nav.swiper-button-prev",
+      },
+    });
+  }
+
   showProductsLoader();
 
   try {
@@ -154,100 +175,75 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
     sliderWrapper.classList.remove("hidden");
 
     track.innerHTML = products
-      .map(
-        (p) => `
-    <div class="swiper-slide">
-    <div class="mp-card"  data-registration-id="${p.register_id || ""}"
-             data-product-id="${p.product_id}"
-             data-line-item-id="${p.line_item_id}"
-             data-order-id="${p.order_id || ""}"
-             data-source="${p.source || "shopify"}">
-      
-      <div class="product-wrapper">
-        <div class="mp-card-img">
-          ${
-            p.image
-              ? `<img src="${p.image}" alt="${p.title}">`
-              : `<div class="no-image"></div>`
-          }
-        </div>
-        <h3>${p.title}</h3>
-        ${
-          p.is_registered  
-            ? ""
-            : `<h2 class="gray-text">Purchased on: ${formatDate(p.purchase_date)}</h2>`
-        }
-      </div>
+      .map((p) => {
+        const action = getProductCardAction(p);
+        const warrantyStatus = p.is_registered
+          ? getWarrantyStatus(p.warranty_end)
+          : null;
+        const finalWarrantyExpiry = hasPurchasedExtendedWarranty(p)
+          ? p.extended_warranty?.extendedWarrantyEndDate ||
+            p.extended_warranty?.endDate ||
+            p.warranty_end
+          : p.warranty_end;
 
-      <div class="mp-card-body">
-        ${
-          p.is_registered
-            ? `
+        const actionButton =
+          action === "extend_warranty"
+            ? `<button type="button" class="btn mp-extend-warranty-btn" data-register-id="${p.register_id}" data-source="${p.source || "shopify"}">Extend Warranty</button>`
+            : action === "view_details"
+              ? `<button type="button" class="btn bordered-btn mp-view-details-btn" data-product-id="${p.product_id}">View Details</button>`
+              : `<div class="btn mp-web-register-btn" data-product-id="${p.product_id}" data-order-id="${p.order_id || ""}" data-source="${p.source || "shopify"}">${web_register_label}</div>`;
+
+        const registeredInfo = p.is_registered
+          ? `
               <div class="expiry">
-                <span class="gray-text">Serial No.: ${
-                  p.serial_number || "-"
-                }</span>
-
-                ${(() => {
-                  const status = getWarrantyStatus(p.warranty_end);
-                  if (!status) return "";
-
-                  return `
-      <div class="mp-warranty-badge mp-${status.type}">
-        <img
-      class="mp-warranty-icon"
-      src="${status.icon}"
-      alt="${status.label}"
-    />
-        ${status.label}
-      </div>
-    `;
-                })()}
-
-                <span class=gray-text>Warranty Expiry: ${formatDate(
-                  p.warranty_end,
-                )}</span>
+                <span class="gray-text">Serial No.: ${p.serial_number || "-"}</span>
                 ${
-                  hasPurchasedExtendedWarranty(p)
-                    ? `<span class="gray-text">Extended: ${p.extended_warranty.displayStatus}${
-                        p.extended_warranty.extendedWarrantyEndDate
-                          ? ` · until ${formatDate(p.extended_warranty.extendedWarrantyEndDate)}`
-                          : p.extended_warranty.endDate
-                            ? ` · until ${formatDate(p.extended_warranty.endDate)}`
-                            : ""
-                      }</span>`
+                  warrantyStatus
+                    ? `<div class="mp-warranty-badge mp-${warrantyStatus.type}">
+                        <img class="mp-warranty-icon" src="${warrantyStatus.icon}" alt="${warrantyStatus.label}" />
+                        ${warrantyStatus.label}
+                      </div>`
                     : ""
                 }
-              </div>
+                <span class="gray-text">Warranty Expiry: ${formatDate(finalWarrantyExpiry)}</span>
+              </div>`
+          : `<div class="expiry expiry--placeholder" aria-hidden="true"></div>`;
 
-                ${(() => {
-                  const action = getProductCardAction(p);
-                  if (action === "extend_warranty") {
-                    return `<button type="button" class="btn mp-extend-warranty-btn" data-register-id="${p.register_id}" data-source="${p.source || "shopify"}">Extend Warranty</button>`;
-                  }
-                  if (action === "view_details") {
-                    return `<button class="btn bordered-btn" data-product-id="${p.product_id}">View Details</button>`;
-                  }
-                  return "";
-                })()}
-            `
-            : `
-            <div
-                id="mp-web-register-btn"
-                class="btn"
-                data-product-id="${p.product_id}"
-                data-order-id="${p.order_id}"
-                data-source="shopify">
-                ${web_register_label}
-              </div>
-            `
-        }
+        return `
+    <div class="swiper-slide">
+      <div class="mp-card"
+           data-registration-id="${p.register_id || ""}"
+           data-product-id="${p.product_id}"
+           data-line-item-id="${p.line_item_id || ""}"
+           data-order-id="${p.order_id || ""}"
+           data-source="${p.source || "shopify"}">
+        <div class="product-wrapper">
+          <div class="mp-card-img">
+            ${
+              p.image
+                ? `<img src="${p.image}" alt="${p.title}">`
+                : `<div class="no-image"></div>`
+            }
+          </div>
+          <h3>${p.title}</h3>
+          ${
+            p.is_registered
+              ? ""
+              : `<p class="gray-text">Purchased on: ${formatDate(p.purchase_date)}</p>`
+          }
+        </div>
+        <div class="mp-card-body">
+          ${registeredInfo}
+          <div class="mp-card-actions">
+            ${actionButton}
+          </div>
+        </div>
       </div>
-    </div>
-    </div>
-  `,
-      )
+    </div>`;
+      })
       .join("");
+
+    initMpSlider();
   } catch (err) {
     hideProductsLoader();
     console.error("Warranty error:", err);
@@ -259,7 +255,7 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
 
   document.addEventListener("click", (e) => {
     const btn = e.target.closest(
-      "#mp-external-register-btn , #mp-web-register-btn, #mp-detail-web-register-btn"
+      "#mp-external-register-btn, .mp-web-register-btn, #mp-detail-web-register-btn"
     );
     if (!btn) return;
 
@@ -286,32 +282,32 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
       };
 
 
-      
-    sessionStorage.setItem(
-      "warranty_registration_context",
-      JSON.stringify(sessionPayload)
-    );
+
+      sessionStorage.setItem(
+        "warranty_registration_context",
+        JSON.stringify(sessionPayload)
+      );
 
       console.log("External Link : ", externalBTN, external_register_link);
 
 
-    window.location.href = web_register_link;
+      window.location.href = web_register_link;
 
     } else if (source === "external") {
-            console.log("source : ", source);
+      console.log("source : ", source);
       sessionPayload = { flow: "external" };
 
 
-      
-    sessionStorage.setItem(
-      "warranty_registration_context",
-      JSON.stringify(sessionPayload)
-    );
+
+      sessionStorage.setItem(
+        "warranty_registration_context",
+        JSON.stringify(sessionPayload)
+      );
 
       console.log("External Link : ", externalBTN, external_register_link);
 
 
-    window.location.href = external_register_link;
+      window.location.href = external_register_link;
 
     } else {
       console.error("Unknown registration source");
@@ -333,16 +329,16 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
      UPDATED PRODUCT DETAIL VIEW
      (Now uses POST API)
   =============================== */
-    document.addEventListener("click", async (e) => {
+  document.addEventListener("click", async (e) => {
     const card = e.target.closest(".mp-card");
     if (!card) return;
 
     /* ===== UPDATED: Prevent register click from opening detail ===== */
     if (e.target.closest(".mp-register-btn")) return;
-    if (e.target.closest(".mp-extend-warranty-btn")) return;
+    if (e.target.closest(".mp-extend-warranty-btn, .mp-web-register-btn")) return;
 
     const registrationId = card.dataset.registrationId || null;
-    const lineItemId = card.dataset.lineItemId ;
+    const lineItemId = card.dataset.lineItemId;
     const productId = card.dataset.productId;
     const orderId = card.dataset.orderId || null;
     const flow = card.dataset.source || "shopify";
@@ -366,12 +362,12 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
       console.log("product detail json: ", data.success, data.product);
 
       if (!data.success) {
-              console.log("product detail json 222: ", data.success);
+        console.log("product detail json 222: ", data.success);
 
         console.error("Product detail error:", data.error);
         return;
       }
-      
+
       console.log("product detail json 333: ", data.success);
 
       renderProductDetail(data);
@@ -526,18 +522,4 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
       ?.classList.add("hidden");
     rootWarpper.classList.remove("breadcrumb-mobile");
   }
-
-  var swiper = new Swiper(".mp-slider", {
-    slidesPerView: 1,
-    spaceBetween: 12,
-    breakpoints: {
-      576: { slidesPerView: 2, spaceBetween: 12 },
-      768: { slidesPerView: 2.5, spaceBetween: 15 },
-      991: { slidesPerView: 3, spaceBetween: 15 },
-    },
-    navigation: {
-      nextEl: ".mp-nav.swiper-button-next",
-      prevEl: ".mp-nav.swiper-button-prev",
-    },
-  });
 })();

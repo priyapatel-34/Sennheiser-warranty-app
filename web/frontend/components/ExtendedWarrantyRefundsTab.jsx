@@ -749,7 +749,8 @@ export default function ExtendedWarrantyRefundsTab() {
 
               {/* Notifications & limits group */}
               <div style={s.stack(12)}>
-                <div style={s.sectionLabel}>Notifications &amp; limits</div>
+                
+                {/* <div style={s.sectionLabel}>Notifications &amp; limits</div>
                 <TextField
                   label="Finance notification emails"
                   helpText="Comma-separated. Notified when a new refund request is created."
@@ -762,7 +763,8 @@ export default function ExtendedWarrantyRefundsTab() {
                   }
                   autoComplete="off"
                   placeholder="finance@example.com, ops@example.com"
-                />
+                /> */}
+                <h3>Eligibility for Refund Process : </h3>
                 <div style={{ maxWidth: 200 }}>
                   <TextField
                     label="Eligibility window (days)"
@@ -782,7 +784,7 @@ export default function ExtendedWarrantyRefundsTab() {
               </div>
 
               {/* PRD note */}
-              <div
+              {/* <div
                 style={{
                   background: "#f9fafb",
                   border: "1px solid #e1e3e5",
@@ -794,7 +796,7 @@ export default function ExtendedWarrantyRefundsTab() {
                   Pro-rata formula is fixed per PRD Section 5.2 and cannot be
                   changed here.
                 </Text>
-              </div>
+              </div> */}
             </div>
           )}
         </Modal.Section>

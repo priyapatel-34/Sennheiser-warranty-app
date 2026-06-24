@@ -16,6 +16,45 @@ import {
   getCustomerFacingRefundStatus,
 } from "../services/extendedWarrantyRefund.service.js";
 
+function normalizeEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+async function resolveShopifyCustomer(client, loggedInCustomerId, fallback = {}) {
+  let customerId = fallback.id ? String(fallback.id) : null;
+  let customerEmail = fallback.email ? String(fallback.email).trim() : null;
+  let customerName = fallback.name ? String(fallback.name).trim() : null;
+
+  if (!loggedInCustomerId) {
+    return { customerId, customerEmail, customerName };
+  }
+
+  const customerResult = await client.request(
+    `
+    query ($id: ID!) {
+      customer(id: $id) {
+        email
+        displayName
+      }
+    }
+    `,
+    {
+      variables: { id: `gid://shopify/Customer/${loggedInCustomerId}` },
+    }
+  );
+
+  const shopifyCustomer = customerResult?.data?.customer;
+  if (shopifyCustomer?.email) {
+    customerEmail = shopifyCustomer.email.trim();
+    customerId = String(loggedInCustomerId);
+    if (!customerName && shopifyCustomer.displayName) {
+      customerName = shopifyCustomer.displayName;
+    }
+  }
+
+  return { customerId, customerEmail, customerName };
+}
+
 function getStandardWarrantyStatus(warrantyEnd) {
   if (!warrantyEnd) return "pending_registration";
   const today = new Date();
@@ -574,6 +613,9 @@ export async function getMyProducts(req, res) {
       return res.status(404).json({ error: "Customer email not found" });
     }
 
+    const loggedInCustomerId = String(logged_in_customer_id);
+    const normalizedCustomerEmail = normalizeEmail(customerEmail);
+
     /* =====================================
        2️⃣ REGISTERED PRODUCTS (DB)
     ===================================== */
@@ -581,11 +623,14 @@ export async function getMyProducts(req, res) {
       `
       SELECT *
       FROM registered_products
-      WHERE customer_email = ?
-      AND shop_id = ?
+      WHERE shop_id = ?
+        AND (
+          LOWER(TRIM(customer_email)) = ?
+          OR customer_id = ?
+        )
       ORDER BY created_at DESC
       `,
-      [customerEmail, shopId],
+      [shopId, normalizedCustomerEmail, loggedInCustomerId],
     );
 
     const registeredMap = new Map();
@@ -712,8 +757,11 @@ export async function getMyProducts(req, res) {
     /* =====================================
        4️⃣ EXTERNAL PRODUCTS (DB)
     ===================================== */
+    const addedRegisterIds = new Set(
+      products.map((p) => p.register_id).filter(Boolean)
+    );
     const externalProducts = registeredRows.filter(
-      (p) => p.purchase_type === "external",
+      (p) => p.purchase_type === "external" && !addedRegisterIds.has(p.id),
     );
 
     for (const ep of externalProducts) {
@@ -725,6 +773,7 @@ export async function getMyProducts(req, res) {
             `
             query ($id: ID!) {
               product(id: $id) {
+                title
                 featuredImage {
                   url
                 }
@@ -746,13 +795,14 @@ export async function getMyProducts(req, res) {
         source: "external",
         order_id: null,
         product_id: ep.shopify_product_id,
-        line_item_id: null, // ✅ UPDATED
+        line_item_id: null,
         title: ep.product_name,
         image,
         order_number: null,
-        register_id: ep?.id || null,
+        register_id: ep.id,
         purchase_date: ep.purchase_date,
         serial_number: ep.serial_number,
+        sku: ep.sku || null,
         warranty_start: ep.warranty_start,
         warranty_end: ep.warranty_end,
         is_registered: true,
@@ -2546,20 +2596,21 @@ export async function registerProducts(req, res) {
     const shopId = shopRow.id;
 
     /* ===============================
-       CUSTOMER DATA
-    =============================== */
-    const customerId = customer.id || null;
-    const customerEmail = customer.email;
-    const customerName = customer.name || null;
-
-    if (!/^\S+@\S+\.\S+$/.test(customerEmail)) {
-      return res.status(400).json({ error: "Invalid customer email" });
-    }
-
-    /* ===============================
-       SHOPIFY GRAPHQL CLIENT
+       CUSTOMER DATA (prefer logged-in Shopify customer)
     =============================== */
     const client = new shopify.api.clients.Graphql({ session });
+    const resolvedCustomer = await resolveShopifyCustomer(
+      client,
+      req.query.logged_in_customer_id,
+      customer
+    );
+    const customerId = resolvedCustomer.customerId;
+    const customerEmail = resolvedCustomer.customerEmail;
+    const customerName = resolvedCustomer.customerName;
+
+    if (!customerEmail || !/^\S+@\S+\.\S+$/.test(customerEmail)) {
+      return res.status(400).json({ error: "Invalid customer email" });
+    }
 
     /* ===============================
        FETCH SHOP ADMIN EMAIL (Dynamic)
@@ -2644,30 +2695,59 @@ export async function registerProducts(req, res) {
           /* ===============================
              EXTERNAL FLOW
           =============================== */
-          const response = await client.request(
-            `
-            query($query: String!) {
-              products(first: 1, query: $query) {
-                edges {
-                  node {
-                    id
-                    title
+          if (p.product_id) {
+            const gid = p.product_id.startsWith("gid://")
+              ? p.product_id
+              : `gid://shopify/Product/${p.product_id}`;
+
+            const response = await client.request(
+              `
+              query($id: ID!) {
+                product(id: $id) {
+                  id
+                  title
+                }
+              }
+              `,
+              { variables: { id: gid } },
+            );
+
+            if (!response.data?.product) {
+              throw new Error(
+                `Product not found: ${p.product_name || p.product_id}`,
+              );
+            }
+
+            productId = response.data.product.id;
+            productName = response.data.product.title;
+          } else if (p.product_name) {
+            const response = await client.request(
+              `
+              query($query: String!) {
+                products(first: 1, query: $query) {
+                  edges {
+                    node {
+                      id
+                      title
+                    }
                   }
                 }
               }
+              `,
+              { variables: { query: `title:"${p.product_name}"` } },
+            );
+
+            const found = response.data.products.edges[0];
+
+            if (!found) {
+              throw new Error(`Product not found: ${p.product_name}`);
             }
-            `,
-            { variables: { query: `title:"${p.product_name}"` } },
-          );
 
-          const found = response.data.products.edges[0];
-
-          if (!found) {
-            throw new Error(`Product not found: ${p.product_name}`);
+            productId = found.node.id;
+            productName = found.node.title;
+          } else {
+            throw new Error("Product name or product ID is required");
           }
-
-          productId = found.node.id;
-          productName = found.node.title;
         }
 
         const numericPId = productId.split("/").pop();
@@ -2740,7 +2820,7 @@ export async function registerProducts(req, res) {
           [
             shopId,
             customerId,
-            customerEmail,
+            normalizeEmail(customerEmail),
             customerName,
             flow,
             p.shopify_order_id || null,

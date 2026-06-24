@@ -818,7 +818,7 @@ export default function ExtendedWarrantyAdmin() {
           ) : (
             <>
               {/* General */}
-              <LegacyCard sectioned>
+              {/* <LegacyCard sectioned>
                 <div style={styles.stack(16)}>
                   <Text as="h2" variant="headingMd">
                     General
@@ -840,7 +840,7 @@ export default function ExtendedWarrantyAdmin() {
                     }
                   />
                 </div>
-              </LegacyCard>
+              </LegacyCard> */}
 
               {/* Content & legal */}
               <LegacyCard sectioned>
