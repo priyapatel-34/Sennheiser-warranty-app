@@ -49,23 +49,23 @@ function getWarrantyStatus(warrantyEnd) {
 }
 
 function hasPurchasedExtendedWarranty(product) {
-  const ew = product?.extended_warranty;
-  return (
-    ew?.status === "active" ||
-    (ew?.displayStatus && ew.displayStatus !== "Not Purchased" && ew.displayStatus !== "Pending Payment")
-  );
+  const status = product?.extended_warranty?.status;
+  return status === "active" || status === "expired" || status === "refunded";
 }
 
 function canShowExtendWarrantyButton(product) {
-  return Boolean(product?.can_extend_warranty) && !hasPurchasedExtendedWarranty(product);
+  return (
+    product?.is_registered &&
+    !hasPurchasedExtendedWarranty(product) &&
+    Boolean(product?.can_extend_warranty)
+  );
 }
 
-function isPendingExtendedWarranty(product) {
-  const ew = product?.extended_warranty;
-  return (
-    ew?.status === "pending_payment" ||
-    ew?.displayStatus === "Pending Payment"
-  );
+function getProductCardAction(product) {
+  if (!product.is_registered) return "register";
+  if (hasPurchasedExtendedWarranty(product)) return "view_details";
+  if (canShowExtendWarrantyButton(product)) return "extend_warranty";
+  return "view_details";
 }
 
 function savePostRegistrationForResume(registerId, myProductsLink) {
@@ -208,8 +208,7 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
                   p.warranty_end,
                 )}</span>
                 ${
-                  p.extended_warranty?.displayStatus &&
-                  p.extended_warranty.displayStatus !== "Not Purchased"
+                  hasPurchasedExtendedWarranty(p)
                     ? `<span class="gray-text">Extended: ${p.extended_warranty.displayStatus}${
                         p.extended_warranty.extendedWarrantyEndDate
                           ? ` · until ${formatDate(p.extended_warranty.extendedWarrantyEndDate)}`
@@ -222,14 +221,14 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
               </div>
 
                 ${(() => {
-                  if (isPendingExtendedWarranty(p)) {
-                    return `<button type="button" class="btn mp-complete-ew-btn" data-register-id="${p.register_id}" data-source="${p.source || "shopify"}">Complete extended warranty payment</button>
-                       <button class="btn bordered-btn" data-product-id="${p.product_id}">View Details</button>`;
-                  }
-                  if (canShowExtendWarrantyButton(p)) {
+                  const action = getProductCardAction(p);
+                  if (action === "extend_warranty") {
                     return `<button type="button" class="btn mp-extend-warranty-btn" data-register-id="${p.register_id}" data-source="${p.source || "shopify"}">Extend Warranty</button>`;
                   }
-                  return `<button class="btn bordered-btn" data-product-id="${p.product_id}">View Details</button>`;
+                  if (action === "view_details") {
+                    return `<button class="btn bordered-btn" data-product-id="${p.product_id}">View Details</button>`;
+                  }
+                  return "";
                 })()}
             `
             : `
@@ -340,7 +339,7 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
 
     /* ===== UPDATED: Prevent register click from opening detail ===== */
     if (e.target.closest(".mp-register-btn")) return;
-    if (e.target.closest(".mp-complete-ew-btn, .mp-extend-warranty-btn")) return;
+    if (e.target.closest(".mp-extend-warranty-btn")) return;
 
     const registrationId = card.dataset.registrationId || null;
     const lineItemId = card.dataset.lineItemId ;
@@ -384,15 +383,6 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
 
 
   document.addEventListener("click", e => {
-    const completeBtn = e.target.closest(".mp-complete-ew-btn");
-    if (completeBtn) {
-      resumeExtendedWarrantyPayment(
-        completeBtn.dataset.registerId,
-        completeBtn.dataset.source
-      );
-      return;
-    }
-
     const extendBtn = e.target.closest(".mp-extend-warranty-btn");
     if (extendBtn) {
       resumeExtendedWarrantyPayment(
@@ -446,10 +436,9 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
 
       const ewSection = document.getElementById("mp-detail-extended-warranty");
       const ew = product.extended_warranty;
-      const completeBtn = document.getElementById("mp-detail-complete-ew-btn");
       const extendBtn = document.getElementById("mp-detail-extend-warranty-btn");
 
-      if (ewSection && ew && ew.displayStatus && ew.displayStatus !== "Not Purchased") {
+      if (ewSection && ew && hasPurchasedExtendedWarranty(product)) {
         ewSection.classList.remove("hidden");
         document.getElementById("mp-detail-extended-status").innerText =
           `Status: ${ew.displayStatus}`;
@@ -467,20 +456,6 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
           .join(" · ");
       } else if (ewSection) {
         ewSection.classList.add("hidden");
-      }
-
-      if (completeBtn) {
-        if (isPendingExtendedWarranty(product)) {
-          completeBtn.classList.remove("hidden");
-          completeBtn.onclick = () =>
-            resumeExtendedWarrantyPayment(
-              product.register_id,
-              product.source || "shopify"
-            );
-        } else {
-          completeBtn.classList.add("hidden");
-          completeBtn.onclick = null;
-        }
       }
 
       if (extendBtn) {

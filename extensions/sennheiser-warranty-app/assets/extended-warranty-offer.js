@@ -98,6 +98,27 @@
     throw new Error("No checkout URL returned");
   }
 
+function sortPlansByDuration(plans) {
+  return [...plans].sort(
+    (a, b) =>
+      (a.durationMonths || (a.durationYears || 0) * 12) -
+      (b.durationMonths || (b.durationYears || 0) * 12)
+  );
+}
+
+function isTwoYearPlan(plan) {
+  return (
+    plan.durationMonths === 24 ||
+    plan.durationYears === 2 ||
+    /\+?\s*2\s*(yr|year)/i.test(plan.planName || "")
+  );
+}
+
+function getDefaultPlanIndex(plans) {
+  const twoYearIdx = plans.findIndex(isTwoYearPlan);
+  return twoYearIdx >= 0 ? twoYearIdx : 0;
+}
+
   function renderOffer(offerData, options = {}) {
     const {
       myProductsLink = "/pages/my-products",
@@ -117,7 +138,7 @@
 
     const reg = offerData.registration;
     const settings = offerData.settings || {};
-    const plans = offerData.plans || [];
+    const plans = sortPlansByDuration(offerData.plans || []);
     const currency = offerData.currency || plans[0]?.currency;
     const productImageUrl = reg.productImageUrl || null;
 
@@ -130,9 +151,11 @@
       ? `<ul>${coverageLines.map(line => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
       : `<p>${escapeHtml("Extended protection after your standard warranty ends.")}</p>`;
 
+    const defaultPlanIndex = getDefaultPlanIndex(plans);
+
     const plansHtml = plans
       .map((plan, index) => {
-        const isDefaultSelected = index === 0;
+        const isDefaultSelected = index === defaultPlanIndex;
         const badgeLabel = plan.badgeLabel || null;
         const showBadge = Boolean(badgeLabel);
         return `

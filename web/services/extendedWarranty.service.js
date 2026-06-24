@@ -398,27 +398,40 @@ export async function fetchRegistrationProductImage(session, registered) {
 }
 
 async function attachMerchandisingBadges(shopId, plans) {
-  const [durations] = await pool.query(
-    `
+  try {
+    const [durations] = await pool.query(
+      `
     SELECT duration_months, merchandising_badge
     FROM extended_warranty_durations
     WHERE shop_id = ?
     `,
-    [shopId]
-  );
+      [shopId]
+    );
 
-  const badgeByMonths = new Map();
-  for (const duration of durations) {
-    const badgeKey = duration.merchandising_badge?.trim();
-    if (badgeKey && MERCHANDISING_BADGE_LABELS[badgeKey]) {
-      badgeByMonths.set(duration.duration_months, MERCHANDISING_BADGE_LABELS[badgeKey]);
+    const badgeByMonths = new Map();
+    for (const duration of durations) {
+      const badgeKey = duration.merchandising_badge?.trim();
+      if (badgeKey && MERCHANDISING_BADGE_LABELS[badgeKey]) {
+        badgeByMonths.set(duration.duration_months, MERCHANDISING_BADGE_LABELS[badgeKey]);
+      }
     }
-  }
 
-  return plans.map(plan => {
-    const badgeLabel = badgeByMonths.get(plan.durationMonths);
-    return badgeLabel ? { ...plan, badgeLabel } : plan;
-  });
+    return plans.map(plan => {
+      const badgeLabel = badgeByMonths.get(plan.durationMonths);
+      return badgeLabel ? { ...plan, badgeLabel } : plan;
+    });
+  } catch (err) {
+    console.warn("Failed to load merchandising badges:", err.message);
+    return plans;
+  }
+}
+
+function sortPlansByDuration(plans) {
+  return [...plans].sort(
+    (a, b) =>
+      (a.durationMonths || (a.durationYears || 0) * 12) -
+      (b.durationMonths || (b.durationYears || 0) * 12)
+  );
 }
 
 export async function loadRegisteredProduct(shopId, registerId) {
@@ -962,7 +975,9 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
     };
   });
 
-  const enrichedPlans = await attachMerchandisingBadges(shopId, basePlans);
+  const enrichedPlans = sortPlansByDuration(
+    await attachMerchandisingBadges(shopId, basePlans)
+  );
   const productImageUrl = session
     ? await fetchRegistrationProductImage(session, registered)
     : null;

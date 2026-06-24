@@ -106,12 +106,23 @@ async function enrichProductWarrantyFields(
     product.register_id &&
     !hasActiveExtendedWarranty
   ) {
-    const eligibility = await canPurchaseExtendedWarranty(
-      shopId,
-      product.register_id
-    );
-    product.can_extend_warranty = Boolean(eligibility.eligible);
-    product.extended_warranty_eligibility = eligibility;
+    try {
+      const eligibility = await canPurchaseExtendedWarranty(
+        shopId,
+        product.register_id
+      );
+      product.can_extend_warranty = Boolean(eligibility.eligible);
+      product.extended_warranty_eligibility = eligibility;
+    } catch (eligibilityErr) {
+      console.warn(
+        `⚠️ EW eligibility check failed for register ${product.register_id}:`,
+        eligibilityErr.message
+      );
+    }
+  }
+
+  if (entitlementRow?.status === "pending_payment" && !hasActiveExtendedWarranty) {
+    product.can_extend_warranty = true;
   }
 
   return product;
@@ -193,7 +204,7 @@ export async function getMyProductsOld(req, res) {
 
     const orderProducts = [];
 
-    for (const orderEdge of ordersResult.data.orders.edges) {
+    for (const orderEdge of ordersResult.data?.orders?.edges || []) {
       const order = orderEdge.node;
 
       for (const itemEdge of order.lineItems.edges) {
@@ -388,7 +399,7 @@ export async function getMyProductsWorkingOld1702(req, res) {
 
     const products = [];
 
-    for (const orderEdge of ordersResult.data.orders.edges) {
+    for (const orderEdge of ordersResult.data?.orders?.edges || []) {
       const order = orderEdge.node;
 
       for (const itemEdge of order.lineItems.edges) {
@@ -637,7 +648,7 @@ export async function getMyProducts(req, res) {
 
     const products = [];
 
-    for (const orderEdge of ordersResult.data.orders.edges) {
+    for (const orderEdge of ordersResult.data?.orders?.edges || []) {
       const order = orderEdge.node;
 
       for (const itemEdge of order.lineItems.edges) {
@@ -755,15 +766,22 @@ export async function getMyProducts(req, res) {
       if (!product.register_id) continue;
       const entitlement = entitlementMap.get(product.register_id);
       if (entitlement?.status === "pending_payment") {
-        const synced = await resolveEntitlementWithSync({
-          session,
-          shopId,
-          registerId: product.register_id,
-          customerEmail,
-          entitlement,
-        });
-        if (synced) {
-          entitlementMap.set(product.register_id, synced);
+        try {
+          const synced = await resolveEntitlementWithSync({
+            session,
+            shopId,
+            registerId: product.register_id,
+            customerEmail,
+            entitlement,
+          });
+          if (synced) {
+            entitlementMap.set(product.register_id, synced);
+          }
+        } catch (syncErr) {
+          console.warn(
+            `⚠️ Pending EW sync skipped for register ${product.register_id}:`,
+            syncErr.message
+          );
         }
       }
     }
@@ -771,19 +789,31 @@ export async function getMyProducts(req, res) {
     const entitlementIds = [...entitlementMap.values()]
       .map(e => e.id)
       .filter(Boolean);
-    const refundMap = await getLatestRefundForEntitlements(shopId, entitlementIds);
+    let refundMap = new Map();
+    try {
+      refundMap = await getLatestRefundForEntitlements(shopId, entitlementIds);
+    } catch (refundErr) {
+      console.warn("⚠️ Refund lookup skipped:", refundErr.message);
+    }
 
     for (const product of products) {
       const entitlement = product.register_id
         ? entitlementMap.get(product.register_id)
         : null;
       const refundRecord = entitlement ? refundMap.get(entitlement.id) : null;
-      await enrichProductWarrantyFields(
-        product,
-        shopId,
-        entitlement,
-        refundRecord
-      );
+      try {
+        await enrichProductWarrantyFields(
+          product,
+          shopId,
+          entitlement,
+          refundRecord
+        );
+      } catch (enrichErr) {
+        console.warn(
+          `⚠️ Warranty enrichment failed for product ${product.product_id}:`,
+          enrichErr.message
+        );
+      }
     }
 
     /* =====================================
@@ -1218,7 +1248,7 @@ export async function getUnregisteredProductDetail(req, res) {
     let purchaseDate = null;
     // console.log("in getUnregisteredProductDetail 222 222");
 
-    for (const orderEdge of ordersResult.data.orders.edges) {
+    for (const orderEdge of ordersResult.data?.orders?.edges || []) {
       //  console.log("in getUnregisteredProductDetail 333", orderEdge);
 
       for (const itemEdge of orderEdge.node.lineItems.edges) {
