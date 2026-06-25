@@ -3,6 +3,11 @@ import { pool } from "../db/mysql.js";
 import { sendEmailService } from "./email.service.js";
 import ExtendedWarrantyPurchaseTemplate from "../emailTemp/extended_warranty_purchase.js";
 import ExtendedWarrantyActivationTemplate from "../emailTemp/extended_warranty_activation.js";
+import {
+  DEFAULT_WARRANTY_PRICING_TYPE,
+  normalizeWarrantyPricingType,
+  resolvePlanPrice,
+} from "./extendedWarrantyPricing.js";
 
 export function getNumericIdFromGid(gid) {
   if (!gid) return null;
@@ -326,7 +331,8 @@ export async function getExtendedWarrantySettings(shopId) {
       terms_url,
       coverage_text,
       region_code,
-      extended_warranty_purchase_days
+      extended_warranty_purchase_days,
+      warranty_pricing_type
     FROM extended_warranty_settings
     WHERE shop_id = ?
     `,
@@ -341,8 +347,125 @@ export async function getExtendedWarrantySettings(shopId) {
       coverage_text: null,
       region_code: null,
       extended_warranty_purchase_days: null,
+      warranty_pricing_type: DEFAULT_WARRANTY_PRICING_TYPE,
     }
   );
+}
+
+export async function fetchVariantPrice(session, variantId, productId = null) {
+  if (!session?.shop || !variantId) return null;
+
+  try {
+    const admin = new shopify.api.clients.Graphql({ session });
+    const variantGid = String(variantId).startsWith("gid://")
+      ? variantId
+      : `gid://shopify/ProductVariant/${variantId}`;
+
+    const response = await admin.request(
+      `
+      query VariantPrice($id: ID!) {
+        productVariant(id: $id) {
+          price
+        }
+      }
+      `,
+      { variables: { id: variantGid } }
+    );
+
+    const price = response.data?.productVariant?.price;
+    if (price != null) return Number(price);
+
+    if (productId) {
+      const productGid = String(productId).startsWith("gid://")
+        ? productId
+        : `gid://shopify/Product/${productId}`;
+      const productResponse = await admin.request(
+        `
+        query ProductVariantPrice($id: ID!, $variantId: ID!) {
+          product(id: $id) {
+            variants(first: 100) {
+              edges {
+                node {
+                  id
+                  price
+                }
+              }
+            }
+          }
+        }
+        `,
+        {
+          variables: {
+            id: productGid,
+            variantId: variantGid,
+          },
+        }
+      );
+      const suffix = `/${variantId}`;
+      const variantEdge = (productResponse.data?.product?.variants?.edges || []).find(
+        edge => edge.node.id.endsWith(suffix)
+      );
+      if (variantEdge?.node?.price != null) {
+        return Number(variantEdge.node.price);
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to fetch variant price:", err.message);
+  }
+
+  return null;
+}
+
+export async function resolvePlanRowForCheckout({
+  planRow,
+  pricingType,
+  productVariantPrice,
+}) {
+  const resolved = resolvePlanPrice({
+    configuredPrice: planRow.price,
+    pricingType,
+    productVariantPrice,
+  });
+
+  return {
+    ...planRow,
+    price: resolved.resolvedPrice,
+    configured_price: planRow.price,
+    pricing_type: resolved.pricingType,
+    percentage: resolved.percentage,
+    calculated_price: resolved.calculatedPrice,
+  };
+}
+
+export function mapPlanForApi(planRow, pricingType, productVariantPrice = null) {
+  const type = normalizeWarrantyPricingType(pricingType);
+  const base = {
+    pricingType: type,
+    price: String(planRow.price),
+    currency: planRow.currency,
+  };
+
+  if (type === "percentage") {
+    base.percentage = Number(planRow.price);
+    if (productVariantPrice != null) {
+      try {
+        const resolved = resolvePlanPrice({
+          configuredPrice: planRow.price,
+          pricingType: type,
+          productVariantPrice,
+        });
+        base.calculatedPrice = resolved.calculatedPrice;
+        base.displayPrice = String(resolved.calculatedPrice);
+      } catch {
+        return null;
+      }
+    }
+    return base;
+  }
+
+  base.calculatedPrice = Number(planRow.price);
+  base.displayPrice = String(planRow.price);
+  return base;
 }
 
 export async function fetchRegistrationProductImage(session, registered) {
@@ -579,6 +702,7 @@ function formatEntitlementForApi(row, registeredProduct = null) {
     durationYears: row.duration_years,
     price: String(row.price),
     currency: row.currency,
+    pricingType: normalizeWarrantyPricingType(row.pricing_type),
     purchaseDate: formatDateOnly(row.purchase_date),
     activationDate: formatDateOnly(row.activation_date),
     expiryDate: formatDateOnly(row.expiry_date),
@@ -599,6 +723,7 @@ export async function createPendingEntitlement({
   planId,
   planRow,
   draftOrderId = null,
+  pricingType = DEFAULT_WARRANTY_PRICING_TYPE,
 }) {
   const [result] = await pool.query(
     `
@@ -612,8 +737,9 @@ export async function createPendingEntitlement({
       duration_years,
       duration_months,
       price,
-      currency
-    ) VALUES (?, ?, ?, ?, 'pending_payment', ?, ?, ?, ?, ?)
+      currency,
+      pricing_type
+    ) VALUES (?, ?, ?, ?, 'pending_payment', ?, ?, ?, ?, ?, ?)
     `,
     [
       shopId,
@@ -625,6 +751,7 @@ export async function createPendingEntitlement({
       planRow.duration_months,
       planRow.price,
       planRow.currency,
+      normalizeWarrantyPricingType(pricingType),
     ]
   );
   return result.insertId;
@@ -706,7 +833,9 @@ export async function activateEntitlementFromPayment({
   customerEmail,
   customerName,
   shopDisplayName,
+  session = null,
 }) {
+  const settings = await getExtendedWarrantySettings(shopId);
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -812,6 +941,28 @@ export async function activateEntitlementFromPayment({
     );
 
     if (!entitlement) {
+      const variantPrice = session
+        ? await fetchVariantPrice(
+            session,
+            registered.shopify_variant_id,
+            registered.shopify_product_id
+          )
+        : null;
+
+      let resolvedPrice = Number(plan.price);
+      let resolvedPricingType = normalizeWarrantyPricingType(
+        settings.warranty_pricing_type
+      );
+
+      if (resolvedPricingType === "percentage" && variantPrice != null) {
+        const resolved = resolvePlanPrice({
+          configuredPrice: plan.price,
+          pricingType: resolvedPricingType,
+          productVariantPrice: variantPrice,
+        });
+        resolvedPrice = resolved.resolvedPrice;
+      }
+
       await conn.query(
         `
         INSERT INTO extended_warranty_entitlements (
@@ -825,10 +976,11 @@ export async function activateEntitlementFromPayment({
           duration_months,
           price,
           currency,
+          pricing_type,
           purchase_date,
           activation_date,
           expiry_date
-        ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, CURDATE(), ?, ?)
+        ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?)
         `,
         [
           shopId,
@@ -838,8 +990,9 @@ export async function activateEntitlementFromPayment({
           plan.plan_name,
           plan.duration_years,
           plan.duration_months,
-          plan.price,
+          resolvedPrice,
           plan.currency,
+          resolvedPricingType,
           activationDate,
           expiryDate,
         ]
@@ -848,8 +1001,19 @@ export async function activateEntitlementFromPayment({
 
     await conn.commit();
 
-    const settings = await getExtendedWarrantySettings(shopId);
     const storeName = shopDisplayName || "Sonova Team";
+
+    const [[activeEntitlement]] = await pool.query(
+      `
+      SELECT * FROM extended_warranty_entitlements
+      WHERE shop_id = ? AND registered_product_id = ? AND status = 'active'
+      ORDER BY updated_at DESC LIMIT 1
+      `,
+      [shopId, registerId]
+    );
+
+    const purchasePrice = activeEntitlement?.price ?? plan.price;
+    const purchaseCurrency = activeEntitlement?.currency ?? plan.currency;
 
     const purchaseHtml = ExtendedWarrantyPurchaseTemplate({
       customerName: customerName || registered.customer_name || "Customer",
@@ -857,8 +1021,8 @@ export async function activateEntitlementFromPayment({
       orderNumber: shopifyOrderName || shopifyOrderId,
       planName: plan.plan_name,
       durationMonths: plan.duration_months,
-      price: String(plan.price),
-      currency: plan.currency,
+      price: String(purchasePrice),
+      currency: purchaseCurrency,
       storeName,
     });
 
@@ -954,26 +1118,47 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
     return { eligible: false, reason: "no_plans_configured" };
   }
 
+  const pricingType = normalizeWarrantyPricingType(settings.warranty_pricing_type);
+  const productVariantPrice =
+    pricingType === "percentage" && session
+      ? await fetchVariantPrice(
+          session,
+          registered.shopify_variant_id,
+          registered.shopify_product_id
+        )
+      : null;
+
   const shopCurrency = plans[0]?.currency || null;
 
-  const basePlans = plans.map(p => {
+  const basePlans = [];
+  for (const p of plans) {
+    const pricing = mapPlanForApi(p, pricingType, productVariantPrice);
+    if (!pricing) continue;
+
     const projected = computeExtendedWarrantyDates(registered, {
       duration_months: p.duration_months,
     });
-    return {
+    basePlans.push({
       planId: p.plan_id,
       planName: p.plan_name,
       durationYears: p.duration_years,
       durationMonths: p.duration_months,
-      price: String(p.price),
+      pricingType: pricing.pricingType,
+      price: pricing.displayPrice || String(pricing.calculatedPrice),
+      percentage: pricing.percentage ?? null,
+      calculatedPrice: pricing.calculatedPrice,
       currency: p.currency,
       coverageText: p.coverage_text || settings.coverage_text,
       startDate: formatDateOnly(projected.startDate),
       endDate: formatDateOnly(projected.endDate),
       extendedWarrantyStartDate: formatDateOnly(projected.startDate),
       extendedWarrantyEndDate: formatDateOnly(projected.endDate),
-    };
-  });
+    });
+  }
+
+  if (!basePlans.length) {
+    return { eligible: false, reason: "no_plans_configured" };
+  }
 
   const enrichedPlans = sortPlansByDuration(
     await attachMerchandisingBadges(shopId, basePlans)
@@ -985,11 +1170,13 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
   return {
     eligible: true,
     currency: shopCurrency,
+    pricingType,
     plans: enrichedPlans,
     purchaseWindow,
     settings: {
       termsUrl: settings.terms_url,
       coverageText: settings.coverage_text,
+      warrantyPricingType: pricingType,
     },
     registration: {
       registerId: registered.id,
@@ -1092,6 +1279,7 @@ export async function trySyncPendingEntitlementActivation({
       customerEmail: order.email || customerEmail,
       customerName: order.customer?.displayName || null,
       shopDisplayName: response.data?.shop?.name,
+      session,
     });
 
     return getActiveEntitlement(shopId, registerId);

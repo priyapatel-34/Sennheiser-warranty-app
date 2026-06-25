@@ -18,9 +18,15 @@ import { useEffect, useState } from "react";
 import { useToast } from "../hooks/useToast.js";
 import LoadingPanel from "../components/LoadingPanel.jsx";
 import ExtendedWarrantyRefundsTab from "../components/ExtendedWarrantyRefundsTab.jsx";
+import { formatMoney } from "../utils/formatMoney.js";
 
 const API_BASE = "/app/extended-warranty";
 const PAGE_SIZE = 25;
+
+const WARRANTY_PRICING_TYPE_OPTIONS = [
+  { label: "Amount", value: "amount" },
+  { label: "Percentage", value: "percentage" },
+];
 
 const PRICE_BADGE_OPTIONS = [
   { label: "None", value: "" },
@@ -104,8 +110,10 @@ export default function ExtendedWarrantyAdmin() {
     termsUrl: "",
     coverageText: "",
     extendedWarrantyPurchaseDays: "",
+    warrantyPricingType: "amount",
     expiryReminderConfigs: [],
   });
+  const [warrantyPricingType, setWarrantyPricingType] = useState("amount");
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -163,6 +171,9 @@ export default function ExtendedWarrantyAdmin() {
 
       setProducts(Array.isArray(data.products) ? data.products : []);
       if (data.currency) setCurrency(data.currency);
+      if (data.warrantyPricingType) {
+        setWarrantyPricingType(data.warrantyPricingType);
+      }
 
       const meta = data.pagination || {};
       setPaginationMeta({
@@ -206,11 +217,13 @@ export default function ExtendedWarrantyAdmin() {
           s.extendedWarrantyPurchaseDays == null
             ? ""
             : String(s.extendedWarrantyPurchaseDays),
+        warrantyPricingType: s.warrantyPricingType || "amount",
         expiryReminderConfigs: (s.expiryReminderConfigs || []).map((entry) => ({
           countryCode: entry.countryCode || null,
           reminderDays: (entry.reminderDays || []).map(String),
         })),
       });
+      setWarrantyPricingType(s.warrantyPricingType || "amount");
     } catch {
       toast.showError("Unable to load settings");
     } finally {
@@ -225,6 +238,13 @@ export default function ExtendedWarrantyAdmin() {
   useEffect(() => {
     if (tab === 1) {
       loadProducts({ targetPage: page, search: productSearchQuery });
+      fetch(`${API_BASE}/settings`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          const pricingType = data?.settings?.warrantyPricingType;
+          if (pricingType) setWarrantyPricingType(pricingType);
+        })
+        .catch(() => {});
     }
     if (tab === 3) loadSettings();
   }, [tab, page, productSearchQuery]);
@@ -374,7 +394,42 @@ export default function ExtendedWarrantyAdmin() {
     }
   };
 
+  const isPercentagePricing = warrantyPricingType === "percentage";
+  const priceFieldPlaceholder = isPercentagePricing
+    ? "Enter Percentage"
+    : "Enter Amount";
+  const priceFieldHelp = isPercentagePricing
+    ? "Percentage of product variant price (e.g. 10 for 10%)"
+    : currency
+      ? `Amount in ${currency}`
+      : undefined;
+
+  const validatePriceInput = (value) => {
+    if (value === "" || value == null) return true;
+    const num = Number(value);
+    if (!Number.isFinite(num)) return false;
+    if (isPercentagePricing) {
+      return num > 0 && num <= 100;
+    }
+    return num >= 0;
+  };
+
   const savePricing = async () => {
+    const allValues = configureMode === "bulk"
+      ? Object.values(bulkDurationPricing)
+      : Object.values(variantPricing).flatMap((variantMap) =>
+          Object.values(variantMap || {})
+        );
+
+    if (allValues.some((value) => value !== "" && value != null && !validatePriceInput(value))) {
+      toast.showError(
+        isPercentagePricing
+          ? "Each percentage must be greater than 0 and at most 100"
+          : "Each amount must be greater than or equal to 0"
+      );
+      return;
+    }
+
     setSaving(true);
     try {
       const payload =
@@ -449,12 +504,14 @@ export default function ExtendedWarrantyAdmin() {
             settings.extendedWarrantyPurchaseDays === ""
               ? null
               : Number(settings.extendedWarrantyPurchaseDays),
+          warrantyPricingType: settings.warrantyPricingType,
           expiryReminderConfigs,
         }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || "Failed to save settings");
       toast.showSuccess("Settings saved");
+      setWarrantyPricingType(settings.warrantyPricingType || "amount");
       loadSettings();
     } catch (err) {
       toast.showError(err.message || "Failed to save settings");
@@ -842,6 +899,26 @@ export default function ExtendedWarrantyAdmin() {
                 </div>
               </LegacyCard> */}
 
+              {/* Warranty pricing type */}
+              <LegacyCard sectioned>
+                <div style={styles.stack(16)}>
+                  <Text as="h2" variant="headingMd">
+                    Warranty pricing type
+                  </Text>
+                  <div style={{ maxWidth: 320 }}>
+                    <Select
+                      label="Warranty Pricing Type"
+                      options={WARRANTY_PRICING_TYPE_OPTIONS}
+                      value={settings.warrantyPricingType}
+                      onChange={(v) =>
+                        setSettings((p) => ({ ...p, warrantyPricingType: v }))
+                      }
+                      helpText="Amount uses fixed prices. Percentage calculates warranty price from the product variant price."
+                    />
+                  </div>
+                </div>
+              </LegacyCard>
+
               {/* Content & legal */}
               <LegacyCard sectioned>
                 <div style={styles.stack(16)}>
@@ -1041,8 +1118,9 @@ export default function ExtendedWarrantyAdmin() {
           {configureMode === "bulk" ? (
             <div style={styles.stack(16)}>
               <div style={styles.infoBanner}>
-                Prices apply to all variants of each selected product. Leave a
-                field empty to skip that duration.
+                {isPercentagePricing
+                  ? "Enter a percentage for each duration. It applies to all variants of each selected product. Leave a field empty to skip that duration."
+                  : "Prices apply to all variants of each selected product. Leave a field empty to skip that duration."}
               </div>
               <div style={styles.grid2}>
                 {durations.map((d) => (
@@ -1058,8 +1136,9 @@ export default function ExtendedWarrantyAdmin() {
                       }))
                     }
                     autoComplete="off"
-                    helpText={currency ? `Amount in ${currency}` : undefined}
-                    placeholder="0.00"
+                    helpText={priceFieldHelp}
+                    placeholder={priceFieldPlaceholder}
+                    suffix={isPercentagePricing ? "%" : undefined}
                   />
                 ))}
               </div>
@@ -1084,6 +1163,11 @@ export default function ExtendedWarrantyAdmin() {
                       {variant.sku && (
                         <Text as="p" tone="subdued" variant="bodySm">
                           SKU: {variant.sku}
+                          {variant.price != null && !isPercentagePricing
+                            ? ` · ${formatMoney(variant.price, currency)}`
+                            : variant.price != null && isPercentagePricing
+                              ? ` · Product price: ${formatMoney(variant.price, currency)}`
+                              : ""}
                         </Text>
                       )}
                     </div>
@@ -1106,8 +1190,9 @@ export default function ExtendedWarrantyAdmin() {
                             }))
                           }
                           autoComplete="off"
-                          helpText={currency ? `Amount in ${currency}` : undefined}
-                          placeholder="0.00"
+                          helpText={priceFieldHelp}
+                          placeholder={priceFieldPlaceholder}
+                          suffix={isPercentagePricing ? "%" : undefined}
                         />
                       ))}
                     </div>

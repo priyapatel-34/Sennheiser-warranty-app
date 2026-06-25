@@ -10,7 +10,10 @@ import {
   getExtendedWarrantySettings,
   getNumericIdFromGid,
   canPurchaseExtendedWarranty,
+  fetchVariantPrice,
+  resolvePlanRowForCheckout,
 } from "../services/extendedWarranty.service.js";
+import { normalizeWarrantyPricingType } from "../services/extendedWarrantyPricing.js";
 
 /** GET offer data after standard registration. */
 export async function getExtendedWarrantyOffer(req, res) {
@@ -110,12 +113,30 @@ export async function initiateExtendedWarrantyCheckout(req, res) {
       : null;
     const email = customer_email || registered.customer_email;
 
+    const pricingType = normalizeWarrantyPricingType(settings.warranty_pricing_type);
+    const variantPrice = await fetchVariantPrice(
+      session,
+      registered.shopify_variant_id,
+      registered.shopify_product_id
+    );
+
+    let resolvedPlanRow;
+    try {
+      resolvedPlanRow = await resolvePlanRowForCheckout({
+        planRow,
+        pricingType,
+        productVariantPrice: variantPrice,
+      });
+    } catch (resolveErr) {
+      return res.status(400).json({ error: resolveErr.message });
+    }
+
     const draftOrder = await createDraftOrderCheckout({
       session,
       customerEmail: email,
       customerGid,
       registeredProduct: registered,
-      planRow,
+      planRow: resolvedPlanRow,
       registerId,
       planId,
       settings,
@@ -131,8 +152,9 @@ export async function initiateExtendedWarrantyCheckout(req, res) {
       shopId,
       registeredProductId: registerId,
       planId,
-      planRow,
+      planRow: resolvedPlanRow,
       draftOrderId: draftOrderNumericId ? String(draftOrderNumericId) : draftOrder.id,
+      pricingType,
     });
 
     return res.json({

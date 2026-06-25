@@ -8,7 +8,14 @@ import {
   MERCHANDISING_BADGE_LABELS,
   buildExpiryReminderAdminConfigs,
   saveExpiryReminderConfigs,
+  getExtendedWarrantySettings,
 } from "../services/extendedWarranty.service.js";
+import {
+  DEFAULT_WARRANTY_PRICING_TYPE,
+  normalizeWarrantyPricingType,
+  validateConfiguredPlanPrice,
+  formatConfiguredPlanPrice,
+} from "../services/extendedWarrantyPricing.js";
 
 function getNumericIdFromGid(gid) {
   if (!gid) return null;
@@ -171,7 +178,8 @@ async function loadPlansForShop(shopId, { productId = null, variantId = null } =
 }
 
 /** Group plan rows by variant numeric ID. */
-function groupPlansByVariantId(planRows) {
+function groupPlansByVariantId(planRows, warrantyPricingType, currency) {
+  const pricingType = normalizeWarrantyPricingType(warrantyPricingType);
   const map = {};
   for (const row of planRows) {
     const key = row.shopify_variant_id;
@@ -181,7 +189,13 @@ function groupPlansByVariantId(planRows) {
       planName: row.plan_name,
       durationYears: row.duration_years,
       durationMonths: row.duration_months,
+      pricingType,
       price: String(row.price),
+      displayPrice: formatConfiguredPlanPrice({
+        configuredPrice: row.price,
+        pricingType,
+        currency: row.currency || currency,
+      }),
       currency: row.currency,
       status: row.status,
     });
@@ -329,6 +343,9 @@ export async function getWarrantyProducts(req, res) {
 
     const edges = response.data?.products?.edges || [];
     const currency = response.data?.shop?.currencyCode || "USD";
+    const ewSettings = await getExtendedWarrantySettings(shopId);
+    const warrantyPricingType =
+      ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
     const totalCount = response.data?.productsCount?.count ?? edges.length;
     const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
     const currentPage = jumpLast
@@ -361,7 +378,11 @@ export async function getWarrantyProducts(req, res) {
         `,
         [shopId, ...productNumericIds]
       );
-      plansByVariantId = groupPlansByVariantId(planRows);
+      plansByVariantId = groupPlansByVariantId(
+        planRows,
+        warrantyPricingType,
+        currency
+      );
     }
 
     const products = edges.map(edge => {
@@ -384,6 +405,7 @@ export async function getWarrantyProducts(req, res) {
     return res.json({
       success: true,
       currency,
+      warrantyPricingType,
       products,
       nextCursor: edges.length ? edges[edges.length - 1].cursor : null,
       hasNextPage: Boolean(response.data?.products?.pageInfo?.hasNextPage),
@@ -447,7 +469,14 @@ export async function getProductVariants(req, res) {
     const planRows = await loadPlansForShop(shopId, {
       productId: productNumericId,
     });
-    const plansByVariantId = groupPlansByVariantId(planRows);
+    const ewSettings = await getExtendedWarrantySettings(shopId);
+    const warrantyPricingType =
+      ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
+    const plansByVariantId = groupPlansByVariantId(
+      planRows,
+      warrantyPricingType,
+      response.data?.shop?.currencyCode || "USD"
+    );
     const currency = response.data?.shop?.currencyCode || "USD";
 
     const variants = (product.variants?.edges || []).map(v =>
@@ -460,6 +489,7 @@ export async function getProductVariants(req, res) {
       productTitle: product.title,
       status: product.status,
       currency,
+      warrantyPricingType,
       variants: variants.map(v => ({
         variantId: v.id,
         variantName: v.name,
@@ -511,15 +541,26 @@ export async function getWarrantyPlans(req, res) {
       variantId: variantNumericId,
     });
 
+    const ewSettings = await getExtendedWarrantySettings(shopId);
+    const warrantyPricingType =
+      ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
+
     return res.json({
       success: true,
       variantId,
+      warrantyPricingType,
       plans: planRows.map(row => ({
         planId: row.plan_id,
         planName: row.plan_name,
         durationYears: row.duration_years,
         durationMonths: row.duration_months,
+        pricingType: warrantyPricingType,
         price: String(row.price),
+        displayPrice: formatConfiguredPlanPrice({
+          configuredPrice: row.price,
+          pricingType: warrantyPricingType,
+          currency: row.currency,
+        }),
         currency: row.currency,
         status: row.status,
       })),
@@ -539,8 +580,10 @@ async function applyProductPlanMappings(
   shopId,
   productId,
   mappings,
-  shopCurrency
+  shopCurrency,
+  warrantyPricingType = DEFAULT_WARRANTY_PRICING_TYPE
 ) {
+  const pricingType = normalizeWarrantyPricingType(warrantyPricingType);
   const productGid = productId.startsWith("gid://")
     ? productId
     : `gid://shopify/Product/${productId}`;
@@ -573,8 +616,10 @@ async function applyProductPlanMappings(
     if (!months || months <= 0) {
       throw new Error("Invalid durationMonths in mapping");
     }
-    if (!Number.isFinite(planPrice) || planPrice < 0) {
-      throw new Error("Invalid price in mapping");
+
+    const priceValidation = validateConfiguredPlanPrice(planPrice, pricingType);
+    if (!priceValidation.valid) {
+      throw new Error(priceValidation.error);
     }
 
     const normalizedStatus = status === "inactive" ? "inactive" : "active";
@@ -651,6 +696,9 @@ export async function bulkSaveWarrantyPlanMapping(req, res) {
     const admin = new shopify.api.clients.Graphql({ session });
     const shopResponse = await admin.request(`query { shop { currencyCode } }`);
     const shopCurrency = shopResponse.data?.shop?.currencyCode || "USD";
+    const ewSettings = await getExtendedWarrantySettings(shopId);
+    const warrantyPricingType =
+      ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
 
     const connection = await pool.getConnection();
     const errors = [];
@@ -670,7 +718,8 @@ export async function bulkSaveWarrantyPlanMapping(req, res) {
             shopId,
             item.productId,
             item.mappings,
-            shopCurrency
+            shopCurrency,
+            warrantyPricingType
           );
           saved += 1;
         } catch (itemErr) {
@@ -749,6 +798,9 @@ export async function saveWarrantyPlanMapping(req, res) {
     const admin = new shopify.api.clients.Graphql({ session });
     const shopResponse = await admin.request(`query { shop { currencyCode } }`);
     const shopCurrency = shopResponse.data?.shop?.currencyCode || "USD";
+    const ewSettings = await getExtendedWarrantySettings(shopId);
+    const warrantyPricingType =
+      ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
 
     const connection = await pool.getConnection();
     try {
@@ -758,7 +810,8 @@ export async function saveWarrantyPlanMapping(req, res) {
         shopId,
         productId,
         mappings,
-        shopCurrency
+        shopCurrency,
+        warrantyPricingType
       );
       await connection.commit();
       return res.json({ success: true });
@@ -833,6 +886,7 @@ function mapSettingsRow(row, expiryReminderConfigs = []) {
       termsUrl: "",
       coverageText: "",
       extendedWarrantyPurchaseDays: null,
+      warrantyPricingType: DEFAULT_WARRANTY_PRICING_TYPE,
       expiryReminderConfigs: [],
     };
   }
@@ -843,6 +897,7 @@ function mapSettingsRow(row, expiryReminderConfigs = []) {
     termsUrl: row.terms_url || "",
     coverageText: row.coverage_text || "",
     extendedWarrantyPurchaseDays: row.extended_warranty_purchase_days ?? null,
+    warrantyPricingType: normalizeWarrantyPricingType(row.warranty_pricing_type),
     expiryReminderConfigs,
   };
 }
@@ -895,6 +950,7 @@ export async function saveEWSettings(req, res) {
       termsUrl = "",
       coverageText = "",
       extendedWarrantyPurchaseDays = null,
+      warrantyPricingType = DEFAULT_WARRANTY_PRICING_TYPE,
       expiryReminderConfigs = [],
     } = req.body;
 
@@ -912,6 +968,8 @@ export async function saveEWSettings(req, res) {
       });
     }
 
+    const normalizedPricingType = normalizeWarrantyPricingType(warrantyPricingType);
+
     await pool.query(
       `
       INSERT INTO extended_warranty_settings (
@@ -920,14 +978,16 @@ export async function saveEWSettings(req, res) {
         offer_after_registration,
         terms_url,
         coverage_text,
-        extended_warranty_purchase_days
-      ) VALUES (?, ?, ?, ?, ?, ?)
+        extended_warranty_purchase_days,
+        warranty_pricing_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         enabled = VALUES(enabled),
         offer_after_registration = VALUES(offer_after_registration),
         terms_url = VALUES(terms_url),
         coverage_text = VALUES(coverage_text),
         extended_warranty_purchase_days = VALUES(extended_warranty_purchase_days),
+        warranty_pricing_type = VALUES(warranty_pricing_type),
         updated_at = CURRENT_TIMESTAMP
       `,
       [
@@ -937,6 +997,7 @@ export async function saveEWSettings(req, res) {
         termsUrl || null,
         coverageText || null,
         purchaseDays,
+        normalizedPricingType,
       ]
     );
 

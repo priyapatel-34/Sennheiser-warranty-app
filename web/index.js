@@ -139,7 +139,6 @@ app.use("/app/registered-products", shopify.validateAuthenticatedSession() , reg
 app.use("/tws-warranty/*", authenticateUser);
 
 async function authenticateUser(req, res, next) {
-  console.log("IN auth 111");
 
   const { shop } = req.query;
   if (!shop) {
@@ -161,7 +160,6 @@ async function authenticateUser(req, res, next) {
   // Attach session for reuse
   res.locals.shopifySession = sessions[0];
 
-  console.log("IN auth 333");
   next();
 }
 

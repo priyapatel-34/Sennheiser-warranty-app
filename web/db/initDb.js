@@ -209,6 +209,10 @@ async function ensureSchemaUpdates() {
 
   const ewSettingsColumns = [
     ["extended_warranty_purchase_days", "INT NULL AFTER region_code"],
+    [
+      "warranty_pricing_type",
+      "ENUM('amount', 'percentage') NOT NULL DEFAULT 'amount' AFTER extended_warranty_purchase_days",
+    ],
   ];
 
   for (const [col, definition] of ewSettingsColumns) {
@@ -304,6 +308,14 @@ async function ensureSchemaUpdates() {
       ADD COLUMN country_code VARCHAR(10) NULL AFTER purchase_type
     `);
     console.log("✅ Added registered_products.country_code");
+  }
+
+  if (!(await columnExists("extended_warranty_entitlements", "pricing_type"))) {
+    await pool.query(`
+      ALTER TABLE extended_warranty_entitlements
+      ADD COLUMN pricing_type ENUM('amount', 'percentage') NOT NULL DEFAULT 'amount' AFTER currency
+    `);
+    console.log("✅ Added extended_warranty_entitlements.pricing_type");
   }
 }
 
@@ -525,6 +537,7 @@ export async function initDb() {
         coverage_text TEXT NULL,
         region_code VARCHAR(10) NULL,
         extended_warranty_purchase_days INT NULL,
+        warranty_pricing_type ENUM('amount', 'percentage') NOT NULL DEFAULT 'amount',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
           ON UPDATE CURRENT_TIMESTAMP,
@@ -559,6 +572,7 @@ export async function initDb() {
         duration_months INT NOT NULL,
         price DECIMAL(10, 2) NOT NULL,
         currency VARCHAR(10) NOT NULL,
+        pricing_type ENUM('amount', 'percentage') NOT NULL DEFAULT 'amount',
         purchase_date DATE NULL,
         activation_date DATE NULL,
         expiry_date DATE NULL,

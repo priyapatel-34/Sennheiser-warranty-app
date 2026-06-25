@@ -161,6 +161,7 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
         customerEmail,
         customerName,
         shopDisplayName: shopName,
+        session,
       });
       console.log(
         `✅ Extended warranty activated: register=${registerId}, plan=${planId}, order=${orderId}`
