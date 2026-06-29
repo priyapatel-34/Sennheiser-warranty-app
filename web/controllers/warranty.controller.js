@@ -9,6 +9,9 @@ import {
   getNumericIdFromGid,
   trySyncPendingEntitlementActivation,
   canPurchaseExtendedWarranty,
+  getExtendedWarrantySettings,
+  buildPlanAvailabilityIndex,
+  canExtendWarrantyLight,
 } from "../services/extendedWarranty.service.js";
 import {
   getLatestRefundForEntitlements,
@@ -17,6 +20,55 @@ import {
 
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
+}
+
+async function fetchShopifyProductImages(client, productIds) {
+  const map = new Map();
+  const uniqueIds = [
+    ...new Set(
+      productIds
+        .map(id => String(id || "").trim())
+        .filter(Boolean)
+    ),
+  ];
+  if (!uniqueIds.length) return map;
+
+  const gids = uniqueIds.map(id => `gid://shopify/Product/${id}`);
+
+  for (let offset = 0; offset < gids.length; offset += 50) {
+    const chunk = gids.slice(offset, offset + 50);
+    try {
+      const result = await client.request(
+        `
+        query ($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on Product {
+              id
+              title
+              featuredImage {
+                url
+              }
+            }
+          }
+        }
+        `,
+        { variables: { ids: chunk } }
+      );
+
+      for (const node of result.data?.nodes || []) {
+        if (!node?.id) continue;
+        const numericId = node.id.split("/").pop();
+        map.set(numericId, {
+          image: node.featuredImage?.url || null,
+          title: node.title || null,
+        });
+      }
+    } catch (err) {
+      console.warn("⚠️ Batch product image fetch failed:", err.message);
+    }
+  }
+
+  return map;
 }
 
 async function resolveShopifyCustomer(client, loggedInCustomerId, fallback = {}) {
@@ -110,7 +162,8 @@ async function enrichProductWarrantyFields(
   shopId,
   entitlementRow = null,
   refundRecord = null,
-  session = null
+  session = null,
+  listContext = null
 ) {
   product.standard_warranty = {
     status: product.is_registered
@@ -163,19 +216,42 @@ async function enrichProductWarrantyFields(
     product.register_id &&
     !hasActiveExtendedWarranty
   ) {
-    try {
-      const eligibility = await canPurchaseExtendedWarranty(
-        shopId,
-        product.register_id,
-        { session }
-      );
+    if (listContext) {
+      const registered =
+        listContext.registeredById.get(product.register_id) || {
+          id: product.register_id,
+          created_at: product.registered_at,
+          purchase_date: product.purchase_date,
+          shopify_product_id: product.product_id,
+          shopify_variant_id: product.variant_id,
+        };
+      const eligibility = canExtendWarrantyLight({
+        entitlement: entitlementRow,
+        registered,
+        ewSettings: listContext.ewSettings,
+        planIndex: listContext.planIndex,
+      });
       product.can_extend_warranty = Boolean(eligibility.eligible);
-      product.extended_warranty_eligibility = eligibility;
-    } catch (eligibilityErr) {
-      console.warn(
-        `⚠️ EW eligibility check failed for register ${product.register_id}:`,
-        eligibilityErr.message
-      );
+      product.extended_warranty_eligibility = {
+        eligible: Boolean(eligibility.eligible),
+        reason: eligibility.reason || null,
+        purchaseWindow: eligibility.purchaseWindow || null,
+      };
+    } else {
+      try {
+        const eligibility = await canPurchaseExtendedWarranty(
+          shopId,
+          product.register_id,
+          { session }
+        );
+        product.can_extend_warranty = Boolean(eligibility.eligible);
+        product.extended_warranty_eligibility = eligibility;
+      } catch (eligibilityErr) {
+        console.warn(
+          `⚠️ EW eligibility check failed for register ${product.register_id}:`,
+          eligibilityErr.message
+        );
+      }
     }
   }
 
@@ -780,39 +856,26 @@ export async function getMyProducts(req, res) {
       (p) => p.purchase_type === "external" && !addedRegisterIds.has(p.id),
     );
 
+    const externalProductIds = externalProducts
+      .map(ep => ep.shopify_product_id)
+      .filter(Boolean);
+    const externalProductImageMap = await fetchShopifyProductImages(
+      client,
+      externalProductIds
+    );
+
     for (const ep of externalProducts) {
-      let image = null;
-
-      if (ep.shopify_product_id) {
-        try {
-          const result = await client.request(
-            `
-            query ($id: ID!) {
-              product(id: $id) {
-                title
-                featuredImage {
-                  url
-                }
-              }
-            }
-            `,
-            {
-              variables: {
-                id: `gid://shopify/Product/${ep.shopify_product_id}`,
-              },
-            },
-          );
-
-          image = result?.data?.product?.featuredImage?.url || null;
-        } catch {}
-      }
+      const productMeta = ep.shopify_product_id
+        ? externalProductImageMap.get(String(ep.shopify_product_id))
+        : null;
+      const image = productMeta?.image || null;
 
       products.push({
         source: "external",
         order_id: null,
         product_id: ep.shopify_product_id,
         line_item_id: null,
-        title: ep.product_name,
+        title: productMeta?.title || ep.product_name,
         image,
         order_number: null,
         register_id: ep.id,
@@ -828,31 +891,7 @@ export async function getMyProducts(req, res) {
     }
 
     const registerIds = products.map(p => p.register_id).filter(Boolean);
-    let entitlementMap = await getEntitlementsForRegistrations(shopId, registerIds);
-
-    for (const product of products) {
-      if (!product.register_id) continue;
-      const entitlement = entitlementMap.get(product.register_id);
-      if (entitlement?.status === "pending_payment") {
-        try {
-          const synced = await resolveEntitlementWithSync({
-            session,
-            shopId,
-            registerId: product.register_id,
-            customerEmail,
-            entitlement,
-          });
-          if (synced) {
-            entitlementMap.set(product.register_id, synced);
-          }
-        } catch (syncErr) {
-          console.warn(
-            `⚠️ Pending EW sync skipped for register ${product.register_id}:`,
-            syncErr.message
-          );
-        }
-      }
-    }
+    const entitlementMap = await getEntitlementsForRegistrations(shopId, registerIds);
 
     const entitlementIds = [...entitlementMap.values()]
       .map(e => e.id)
@@ -864,18 +903,27 @@ export async function getMyProducts(req, res) {
       console.warn("⚠️ Refund lookup skipped:", refundErr.message);
     }
 
+    const ewSettings = await getExtendedWarrantySettings(shopId);
+    const planIndex = await buildPlanAvailabilityIndex(shopId, [
+      ...products.map(p => p.product_id),
+      ...registeredRows.map(r => r.shopify_product_id),
+    ]);
+    const registeredById = new Map(registeredRows.map(r => [r.id, r]));
+    const listContext = { ewSettings, planIndex, registeredById };
+
     for (const product of products) {
       const entitlement = product.register_id
         ? entitlementMap.get(product.register_id)
         : null;
       const refundRecord = entitlement ? refundMap.get(entitlement.id) : null;
       try {
-        await enrichProductWarrantyFields(
+        enrichProductWarrantyFields(
           product,
           shopId,
           entitlement,
           refundRecord,
-          session
+          session,
+          listContext
         );
       } catch (enrichErr) {
         console.warn(
@@ -1091,6 +1139,7 @@ export async function getProductDetail(req, res) {
         sku: node.sku || null,
         image,
         purchase_date: order.processedAt,
+        registered_at: registered?.created_at || null,
         register_id: registered?.id || null,
         serial_number: registered?.serial_number || null,
         warranty_start: registered?.warranty_start || null,
@@ -1204,6 +1253,7 @@ export async function getProductDetail(req, res) {
         sku: r.sku || null,
         image,
         purchase_date: r.purchase_date,
+        registered_at: r.created_at || null,
         register_id: r.id,
         serial_number: r.serial_number,
         warranty_start: r.warranty_start,

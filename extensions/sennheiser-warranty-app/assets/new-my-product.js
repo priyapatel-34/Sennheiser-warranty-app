@@ -79,7 +79,17 @@ function getExtendedWarrantyCardBadge(product) {
   return { type: "ew-status", label };
 }
 
+function isPurchaseWindowExpired(product) {
+  const eligibility = product?.extended_warranty_eligibility;
+  if (eligibility?.reason === "purchase_window_expired") return true;
+
+  const pw = eligibility?.purchaseWindow;
+  return Boolean(pw?.configured && pw.allowed === false);
+}
+
 function canShowExtendWarrantyButton(product) {
+  if (isPurchaseWindowExpired(product)) return false;
+
   return (
     product?.is_registered &&
     !hasPurchasedExtendedWarranty(product) &&
@@ -401,8 +411,6 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
       });
 
       const data = await response.json();
-
-      console.log("product detail json: ", data.success, data.product);
 
       if (!data.success) {
         console.log("product detail json 222: ", data.success);

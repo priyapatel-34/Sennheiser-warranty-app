@@ -114,12 +114,37 @@ function isTwoYearPlan(plan) {
   );
 }
 
+function formatExtensionOfferExpiryLabel(purchaseWindow) {
+  if (!purchaseWindow?.configured) return null;
+
+  if (
+    !purchaseWindow.allowed &&
+    purchaseWindow.reason === "purchase_window_expired"
+  ) {
+    return { label: "Extension Offer Expired", expired: true };
+  }
+
+  const remaining = Number(purchaseWindow.daysRemaining);
+  if (!Number.isFinite(remaining)) return null;
+
+  if (remaining === 0) {
+    return { label: "Offer Expires Today", expired: false };
+  }
+  if (remaining === 1) {
+    return { label: "Extension Offer Expires Tomorrow", expired: false };
+  }
+  return {
+    label: `Extension Offer Expires in ${remaining} Days`,
+    expired: false,
+  };
+}
+
 function getDefaultPlanIndex(plans) {
   const twoYearIdx = plans.findIndex(isTwoYearPlan);
   return twoYearIdx >= 0 ? twoYearIdx : 0;
 }
 
-  function renderOffer(offerData, options = {}) {
+function renderOffer(offerData, options = {}) {
     const {
       myProductsLink = "/pages/my-products",
       customerEmail = "",
@@ -138,9 +163,20 @@ function getDefaultPlanIndex(plans) {
 
     const reg = offerData.registration;
     const settings = offerData.settings || {};
+    const purchaseWindow = offerData.purchaseWindow || {};
     const plans = sortPlansByDuration(offerData.plans || []);
     const currency = offerData.currency || plans[0]?.currency;
     const productImageUrl = reg.productImageUrl || null;
+    const expiryBadge = formatExtensionOfferExpiryLabel(purchaseWindow);
+    const isOfferExpired =
+      Boolean(purchaseWindow?.configured) &&
+      (!purchaseWindow.allowed ||
+        purchaseWindow.reason === "purchase_window_expired");
+    const expiryBadgeHtml = isOfferExpired
+      ? `<span class="badge ew-badge-expired">${escapeHtml("Extension Offer Expired")}</span>`
+      : expiryBadge
+        ? `<span class="badge${expiryBadge.expired ? " ew-badge-expired" : ""}">${escapeHtml(expiryBadge.label)}</span>`
+        : "";
 
     const coverageLines = (settings.coverageText || "")
       .split("\n")
@@ -201,7 +237,7 @@ function getDefaultPlanIndex(plans) {
                   <div class="ew-product-info">
                       <div class="title-with-badge">
                         <h3>${escapeHtml(reg.productName || "Product")}</h3>
-                        <span class="badge">Extension Offer Expires in 2 Days</span>
+                        ${expiryBadgeHtml}
                       </div>
                       <dl class="ew-meta-list">
                           <div><dt>Serial number</dt><dd>${escapeHtml(reg.serialNumber || "-")}</dd></div>
@@ -212,11 +248,17 @@ function getDefaultPlanIndex(plans) {
               </div>
           </div>
 
-          <div class="ew-offer-grid">
+          <div class="ew-offer-grid${isOfferExpired ? " ew-offer-expired" : ""}">
               <div class="ew-coverage-box">
                   <h4 class="ew-section-label">What’s Covered</h4>
                   ${coverageHtml}
               </div>
+              ${isOfferExpired
+        ? `<div class="ew-expired-message">
+            <p>The extended warranty purchase window for this product has closed.</p>
+            <button type="button" class="btn bordered-btn" id="ew-skip-btn">Back to My Products</button>
+          </div>`
+        : `
               <div class="divider"></div>
               <div class="ew-plan-panel">
                   <div class="upper-block">
@@ -225,16 +267,17 @@ function getDefaultPlanIndex(plans) {
                   </div>
                   <div class="lower-block">
                       ${settings.termsUrl
-        ? `<p class="ew-terms">By continuing you agree to the <a href="${escapeHtml(settings.termsUrl)}" target="_blank" rel="noopener">Terms &amp; Conditions</a>.</p>`
-        : ""
-      }
+          ? `<p class="ew-terms">By continuing you agree to the <a href="${escapeHtml(settings.termsUrl)}" target="_blank" rel="noopener">Terms &amp; Conditions</a>.</p>`
+          : ""
+        }
                       <div class="ew-actions-row">
                           <button type="button" class="btn bordered-btn" id="ew-skip-btn">Skip for now</button>
                           <button type="button" class="btn btn-primary ew-primary-btn" id="ew-purchase-btn" ${plans.length ? "" : "disabled"
-      }>Continue to checkout</button>
+        }>Continue to checkout</button>
                       </div>
                   </div>
-              </div>
+              </div>`
+      }
           </div>
       </section>
     `;

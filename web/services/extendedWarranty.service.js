@@ -8,6 +8,14 @@ import {
   normalizeWarrantyPricingType,
   resolvePlanPrice,
 } from "./extendedWarrantyPricing.js";
+import { computePurchaseWindowState, formatExtensionOfferExpiryLabel } from "./purchaseWindow.utils.js";
+
+export {
+  computePurchaseWindowState,
+  formatExtensionOfferExpiryLabel,
+  resolveRegistrationTimestamp,
+} from "./purchaseWindow.utils.js";
+
 export function getNumericIdFromGid(gid) {
   if (!gid) return null;
   const numeric = Number(String(gid).split("/").pop());
@@ -128,7 +136,9 @@ export async function getReminderDaysForShop(shopId) {
     `,
     [shopId]
   );
-  return rows.map(r => r.reminder_days);
+  return rows.map(r => Number(r.reminder_days)).filter(
+    value => Number.isInteger(value) && value > 0
+  );
 }
 
 /** @deprecated Use getReminderDaysForShop — country scoping removed. */
@@ -149,41 +159,93 @@ function daysSinceDate(value, referenceDate = new Date()) {
 
 export async function evaluatePurchaseWindowEligibility(shopId, registered) {
   const settings = await getExtendedWarrantySettings(shopId);
-  const purchaseDays = settings.extended_warranty_purchase_days;
+  return evaluatePurchaseWindowFromSettings(settings, registered, {
+    logContext: `shop:${shopId}:register:${registered?.id ?? "unknown"}`,
+  });
+}
 
-  if (purchaseDays == null) {
-    return { allowed: true, configured: false };
+export function evaluatePurchaseWindowFromSettings(
+  settings,
+  registered,
+  options = {}
+) {
+  return computePurchaseWindowState({
+    purchaseDays: settings?.extended_warranty_purchase_days,
+    registered,
+    now: options.now,
+    logContext: options.logContext || null,
+  });
+}
+
+/** Active EW plan rows grouped by Shopify product id (list-view eligibility). */
+export async function buildPlanAvailabilityIndex(shopId, productIds) {
+  const ids = [
+    ...new Set(
+      productIds
+        .map(id => Number(id))
+        .filter(id => Number.isFinite(id) && id > 0)
+    ),
+  ];
+  const index = new Map();
+  if (!ids.length) return index;
+
+  const [rows] = await pool.query(
+    `
+    SELECT shopify_product_id, shopify_variant_id
+    FROM extended_warranty_plans
+    WHERE shop_id = ?
+      AND status = 'active'
+      AND shopify_product_id IN (?)
+    `,
+    [shopId, ids]
+  );
+
+  for (const row of rows) {
+    const productId = Number(row.shopify_product_id);
+    if (!index.has(productId)) index.set(productId, []);
+    index.get(productId).push({
+      variantId: row.shopify_variant_id ? Number(row.shopify_variant_id) : null,
+    });
   }
 
-  const referenceDate = registered.created_at || registered.warranty_start;
-  const elapsedDays = daysSinceDate(referenceDate);
-  if (elapsedDays == null) {
+  return index;
+}
+
+export function registeredHasEligiblePlansInIndex(registeredProduct, planIndex) {
+  const productId = Number(registeredProduct.shopify_product_id);
+  const entries = planIndex.get(productId);
+  return Boolean(entries?.length);
+}
+
+export function canExtendWarrantyLight({
+  entitlement,
+  registered,
+  ewSettings,
+  planIndex,
+}) {
+  if (entitlement?.status === "active") {
+    return { eligible: false, reason: "already_purchased" };
+  }
+  if (entitlement?.status === "pending_payment") {
+    return { eligible: false, reason: "pending_payment" };
+  }
+
+  const purchaseWindow = evaluatePurchaseWindowFromSettings(ewSettings, registered, {
+    logContext: `list:register:${registered?.id ?? "unknown"}`,
+  });
+  if (!purchaseWindow.allowed) {
     return {
-      allowed: false,
-      configured: true,
-      reason: "registration_date_missing",
-      extendedWarrantyPurchaseDays: purchaseDays,
+      eligible: false,
+      reason: purchaseWindow.reason || "purchase_window_expired",
+      purchaseWindow,
     };
   }
 
-  if (elapsedDays > purchaseDays) {
-    return {
-      allowed: false,
-      configured: true,
-      reason: "purchase_window_expired",
-      extendedWarrantyPurchaseDays: purchaseDays,
-      daysSinceRegistration: elapsedDays,
-      daysRemaining: 0,
-    };
+  if (!registeredHasEligiblePlansInIndex(registered, planIndex)) {
+    return { eligible: false, reason: "no_plans_configured" };
   }
 
-  return {
-    allowed: true,
-    configured: true,
-    extendedWarrantyPurchaseDays: purchaseDays,
-    daysSinceRegistration: elapsedDays,
-    daysRemaining: purchaseDays - elapsedDays,
-  };
+  return { eligible: true, purchaseWindow };
 }
 
 export async function getExtendedWarrantySettings(shopId) {

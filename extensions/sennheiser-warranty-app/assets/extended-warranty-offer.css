@@ -351,6 +351,27 @@
   background-color: #037cc2;
 }
 
+.ew-outer-wrapper .title-with-badge .badge.ew-badge-expired {
+  background: rgba(217, 48, 37, 0.15);
+  color: #d93025;
+}
+
+.ew-offer-grid.ew-offer-expired {
+  grid-template-columns: 1fr;
+}
+
+.ew-expired-message {
+  padding: 24px;
+  border-radius: 8px;
+  background: rgba(217, 48, 37, 0.08);
+  color: #44474a;
+}
+
+.ew-expired-message p {
+  margin: 0 0 16px;
+  font-weight: 500;
+}
+
 @media (max-width: 1023px) {
   .ew-offer-section {
     margin-bottom: 0;
