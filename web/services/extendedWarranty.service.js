@@ -8,7 +8,6 @@ import {
   normalizeWarrantyPricingType,
   resolvePlanPrice,
 } from "./extendedWarrantyPricing.js";
-
 export function getNumericIdFromGid(gid) {
   if (!gid) return null;
   const numeric = Number(String(gid).split("/").pop());
@@ -470,6 +469,20 @@ export async function loadRegisteredProduct(shopId, registerId) {
   return row || null;
 }
 
+function dedupeActivePlansByDuration(rows) {
+  const byDuration = new Map();
+  for (const row of rows) {
+    if (row.status && row.status !== "active") continue;
+    const key = row.duration_months;
+    if (!byDuration.has(key)) {
+      byDuration.set(key, row);
+    }
+  }
+  return [...byDuration.values()].sort(
+    (a, b) => a.duration_months - b.duration_months
+  );
+}
+
 /** Load active EW plans for a registered product (scoped by shop + product + variant). */
 export async function loadEligiblePlans(shopId, registeredProduct) {
   const productId = Number(registeredProduct.shopify_product_id);
@@ -536,7 +549,7 @@ export async function loadEligiblePlans(shopId, registeredProduct) {
     rows = allProductRows;
   }
 
-  return rows;
+  return dedupeActivePlansByDuration(rows);
 }
 
 export async function getActiveEntitlement(shopId, registeredProductId) {
@@ -565,7 +578,10 @@ export async function getEntitlementsForRegistrations(shopId, registerIds) {
     FROM extended_warranty_entitlements
     WHERE shop_id = ?
       AND registered_product_id IN (${placeholders})
-    ORDER BY created_at DESC
+    ORDER BY
+      registered_product_id,
+      FIELD(status, 'active', 'pending_payment', 'refunded', 'cancelled', 'expired'),
+      created_at DESC
     `,
     [shopId, ...registerIds]
   );
@@ -652,6 +668,17 @@ export async function createPendingEntitlement({
   draftOrderId = null,
   pricingType = DEFAULT_WARRANTY_PRICING_TYPE,
 }) {
+  await pool.query(
+    `
+    UPDATE extended_warranty_entitlements
+    SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+    WHERE shop_id = ?
+      AND registered_product_id = ?
+      AND status = 'pending_payment'
+    `,
+    [shopId, registeredProductId]
+  );
+
   const [result] = await pool.query(
     `
     INSERT INTO extended_warranty_entitlements (
@@ -1100,7 +1127,15 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
     plans: enrichedPlans,
     purchaseWindow,
     settings: {
-      termsUrl: settings.terms_url,
+      termsUrl: (() => {
+        if (!settings.terms_url) return null;
+        if (!session?.shop) return settings.terms_url;
+        try {
+          return normalizeTermsUrl(settings.terms_url, session.shop);
+        } catch {
+          return settings.terms_url;
+        }
+      })(),
       coverageText: settings.coverage_text,
       warrantyPricingType: pricingType,
     },
@@ -1123,13 +1158,52 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
   };
 }
 
-export async function canPurchaseExtendedWarranty(shopId, registerId) {
-  const offer = await buildExtendedWarrantyOffer(shopId, registerId);
+export async function canPurchaseExtendedWarranty(shopId, registerId, options = {}) {
+  const offer = await buildExtendedWarrantyOffer(shopId, registerId, options);
   return {
     eligible: Boolean(offer.eligible),
     reason: offer.reason || null,
     purchaseWindow: offer.purchaseWindow || null,
   };
+}
+
+/** Resolve storefront Terms & Conditions URL from admin input. */
+export function normalizeTermsUrl(input, shopDomain) {
+  const trimmed = String(input || "").trim();
+  if (!trimmed) return null;
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const url = new URL(trimmed);
+      if (!["http:", "https:"].includes(url.protocol)) {
+        throw new Error("Terms URL must use http or https");
+      }
+      return url.toString();
+    } catch {
+      throw new Error("Terms URL must be a valid absolute URL");
+    }
+  }
+
+  const domain = String(shopDomain || "").trim();
+  if (!domain) {
+    throw new Error("Shop domain is required to resolve relative terms URL");
+  }
+
+  let path = trimmed.replace(/^\/+/, "");
+
+  if (path.startsWith("pages/")) {
+    return `https://${domain}/${path}`;
+  }
+
+  if (path.startsWith("policies/")) {
+    return `https://${domain}/${path}`;
+  }
+
+  if (!path.includes("/")) {
+    return `https://${domain}/policies/${path}`;
+  }
+
+  return `https://${domain}/${path}`;
 }
 
 export async function trySyncPendingEntitlementActivation({

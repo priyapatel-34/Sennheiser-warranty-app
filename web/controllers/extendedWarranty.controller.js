@@ -9,12 +9,14 @@ import {
   buildExpiryReminderAdminConfigs,
   saveExpiryReminderConfigs,
   getExtendedWarrantySettings,
+  normalizeTermsUrl,
 } from "../services/extendedWarranty.service.js";
 import {
   DEFAULT_WARRANTY_PRICING_TYPE,
   normalizeWarrantyPricingType,
   validateConfiguredPlanPrice,
   formatConfiguredPlanPrice,
+  resolvePlanPrice,
 } from "../services/extendedWarrantyPricing.js";
 
 function getNumericIdFromGid(gid) {
@@ -114,7 +116,34 @@ function buildShopifyProductSearchQuery(searchTerm) {
   const term = String(searchTerm || "").trim();
   if (!term) return statusFilter;
   const sanitized = term.replace(/["\\]/g, " ").trim();
-  return `${sanitized} AND ${statusFilter}`;
+  return `(title:*${sanitized}* OR sku:*${sanitized}*) AND ${statusFilter}`;
+}
+
+function productMatchesSearchTerm(productNode, searchTerm) {
+  const term = String(searchTerm || "").trim().toLowerCase();
+  if (!term) return true;
+
+  const title = String(productNode.title || "").toLowerCase();
+  if (title.includes(term)) return true;
+
+  const variants = productNode.variants?.edges || [];
+  return variants.some(edge => {
+    const variant = edge.node || {};
+    const variantTitle = String(variant.displayName || variant.title || "").toLowerCase();
+    const sku = String(variant.sku || "").toLowerCase();
+    return variantTitle.includes(term) || sku.includes(term);
+  });
+}
+
+function countActivePlanDurationsForProduct(planRows, productNumericId) {
+  const durations = new Set();
+  for (const row of planRows) {
+    if (row.status !== "active") continue;
+    if (Number(row.shopify_product_id) !== Number(productNumericId)) continue;
+    if (Number(row.price) <= 0) continue;
+    durations.add(row.duration_months);
+  }
+  return durations.size;
 }
 
 const PRODUCT_VARIANTS_QUERY = `
@@ -160,6 +189,7 @@ async function loadPlansForShop(shopId, { productId = null, variantId = null } =
       status
     FROM extended_warranty_plans
     WHERE shop_id = ?
+      AND status = 'active'
   `;
   const params = [shopId];
 
@@ -178,12 +208,38 @@ async function loadPlansForShop(shopId, { productId = null, variantId = null } =
 }
 
 /** Group plan rows by variant numeric ID. */
-function groupPlansByVariantId(planRows, warrantyPricingType, currency) {
+function groupPlansByVariantId(planRows, warrantyPricingType, currency, variantPriceById = {}) {
   const pricingType = normalizeWarrantyPricingType(warrantyPricingType);
   const map = {};
   for (const row of planRows) {
+    if (row.status !== "active" || Number(row.price) <= 0) continue;
+
     const key = row.shopify_variant_id;
     if (!map[key]) map[key] = [];
+
+    let displayPrice = formatConfiguredPlanPrice({
+      configuredPrice: row.price,
+      pricingType,
+      currency: row.currency || currency,
+    });
+
+    const variantPrice = variantPriceById[key];
+    if (pricingType === "percentage" && variantPrice != null) {
+      try {
+        const resolved = resolvePlanPrice({
+          configuredPrice: row.price,
+          pricingType,
+          productVariantPrice: variantPrice,
+        });
+        displayPrice = new Intl.NumberFormat(undefined, {
+          style: "currency",
+          currency: row.currency || currency || "USD",
+        }).format(resolved.calculatedPrice);
+      } catch {
+        // keep percentage label when variant price unavailable
+      }
+    }
+
     map[key].push({
       planId: row.plan_id,
       planName: row.plan_name,
@@ -191,11 +247,7 @@ function groupPlansByVariantId(planRows, warrantyPricingType, currency) {
       durationMonths: row.duration_months,
       pricingType,
       price: String(row.price),
-      displayPrice: formatConfiguredPlanPrice({
-        configuredPrice: row.price,
-        pricingType,
-        currency: row.currency || currency,
-      }),
+      displayPrice,
       currency: row.currency,
       status: row.status,
     });
@@ -342,21 +394,27 @@ export async function getWarrantyProducts(req, res) {
     }
 
     const edges = response.data?.products?.edges || [];
+    const filteredEdges = searchTerm
+      ? edges.filter(edge => productMatchesSearchTerm(edge.node, searchTerm))
+      : edges;
     const currency = response.data?.shop?.currencyCode || "USD";
     const ewSettings = await getExtendedWarrantySettings(shopId);
     const warrantyPricingType =
       ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
-    const totalCount = response.data?.productsCount?.count ?? edges.length;
+    const totalCount = searchTerm
+      ? filteredEdges.length
+      : response.data?.productsCount?.count ?? filteredEdges.length;
     const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
     const currentPage = jumpLast
       ? totalPages
       : Math.max(1, parseInt(req.query.page, 10) || 1);
 
-    const productNumericIds = edges
+    const productNumericIds = filteredEdges
       .map(e => getNumericIdFromGid(e.node.id))
       .filter(Boolean);
 
     let plansByVariantId = {};
+    let allPlanRows = [];
     if (productNumericIds.length > 0) {
       const placeholders = productNumericIds.map(() => "?").join(",");
       const [planRows] = await pool.query(
@@ -374,19 +432,35 @@ export async function getWarrantyProducts(req, res) {
         FROM extended_warranty_plans
         WHERE shop_id = ?
           AND shopify_product_id IN (${placeholders})
+          AND status = 'active'
+          AND price > 0
         ORDER BY duration_months
         `,
         [shopId, ...productNumericIds]
       );
+      allPlanRows = planRows;
+
+      const variantPriceById = {};
+      for (const edge of filteredEdges) {
+        for (const variantEdge of edge.node.variants?.edges || []) {
+          const variantNumericId = getNumericIdFromGid(variantEdge.node.id);
+          if (variantNumericId && variantEdge.node.price != null) {
+            variantPriceById[variantNumericId] = Number(variantEdge.node.price);
+          }
+        }
+      }
+
       plansByVariantId = groupPlansByVariantId(
         planRows,
         warrantyPricingType,
-        currency
+        currency,
+        variantPriceById
       );
     }
 
-    const products = edges.map(edge => {
+    const products = filteredEdges.map(edge => {
       const node = edge.node;
+      const productNumericId = getNumericIdFromGid(node.id);
       const variants = (node.variants?.edges || []).map(v =>
         formatVariantNode(v.node, plansByVariantId)
       );
@@ -399,6 +473,10 @@ export async function getWarrantyProducts(req, res) {
         category: node.productType,
         variants,
         warrantyPlans: variants.flatMap(v => v.warrantyPlans),
+        configuredPlanCount: countActivePlanDurationsForProduct(
+          allPlanRows,
+          productNumericId
+        ),
       };
     });
 
@@ -407,7 +485,7 @@ export async function getWarrantyProducts(req, res) {
       currency,
       warrantyPricingType,
       products,
-      nextCursor: edges.length ? edges[edges.length - 1].cursor : null,
+      nextCursor: filteredEdges.length ? filteredEdges[filteredEdges.length - 1].cursor : null,
       hasNextPage: Boolean(response.data?.products?.pageInfo?.hasNextPage),
       pagination: {
         total: totalCount,
@@ -472,12 +550,20 @@ export async function getProductVariants(req, res) {
     const ewSettings = await getExtendedWarrantySettings(shopId);
     const warrantyPricingType =
       ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
+    const currency = response.data?.shop?.currencyCode || "USD";
+    const variantPriceById = {};
+    for (const variantEdge of product.variants?.edges || []) {
+      const variantNumericId = getNumericIdFromGid(variantEdge.node.id);
+      if (variantNumericId && variantEdge.node.price != null) {
+        variantPriceById[variantNumericId] = Number(variantEdge.node.price);
+      }
+    }
     const plansByVariantId = groupPlansByVariantId(
       planRows,
       warrantyPricingType,
-      response.data?.shop?.currencyCode || "USD"
+      currency,
+      variantPriceById
     );
-    const currency = response.data?.shop?.currencyCode || "USD";
 
     const variants = (product.variants?.edges || []).map(v =>
       formatVariantNode(v.node, plansByVariantId)
@@ -964,6 +1050,15 @@ export async function saveEWSettings(req, res) {
 
     const normalizedPricingType = normalizeWarrantyPricingType(warrantyPricingType);
 
+    let normalizedTermsUrl = null;
+    if (termsUrl != null && String(termsUrl).trim()) {
+      try {
+        normalizedTermsUrl = normalizeTermsUrl(termsUrl, session.shop);
+      } catch (termsErr) {
+        return res.status(400).json({ error: termsErr.message });
+      }
+    }
+
     await pool.query(
       `
       INSERT INTO extended_warranty_settings (
@@ -982,7 +1077,7 @@ export async function saveEWSettings(req, res) {
       `,
       [
         shopId,
-        termsUrl || null,
+        normalizedTermsUrl,
         coverageText || null,
         purchaseDays,
         normalizedPricingType,
@@ -1019,13 +1114,36 @@ export async function deleteEWDuration(req, res) {
       return res.status(400).json({ error: "Invalid duration id" });
     }
 
-    const [result] = await pool.query(
-      `DELETE FROM extended_warranty_durations WHERE shop_id = ? AND id = ?`,
+    const [[durationRow]] = await pool.query(
+      `SELECT duration_months FROM extended_warranty_durations WHERE shop_id = ? AND id = ?`,
       [shopId, durationId]
     );
 
-    if (result.affectedRows === 0) {
+    if (!durationRow) {
       return res.status(404).json({ error: "Duration not found" });
+    }
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      await conn.query(
+        `DELETE FROM extended_warranty_plans WHERE shop_id = ? AND duration_months = ?`,
+        [shopId, durationRow.duration_months]
+      );
+      const [result] = await conn.query(
+        `DELETE FROM extended_warranty_durations WHERE shop_id = ? AND id = ?`,
+        [shopId, durationId]
+      );
+      if (result.affectedRows === 0) {
+        await conn.rollback();
+        return res.status(404).json({ error: "Duration not found" });
+      }
+      await conn.commit();
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
     }
 
     return res.json({ success: true });

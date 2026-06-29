@@ -75,10 +75,19 @@ const styles = {
 };
 
 function countConfiguredPlans(product) {
-  return (product.variants || []).reduce(
-    (sum, v) => sum + (v.warrantyPlans || []).length,
-    0
-  );
+  if (typeof product?.configuredPlanCount === "number") {
+    return product.configuredPlanCount;
+  }
+
+  const activeDurations = new Set();
+  for (const variant of product.variants || []) {
+    for (const plan of variant.warrantyPlans || []) {
+      if (plan.status && plan.status !== "active") continue;
+      if (Number(plan.price) <= 0) continue;
+      activeDurations.add(plan.durationMonths);
+    }
+  }
+  return activeDurations.size;
 }
 
 export default function ExtendedWarrantyAdmin() {
@@ -932,7 +941,6 @@ export default function ExtendedWarrantyAdmin() {
                         }))
                       }
                       autoComplete="off"
-                      helpText="Leave empty to allow purchase at any time."
                       placeholder="e.g. 90"
                     />
                   </div>

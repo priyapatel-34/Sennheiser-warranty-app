@@ -1,5 +1,6 @@
 import sgMail from "@sendgrid/mail";
 import dotenv from "dotenv";
+
 dotenv.config();
 
 const EMAIL_MODE = (process.env.EMAIL_MODE || "auto").toLowerCase();
@@ -45,14 +46,12 @@ function extractSendGridError(error) {
  * (from === to). Delivery still requires the FROM address to be verified
  * as a Single Sender or authenticated domain in SendGrid.
  */
-export const sendEmailService = async ({
-  to,
-  subject,
-  html,
-  text,
-  from,
-  replyTo,
-}) => {
+export const sendEmailService = async ({ to, subject, html, text, from, replyTo }) => {
+  if (!to) {
+    console.error("📧 Email validation failed: recipient email is required");
+    return { success: false, error: "Recipient email is required", skipped: true };
+  }
+
   const resolvedFrom = from || DEFAULT_FROM || "noreply@example.com";
   const payload = {
     to,
@@ -78,6 +77,7 @@ export const sendEmailService = async ({
       skipped: true,
       testMode: true,
       messageId: `test-${Date.now()}`,
+      statusCode: 202,
     };
   }
 
@@ -107,11 +107,7 @@ export const sendEmailService = async ({
         normalizeEmailAddress(payload.to) === normalizeEmailAddress(payload.from),
     });
 
-    return {
-      success: true,
-      messageId,
-      statusCode,
-    };
+    return { success: true, messageId, statusCode };
   } catch (error) {
     const parsed = extractSendGridError(error);
     console.error("SendGrid Error:", {
@@ -128,11 +124,11 @@ export const sendEmailService = async ({
             : undefined,
       details: parsed.errors || undefined,
     });
-
     return {
       success: false,
       error: parsed.message || error.message,
       statusCode: parsed.statusCode || null,
+      details: parsed.errors || null,
     };
   }
 };

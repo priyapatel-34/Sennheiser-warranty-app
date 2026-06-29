@@ -109,7 +109,8 @@ async function enrichProductWarrantyFields(
   product,
   shopId,
   entitlementRow = null,
-  refundRecord = null
+  refundRecord = null,
+  session = null
 ) {
   product.standard_warranty = {
     status: product.is_registered
@@ -149,7 +150,15 @@ async function enrichProductWarrantyFields(
   }
 
   product.can_extend_warranty = false;
-  if (
+  product.can_resume_warranty_payment = false;
+
+  if (entitlementRow?.status === "pending_payment" && !hasActiveExtendedWarranty) {
+    product.can_resume_warranty_payment = true;
+    product.extended_warranty_eligibility = {
+      eligible: false,
+      reason: "pending_payment",
+    };
+  } else if (
     product.is_registered &&
     product.register_id &&
     !hasActiveExtendedWarranty
@@ -157,7 +166,8 @@ async function enrichProductWarrantyFields(
     try {
       const eligibility = await canPurchaseExtendedWarranty(
         shopId,
-        product.register_id
+        product.register_id,
+        { session }
       );
       product.can_extend_warranty = Boolean(eligibility.eligible);
       product.extended_warranty_eligibility = eligibility;
@@ -167,14 +177,6 @@ async function enrichProductWarrantyFields(
         eligibilityErr.message
       );
     }
-  }
-
-  if (entitlementRow?.status === "pending_payment" && !hasActiveExtendedWarranty) {
-    product.can_extend_warranty = false;
-    product.extended_warranty_eligibility = {
-      eligible: false,
-      reason: "pending_payment",
-    };
   }
 
   return product;
@@ -872,7 +874,8 @@ export async function getMyProducts(req, res) {
           product,
           shopId,
           entitlement,
-          refundRecord
+          refundRecord,
+          session
         );
       } catch (enrichErr) {
         console.warn(
@@ -1068,6 +1071,11 @@ export async function getProductDetail(req, res) {
             entitlement: entitlementMap.get(registered.id) || null,
           })
         : null;
+      const refundMap =
+        entitlement?.id
+          ? await getLatestRefundForEntitlements(shopId, [entitlement.id])
+          : new Map();
+      const refundRecord = entitlement ? refundMap.get(entitlement.id) : null;
 
       const image = variant?.image?.url || product?.featuredImage?.url || null;
 
@@ -1093,7 +1101,9 @@ export async function getProductDetail(req, res) {
       await enrichProductWarrantyFields(
         productPayload,
         shopId,
-        entitlement
+        entitlement,
+        refundRecord,
+        session
       );
 
       return res.json({
@@ -1177,6 +1187,10 @@ export async function getProductDetail(req, res) {
         customerEmail: r.customer_email,
         entitlement: entitlementMap.get(r.id) || null,
       });
+      const refundMap = entitlement?.id
+        ? await getLatestRefundForEntitlements(shopId, [entitlement.id])
+        : new Map();
+      const refundRecord = entitlement ? refundMap.get(entitlement.id) : null;
 
       const productPayload = {
         source: "external",
@@ -1200,7 +1214,9 @@ export async function getProductDetail(req, res) {
       await enrichProductWarrantyFields(
         productPayload,
         shopId,
-        entitlement
+        entitlement,
+        refundRecord,
+        session
       );
 
       return res.json({
@@ -1579,19 +1595,21 @@ export async function productAutocomplete(req, res) {
       },
     });
 
-    const products = result.data.products.edges
-    .filter((p) => {
-      const duration = p.node.metafield
-      ? Number(p.node.metafield.value)
-      : null;
+    const normalizedQuery = String(q).trim().toLowerCase();
 
-      return duration === null || duration > 0;
-    })
-    .slice(0, 10)
-    .map((p) => ({
-      id: p.node.id,
-      title: p.node.title,
-    }));
+    const products = result.data.products.edges
+      .filter((p) => {
+        const duration = p.node.metafield ? Number(p.node.metafield.value) : null;
+        if (duration !== null && duration <= 0) return false;
+
+        const title = String(p.node.title || "").toLowerCase();
+        return title.includes(normalizedQuery);
+      })
+      .slice(0, 10)
+      .map((p) => ({
+        id: p.node.id,
+        title: p.node.title,
+      }));
 
     return res.json(products);
   } catch (error) {
@@ -2627,8 +2645,12 @@ export async function registerProducts(req, res) {
       customer
     );
     const customerId = resolvedCustomer.customerId;
-    const customerEmail = resolvedCustomer.customerEmail;
+    let customerEmail = resolvedCustomer.customerEmail;
     const customerName = resolvedCustomer.customerName;
+
+    if (flow === "external" && customer?.email) {
+      customerEmail = normalizeEmail(customer.email);
+    }
 
     if (!customerEmail || !/^\S+@\S+\.\S+$/.test(customerEmail)) {
       return res.status(400).json({ error: "Invalid customer email" });
@@ -2912,16 +2934,29 @@ export async function registerProducts(req, res) {
         from: dynamicFrom,
       });
 
-       if (!emailResult.success) {
+      if (!emailResult.success) {
         if (emailResult.skipped) {
-          console.warn("Registration email skipped (SendGrid not configured)");
+          console.warn("Registration email skipped (SendGrid not configured)", {
+            flow,
+            to: customerEmail,
+            mode: process.env.EMAIL_MODE,
+          });
         } else {
-          console.error(
-            "Registration succeeded but email failed:",
-            emailResult.error,
-            "— verify SENDGRID_API_KEY in .env"
-          );
+          console.error("Registration succeeded but email failed:", {
+            flow,
+            to: customerEmail,
+            from: dynamicFrom,
+            error: emailResult.error,
+            statusCode: emailResult.statusCode,
+          });
         }
+      } else {
+        console.log("Registration email accepted:", {
+          flow,
+          to: customerEmail,
+          messageId: emailResult.messageId,
+          testMode: emailResult.testMode || false,
+        });
       }
 
       const primaryRegistration = createdProducts[0];

@@ -90,7 +90,7 @@ export async function initiateExtendedWarrantyCheckout(req, res) {
       return res.status(400).json({ error: "Plan not eligible for this registration" });
     }
 
-    const eligibility = await canPurchaseExtendedWarranty(shopId, registerId);
+    const eligibility = await canPurchaseExtendedWarranty(shopId, registerId, { session });
     if (!eligibility.eligible) {
       return res.status(400).json({
         error:
@@ -184,7 +184,7 @@ export async function getCartCheckoutPayload(req, res) {
       return res.status(404).json({ error: "Registration or plan not found" });
     }
 
-    const eligibility = await canPurchaseExtendedWarranty(shopId, registerId);
+    const eligibility = await canPurchaseExtendedWarranty(shopId, registerId, { session });
     if (!eligibility.eligible) {
       return res.status(400).json({
         error: "Extended warranty is not available for this registration",

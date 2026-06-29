@@ -199,7 +199,10 @@ function getDefaultPlanIndex(plans) {
         : ""
       }
                   <div class="ew-product-info">
-                      <h3>${escapeHtml(reg.productName || "Product")}</h3>
+                      <div class="title-with-badge">
+                        <h3>${escapeHtml(reg.productName || "Product")}</h3>
+                        <span class="badge">Extension Offer Expires in 2 Days</span>
+                      </div>
                       <dl class="ew-meta-list">
                           <div><dt>Serial number</dt><dd>${escapeHtml(reg.serialNumber || "-")}</dd></div>
                           <div><dt>Standard warranty ends</dt><dd>${formatDate(reg.standardWarrantyEnd)}</dd></div>

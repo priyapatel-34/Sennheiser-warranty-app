@@ -156,11 +156,21 @@ async function notifyFinanceTeam(settings, subject, html) {
     .filter(Boolean);
 
   for (const to of emails) {
-    await sendEmailService({ to, subject, html, from: process.env.DEFAULT_FROM_EMAIL });
+    await sendEmailService({
+      to,
+      subject,
+      html,
+      from: process.env.DEFAULT_FROM_EMAIL,
+    });
   }
 }
 
-async function sendRefundCustomerEmail(type, record, entitlement, storeName = "Sennheiser") {
+async function sendRefundCustomerEmail(
+  type,
+  record,
+  entitlement,
+  storeName = "Sennheiser"
+) {
   const customerEmail = record.customer_email || entitlement.customer_email;
   if (!customerEmail) return;
 
@@ -718,7 +728,7 @@ export async function approveRefundRequest(shopId, refundId, actor, adminNotes) 
     },
   });
 
-  await sendRefundCustomerEmail("approved", record, entitlement);
+  await sendRefundCustomerEmail("approved", record, entitlement, "Sennheiser");
   return mapRefundRow(record);
 }
 
@@ -742,7 +752,7 @@ export async function rejectRefundRequest(shopId, refundId, actor, rejectionReas
     },
   });
 
-  await sendRefundCustomerEmail("rejected", record, entitlement);
+  await sendRefundCustomerEmail("rejected", record, entitlement, "Sennheiser");
   return mapRefundRow(record);
 }
 
@@ -766,7 +776,7 @@ export async function completeRefundRequest(shopId, refundId, actor, adminNotes)
     },
   });
 
-  await sendRefundCustomerEmail("completed", record, entitlement);
+  await sendRefundCustomerEmail("completed", record, entitlement, "Sennheiser");
   return mapRefundRow(record);
 }
 
