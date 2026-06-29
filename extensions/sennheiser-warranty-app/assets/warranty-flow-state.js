@@ -16,6 +16,17 @@
     sessionStorage.setItem(key, JSON.stringify(value));
   }
 
+  async function fetchExtendedWarrantyOffer(registerId) {
+    const res = await fetch(
+      `/apps/warranty/extended-warranty/offer?register_id=${encodeURIComponent(registerId)}`
+    );
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to load extended warranty offer");
+    }
+    return data;
+  }
+
   window.WarrantyFlowState = {
     savePostRegistration(state) {
       writeJson(POST_REG_KEY, { ...state, savedAt: Date.now() });
@@ -43,6 +54,71 @@
       sessionStorage.removeItem(REG_CONTEXT_KEY);
     },
 
+    async resolveExtendedWarrantyOffer(data) {
+      if (data?.extendedWarrantyOffer?.eligible) {
+        return data.extendedWarrantyOffer;
+      }
+
+      const registerId = data?.registrations?.[0]?.registerId;
+      if (!registerId) return data?.extendedWarrantyOffer || null;
+
+      try {
+        return await fetchExtendedWarrantyOffer(registerId);
+      } catch (err) {
+        console.warn("Extended warranty offer fetch failed:", err.message);
+        return data?.extendedWarrantyOffer || null;
+      }
+    },
+
+    /**
+     * After standard registration:
+     * - eligible EW within purchase window → show offer page
+     * - purchase window expired / no offer → My Products
+     */
+    async handlePostRegistrationNavigation(data, options = {}) {
+      const {
+        myProductsLink = "/pages/my-products",
+        customerEmail = "",
+        customerName = "",
+        redirectDelayMs = 4500,
+      } = options;
+
+      const navigation = data?.postRegistrationNavigation || {};
+      const offer = await this.resolveExtendedWarrantyOffer(data);
+      const reason = offer?.reason || navigation.reason || null;
+      const purchaseWindowExpired = reason === "purchase_window_expired";
+
+      if (offer?.eligible && window.ExtendedWarrantyOffer) {
+        try {
+          const rendered = window.ExtendedWarrantyOffer.renderOffer(offer, {
+            myProductsLink,
+            customerEmail,
+            customerName,
+            onSkip: () => {
+              this.clearPostRegistration();
+              window.location.href = myProductsLink;
+            },
+          });
+          if (rendered) return { shownOffer: true };
+        } catch (err) {
+          console.error("Extended warranty offer render failed:", err);
+        }
+      }
+
+      this.clearPostRegistration();
+
+      if (purchaseWindowExpired) {
+        window.location.href = myProductsLink;
+        return { redirected: true, reason: "purchase_window_expired" };
+      }
+
+      window.setTimeout(() => {
+        window.location.href = myProductsLink;
+      }, redirectDelayMs);
+
+      return { redirected: true, delayed: true, reason: reason || "no_offer" };
+    },
+
     async restoreExtendedWarrantyOffer(options = {}) {
       const state = this.getPostRegistration();
       if (!state?.registerId || !window.ExtendedWarrantyOffer) {
@@ -50,12 +126,9 @@
       }
 
       try {
-        const res = await fetch(
-          `/apps/warranty/extended-warranty/offer?register_id=${encodeURIComponent(state.registerId)}`
-        );
-        const data = await res.json();
+        const data = await fetchExtendedWarrantyOffer(state.registerId);
 
-        if (!res.ok || !data.eligible) {
+        if (!data.eligible) {
           if (data.reason === "already_purchased") {
             this.clearPostRegistration();
             window.WarrantyToast?.showSuccess(

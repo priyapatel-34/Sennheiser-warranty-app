@@ -5,7 +5,6 @@ import WarrantyRegistrationSuccessTemplate from "../emailTemp/standard_warranty.
 import {
   getEntitlementsForRegistrations,
   formatEntitlementForApiExport,
-  getExtendedWarrantySettings,
   buildExtendedWarrantyOffer,
   getNumericIdFromGid,
   trySyncPendingEntitlementActivation,
@@ -126,11 +125,21 @@ async function enrichProductWarrantyFields(
     const registeredProduct = {
       warranty_end: product.warranty_end,
     };
+    const refundDateRaw =
+      refundRecord?.completedAt ||
+      refundRecord?.createdAt ||
+      entitlementRow.refunded_at ||
+      null;
     product.extended_warranty = {
       ...formatEntitlementForApiExport(entitlementRow, registeredProduct),
       displayStatus: getExtendedWarrantyDisplayStatus(entitlementRow, refundRecord),
       refundStatus: refundRecord?.status || null,
-      refundAmount: refundRecord?.netRefundAmount ?? entitlementRow.refund_amount ?? null,
+      refundType: refundRecord?.refundType || null,
+      refundAmount:
+        refundRecord?.netRefundAmount ?? entitlementRow.refund_amount ?? null,
+      refundDate: refundDateRaw
+        ? new Date(refundDateRaw).toISOString().split("T")[0]
+        : null,
     };
   } else if (product.register_id && product.is_registered) {
     product.extended_warranty = {
@@ -161,7 +170,11 @@ async function enrichProductWarrantyFields(
   }
 
   if (entitlementRow?.status === "pending_payment" && !hasActiveExtendedWarranty) {
-    product.can_extend_warranty = true;
+    product.can_extend_warranty = false;
+    product.extended_warranty_eligibility = {
+      eligible: false,
+      reason: "pending_payment",
+    };
   }
 
   return product;
@@ -743,8 +756,9 @@ export async function getMyProducts(req, res) {
           variant_title: variantTitle,
           sku: sku,
           image: image,
-          order_number: order.name,
           purchase_date: order.processedAt,
+          registered_at: registered?.created_at || null,
+          sort_date: registered?.created_at || order.processedAt,
           register_id: registered?.id || null,
           serial_number: registered?.serial_number || null,
           warranty_start: registered?.warranty_start || null,
@@ -801,6 +815,8 @@ export async function getMyProducts(req, res) {
         order_number: null,
         register_id: ep.id,
         purchase_date: ep.purchase_date,
+        registered_at: ep.created_at,
+        sort_date: ep.created_at || ep.purchase_date,
         serial_number: ep.serial_number,
         sku: ep.sku || null,
         warranty_start: ep.warranty_start,
@@ -865,6 +881,12 @@ export async function getMyProducts(req, res) {
         );
       }
     }
+
+    products.sort((a, b) => {
+      const dateA = new Date(a.sort_date || a.registered_at || a.purchase_date || 0);
+      const dateB = new Date(b.sort_date || b.registered_at || b.purchase_date || 0);
+      return dateB - dateA;
+    });
 
     /* =====================================
        5️⃣ RESPONSE
@@ -2902,11 +2924,9 @@ export async function registerProducts(req, res) {
         }
       }
 
-      const ewSettings = await getExtendedWarrantySettings(shopId);
       const primaryRegistration = createdProducts[0];
       let extendedWarrantyOffer = null;
-
-      if (ewSettings.enabled && primaryRegistration?.registerId) {
+      if (primaryRegistration?.registerId) {
         extendedWarrantyOffer = await buildExtendedWarrantyOffer(
           shopId,
           primaryRegistration.registerId,
@@ -2914,15 +2934,20 @@ export async function registerProducts(req, res) {
         );
       }
 
+      const postRegistrationNavigation = {
+        next: extendedWarrantyOffer?.eligible ? "extended_warranty" : "my_products",
+        reason: extendedWarrantyOffer?.reason || null,
+        purchaseWindow: extendedWarrantyOffer?.purchaseWindow || null,
+      };
+
       return res.json({
         success: true,
         registrations: createdProducts,
         showExtendedWarrantyOffer: Boolean(
-          extendedWarrantyOffer?.eligible &&
-            ewSettings.enabled &&
-            ewSettings.offer_after_registration
+          extendedWarrantyOffer?.eligible
         ),
         extendedWarrantyOffer,
+        postRegistrationNavigation,
       });
     } catch (err) {
       await conn.rollback();

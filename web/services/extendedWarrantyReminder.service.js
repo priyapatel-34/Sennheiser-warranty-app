@@ -4,8 +4,7 @@ import { sendEmailService } from "./email.service.js";
 import ExtendedWarrantyEligibilityReminderTemplate from "../emailTemp/extended_warranty_eligibility_reminder.js";
 import {
   evaluatePurchaseWindowEligibility,
-  getReminderDaysForCountry,
-  resolveRegistrationCountryCode,
+  getReminderDaysForShop,
 } from "./extendedWarranty.service.js";
 
 function formatDisplayDate(value) {
@@ -58,12 +57,10 @@ async function loadReminderCandidates() {
     `
     SELECT
       rp.*,
-      s.shop_domain,
-      ews.region_code
+      s.shop_domain
     FROM registered_products rp
     INNER JOIN shops s ON s.id = rp.shop_id AND s.is_installed = TRUE
     INNER JOIN extended_warranty_settings ews ON ews.shop_id = rp.shop_id
-      AND ews.enabled = 1
       AND ews.extended_warranty_purchase_days IS NOT NULL
     LEFT JOIN extended_warranty_entitlements ew ON ew.registered_product_id = rp.id
       AND ew.status IN ('active', 'pending_payment')
@@ -139,10 +136,9 @@ export async function sendExtendedWarrantyEligibilityReminders() {
   const summary = { checked: candidates.length, sent: 0, skipped: 0, errors: 0 };
 
   for (const row of candidates) {
-    const countryCode = await resolveRegistrationCountryCode(row.shop_id, row);
-    const reminderDays = await getReminderDaysForCountry(row.shop_id, countryCode);
+    const reminderDays = await getReminderDaysForShop(row.shop_id);
 
-    if (!countryCode || !reminderDays.length) {
+    if (!reminderDays.length) {
       summary.skipped += 1;
       continue;
     }
@@ -163,7 +159,7 @@ export async function sendExtendedWarrantyEligibilityReminders() {
       if (outcome.sent) {
         summary.sent += 1;
         console.log(
-          `📧 EW eligibility reminder (${window.daysRemaining}d, ${countryCode || "no-country"}) sent to ${row.customer_email} for registration ${row.id}`
+          `📧 EW eligibility reminder (${window.daysRemaining}d) sent to ${row.customer_email} for registration ${row.id}`
         );
       } else if (outcome.error) {
         summary.errors += 1;

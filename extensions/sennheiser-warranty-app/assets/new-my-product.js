@@ -53,6 +53,32 @@ function hasPurchasedExtendedWarranty(product) {
   return status === "active" || status === "expired" || status === "refunded";
 }
 
+function getExtendedWarrantyCardBadge(product) {
+  const ew = product?.extended_warranty;
+  if (!ew?.displayStatus || ew.displayStatus === "Not Purchased") return null;
+
+  const label = ew.displayStatus;
+  const normalized = label.toLowerCase();
+
+  if (normalized.includes("refund")) {
+    return { type: "ew-refunded", label };
+  }
+  if (normalized.includes("cancel")) {
+    return { type: "ew-cancelled", label };
+  }
+  if (normalized.includes("pending")) {
+    return { type: "ew-pending", label };
+  }
+  if (ew.status === "active" || label === "Active") {
+    return { type: "ew-active", label: "Extended Warranty Active" };
+  }
+  if (ew.status === "expired" || label === "Expired") {
+    return { type: "ew-expired", label: "Extended Warranty Expired" };
+  }
+
+  return { type: "ew-status", label };
+}
+
 function canShowExtendWarrantyButton(product) {
   return (
     product?.is_registered &&
@@ -180,6 +206,7 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
         const warrantyStatus = p.is_registered
           ? getWarrantyStatus(p.warranty_end)
           : null;
+        const ewBadge = getExtendedWarrantyCardBadge(p);
         const finalWarrantyExpiry = hasPurchasedExtendedWarranty(p)
           ? p.extended_warranty?.extendedWarrantyEndDate ||
             p.extended_warranty?.endDate ||
@@ -198,7 +225,11 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
               <div class="expiry">
                 <span class="gray-text">Serial No.: ${p.serial_number || "-"}</span>
                 ${
-                  warrantyStatus
+                  ewBadge
+                    ? `<div class="mp-warranty-badge mp-${ewBadge.type}">
+                        ${ewBadge.label}
+                      </div>`
+                    : warrantyStatus
                     ? `<div class="mp-warranty-badge mp-${warrantyStatus.type}">
                         <img class="mp-warranty-icon" src="${warrantyStatus.icon}" alt="${warrantyStatus.label}" />
                         ${warrantyStatus.label}
@@ -434,10 +465,10 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
       const ew = product.extended_warranty;
       const extendBtn = document.getElementById("mp-detail-extend-warranty-btn");
 
-      if (ewSection && ew && hasPurchasedExtendedWarranty(product)) {
+      if (ewSection && ew && (hasPurchasedExtendedWarranty(product) || ew.displayStatus)) {
         ewSection.classList.remove("hidden");
         document.getElementById("mp-detail-extended-status").innerText =
-          `Status: ${ew.displayStatus}`;
+          `Status: ${ew.displayStatus || ew.status || "Unknown"}`;
         document.getElementById("mp-detail-extended-plan").innerText =
           ew.planName ? `Plan: ${ew.planName}` : "";
         document.getElementById("mp-detail-extended-dates").innerText = [
@@ -450,6 +481,21 @@ function savePostRegistrationForResume(registerId, myProductsLink) {
         ]
           .filter(Boolean)
           .join(" · ");
+
+        const refundEl = document.getElementById("mp-detail-extended-refund");
+        if (refundEl) {
+          if (ew.refundDate) {
+            refundEl.classList.remove("hidden");
+            refundEl.innerText = `Refund date: ${formatDate(ew.refundDate)}${
+              ew.refundAmount != null
+                ? ` · Amount: ${Number(ew.refundAmount).toFixed(2)} ${ew.currency || ""}`.trim()
+                : ""
+            }`;
+          } else {
+            refundEl.classList.add("hidden");
+            refundEl.innerText = "";
+          }
+        }
       } else if (ewSection) {
         ewSection.classList.add("hidden");
       }

@@ -10,7 +10,7 @@ import {
   getExtendedWarrantySettings,
   getNumericIdFromGid,
   canPurchaseExtendedWarranty,
-  fetchVariantPrice,
+  fetchProductPrice,
   resolvePlanRowForCheckout,
 } from "../services/extendedWarranty.service.js";
 import { normalizeWarrantyPricingType } from "../services/extendedWarrantyPricing.js";
@@ -65,11 +65,6 @@ export async function initiateExtendedWarrantyCheckout(req, res) {
       return res.status(404).json({ error: "Shop not registered" });
     }
 
-    const settings = await getExtendedWarrantySettings(shopId);
-    if (!settings.enabled) {
-      return res.status(400).json({ error: "Extended warranty is disabled for this store" });
-    }
-
     const registered = await loadRegisteredProduct(shopId, registerId);
     if (!registered) {
       return res.status(404).json({ error: "Registration not found" });
@@ -88,11 +83,9 @@ export async function initiateExtendedWarrantyCheckout(req, res) {
       return res.status(404).json({ error: "Warranty plan not found" });
     }
 
-    const eligiblePlans = await loadEligiblePlans(
-      shopId,
-      registered,
-      settings.region_code || null
-    );
+    const settings = await getExtendedWarrantySettings(shopId);
+
+    const eligiblePlans = await loadEligiblePlans(shopId, registered);
     if (!eligiblePlans.some(p => p.plan_id === planId)) {
       return res.status(400).json({ error: "Plan not eligible for this registration" });
     }
@@ -114,11 +107,7 @@ export async function initiateExtendedWarrantyCheckout(req, res) {
     const email = customer_email || registered.customer_email;
 
     const pricingType = normalizeWarrantyPricingType(settings.warranty_pricing_type);
-    const variantPrice = await fetchVariantPrice(
-      session,
-      registered.shopify_variant_id,
-      registered.shopify_product_id
-    );
+    const variantPrice = await fetchProductPrice(session, registered);
 
     let resolvedPlanRow;
     try {

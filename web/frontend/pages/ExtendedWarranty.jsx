@@ -8,7 +8,6 @@ import {
   Modal,
   Badge,
   Text,
-  Checkbox,
   Pagination,
   EmptyState,
   useIndexResourceState,
@@ -105,8 +104,6 @@ export default function ExtendedWarrantyAdmin() {
   });
 
   const [settings, setSettings] = useState({
-    enabled: true,
-    offerAfterRegistration: true,
     termsUrl: "",
     coverageText: "",
     extendedWarrantyPurchaseDays: "",
@@ -209,8 +206,6 @@ export default function ExtendedWarrantyAdmin() {
       const data = await r.json();
       const s = data.settings || {};
       setSettings({
-        enabled: Boolean(s.enabled ?? true),
-        offerAfterRegistration: Boolean(s.offerAfterRegistration ?? true),
         termsUrl: s.termsUrl || "",
         coverageText: s.coverageText || "",
         extendedWarrantyPurchaseDays:
@@ -219,7 +214,6 @@ export default function ExtendedWarrantyAdmin() {
             : String(s.extendedWarrantyPurchaseDays),
         warrantyPricingType: s.warrantyPricingType || "amount",
         expiryReminderConfigs: (s.expiryReminderConfigs || []).map((entry) => ({
-          countryCode: entry.countryCode || null,
           reminderDays: (entry.reminderDays || []).map(String),
         })),
       });
@@ -485,7 +479,6 @@ export default function ExtendedWarrantyAdmin() {
     try {
       const expiryReminderConfigs = (settings.expiryReminderConfigs || [])
         .map((entry) => ({
-          countryCode: entry.countryCode?.trim().toUpperCase() || null,
           reminderDays: (entry.reminderDays || [])
             .map((d) => Number(d))
             .filter((d) => Number.isInteger(d) && d > 0),
@@ -496,8 +489,6 @@ export default function ExtendedWarrantyAdmin() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          enabled: settings.enabled,
-          offerAfterRegistration: settings.offerAfterRegistration,
           termsUrl: settings.termsUrl,
           coverageText: settings.coverageText,
           extendedWarrantyPurchaseDays:
@@ -520,34 +511,34 @@ export default function ExtendedWarrantyAdmin() {
     }
   };
 
-  const addExpiryReminderDay = (countryIndex) => {
+  const addExpiryReminderDay = (configIndex) => {
     setSettings((p) => {
       const next = [...(p.expiryReminderConfigs || [])];
-      next[countryIndex] = {
-        ...next[countryIndex],
-        reminderDays: [...(next[countryIndex].reminderDays || []), ""],
+      next[configIndex] = {
+        ...next[configIndex],
+        reminderDays: [...(next[configIndex].reminderDays || []), ""],
       };
       return { ...p, expiryReminderConfigs: next };
     });
   };
 
-  const updateExpiryReminderDay = (countryIndex, dayIndex, value) => {
+  const updateExpiryReminderDay = (configIndex, dayIndex, value) => {
     setSettings((p) => {
       const next = [...(p.expiryReminderConfigs || [])];
-      const days = [...(next[countryIndex].reminderDays || [])];
+      const days = [...(next[configIndex].reminderDays || [])];
       days[dayIndex] = value;
-      next[countryIndex] = { ...next[countryIndex], reminderDays: days };
+      next[configIndex] = { ...next[configIndex], reminderDays: days };
       return { ...p, expiryReminderConfigs: next };
     });
   };
 
-  const removeExpiryReminderDay = (countryIndex, dayIndex) => {
+  const removeExpiryReminderDay = (configIndex, dayIndex) => {
     setSettings((p) => {
       const next = [...(p.expiryReminderConfigs || [])];
-      const days = (next[countryIndex].reminderDays || []).filter(
+      const days = (next[configIndex].reminderDays || []).filter(
         (_, i) => i !== dayIndex
       );
-      next[countryIndex] = { ...next[countryIndex], reminderDays: days };
+      next[configIndex] = { ...next[configIndex], reminderDays: days };
       return { ...p, expiryReminderConfigs: next };
     });
   };
@@ -874,31 +865,6 @@ export default function ExtendedWarrantyAdmin() {
             </LegacyCard>
           ) : (
             <>
-              {/* General */}
-              {/* <LegacyCard sectioned>
-                <div style={styles.stack(16)}>
-                  <Text as="h2" variant="headingMd">
-                    General
-                  </Text>
-                  <Checkbox
-                    label="Extended warranty enabled"
-                    helpText="Show warranty offers to customers across your store."
-                    checked={settings.enabled}
-                    onChange={(v) =>
-                      setSettings((p) => ({ ...p, enabled: v }))
-                    }
-                  />
-                  <Checkbox
-                    label="Offer extended warranty after product registration"
-                    helpText="Prompt customers to purchase a warranty when they register a product."
-                    checked={settings.offerAfterRegistration}
-                    onChange={(v) =>
-                      setSettings((p) => ({ ...p, offerAfterRegistration: v }))
-                    }
-                  />
-                </div>
-              </LegacyCard> */}
-
               {/* Warranty pricing type */}
               <LegacyCard sectioned>
                 <div style={styles.stack(16)}>
@@ -988,32 +954,25 @@ export default function ExtendedWarrantyAdmin() {
 
                   {(settings.expiryReminderConfigs || []).length === 0 ? (
                     <div style={styles.infoBanner}>
-                      No reminder schedules configured. They will appear here
-                      once warranty plan regions are set up.
+                      No reminder schedules configured. Add reminder days below
+                      to notify customers before the purchase window closes.
                     </div>
                   ) : (
                     <div style={styles.stack(12)}>
                       {(settings.expiryReminderConfigs || []).map(
-                        (entry, countryIndex) => (
+                        (entry, configIndex) => (
                           <div
-                            key={`reminder-${entry.countryCode || countryIndex}`}
+                            key={`reminder-${configIndex}`}
                             style={{
                               border: "1px solid #e1e3e5",
                               borderRadius: 8,
                               padding: "12px 14px",
                             }}
                           >
-                            {entry.countryCode && (
-                              <div style={{ marginBottom: 8 }}>
-                                <Text as="p" variant="bodySm" fontWeight="semibold">
-                                  Country: {entry.countryCode}
-                                </Text>
-                              </div>
-                            )}
                             <div style={{ ...styles.row(8, "center"), flexWrap: "wrap" }}>
                               {(entry.reminderDays || []).map((day, dayIndex) => (
                                 <div
-                                  key={`reminder-day-${countryIndex}-${dayIndex}`}
+                                  key={`reminder-day-${configIndex}-${dayIndex}`}
                                   style={{
                                     display: "flex",
                                     alignItems: "center",
@@ -1030,7 +989,7 @@ export default function ExtendedWarrantyAdmin() {
                                     min={1}
                                     onChange={(e) =>
                                       updateExpiryReminderDay(
-                                        countryIndex,
+                                        configIndex,
                                         dayIndex,
                                         e.target.value
                                       )
@@ -1052,7 +1011,7 @@ export default function ExtendedWarrantyAdmin() {
                                   <button
                                     disabled={(entry.reminderDays || []).length <= 1}
                                     onClick={() =>
-                                      removeExpiryReminderDay(countryIndex, dayIndex)
+                                      removeExpiryReminderDay(configIndex, dayIndex)
                                     }
                                     style={{
                                       marginLeft: 2,
@@ -1076,7 +1035,7 @@ export default function ExtendedWarrantyAdmin() {
                               ))}
                               <Button
                                 size="slim"
-                                onClick={() => addExpiryReminderDay(countryIndex)}
+                                onClick={() => addExpiryReminderDay(configIndex)}
                               >
                                 + Add day
                               </Button>

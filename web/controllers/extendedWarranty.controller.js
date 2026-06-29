@@ -881,8 +881,6 @@ export async function updateEWDuration(req, res) {
 function mapSettingsRow(row, expiryReminderConfigs = []) {
   if (!row) {
     return {
-      enabled: true,
-      offerAfterRegistration: true,
       termsUrl: "",
       coverageText: "",
       extendedWarrantyPurchaseDays: null,
@@ -892,8 +890,6 @@ function mapSettingsRow(row, expiryReminderConfigs = []) {
   }
 
   return {
-    enabled: Boolean(row.enabled),
-    offerAfterRegistration: Boolean(row.offer_after_registration ?? true),
     termsUrl: row.terms_url || "",
     coverageText: row.coverage_text || "",
     extendedWarrantyPurchaseDays: row.extended_warranty_purchase_days ?? null,
@@ -945,8 +941,6 @@ export async function saveEWSettings(req, res) {
     }
 
     const {
-      enabled = true,
-      offerAfterRegistration = true,
       termsUrl = "",
       coverageText = "",
       extendedWarrantyPurchaseDays = null,
@@ -974,16 +968,12 @@ export async function saveEWSettings(req, res) {
       `
       INSERT INTO extended_warranty_settings (
         shop_id,
-        enabled,
-        offer_after_registration,
         terms_url,
         coverage_text,
         extended_warranty_purchase_days,
         warranty_pricing_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
-        enabled = VALUES(enabled),
-        offer_after_registration = VALUES(offer_after_registration),
         terms_url = VALUES(terms_url),
         coverage_text = VALUES(coverage_text),
         extended_warranty_purchase_days = VALUES(extended_warranty_purchase_days),
@@ -992,8 +982,6 @@ export async function saveEWSettings(req, res) {
       `,
       [
         shopId,
-        enabled ? 1 : 0,
-        offerAfterRegistration ? 1 : 0,
         termsUrl || null,
         coverageText || null,
         purchaseDays,

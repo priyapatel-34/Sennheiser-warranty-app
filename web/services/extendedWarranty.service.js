@@ -40,115 +40,29 @@ export const MERCHANDISING_BADGE_LABELS = {
   limited_offer: "Limited Offer",
 };
 
-export function normalizeCountryCode(value) {
-  if (!value) return null;
-  const code = String(value).trim().toUpperCase();
-  return code.length >= 2 ? code.slice(0, 10) : null;
-}
-
-export async function getConfiguredCountryCodes(shopId) {
-  const codes = new Set();
-
-  const [planRows] = await pool.query(
-    `
-    SELECT DISTINCT UPPER(TRIM(region_code)) AS country_code
-    FROM extended_warranty_plans
-    WHERE shop_id = ?
-      AND region_code IS NOT NULL
-      AND TRIM(region_code) != ''
-    ORDER BY country_code
-    `,
-    [shopId]
-  );
-
-  for (const row of planRows) {
-    codes.add(row.country_code);
-  }
-
-  const settings = await getExtendedWarrantySettings(shopId);
-  const settingsCode = normalizeCountryCode(settings.region_code);
-  if (settingsCode) {
-    codes.add(settingsCode);
-  }
-
-  return [...codes].sort();
-}
-
-export async function resolveRegistrationCountryCode(shopId, registered) {
-  const direct = normalizeCountryCode(registered.country_code);
-  if (direct) return direct;
-
-  const productId = registered.shopify_product_id
-    ? Number(registered.shopify_product_id)
-    : null;
-
-  if (productId) {
-    const [planRegions] = await pool.query(
-      `
-      SELECT DISTINCT UPPER(TRIM(region_code)) AS country_code
-      FROM extended_warranty_plans
-      WHERE shop_id = ?
-        AND shopify_product_id = ?
-        AND region_code IS NOT NULL
-        AND TRIM(region_code) != ''
-      `,
-      [shopId, productId]
-    );
-
-    if (planRegions.length === 1) {
-      return planRegions[0].country_code;
-    }
-  }
-
-  const settings = await getExtendedWarrantySettings(shopId);
-  return normalizeCountryCode(settings.region_code);
-}
+/** Shop-scoped reminder configs (country_code column retained for schema compat). */
+const SHOP_REMINDER_SCOPE = "SHOP";
 
 export async function getExpiryReminderConfigs(shopId) {
   const [rows] = await pool.query(
     `
-    SELECT country_code, reminder_days
+    SELECT reminder_days
     FROM extended_warranty_expiry_reminder_configs
     WHERE shop_id = ?
-    ORDER BY country_code, reminder_days DESC
+    ORDER BY reminder_days DESC
     `,
     [shopId]
   );
 
-  const byCountry = new Map();
-  for (const row of rows) {
-    const code = row.country_code;
-    if (!byCountry.has(code)) {
-      byCountry.set(code, []);
-    }
-    byCountry.get(code).push(row.reminder_days);
-  }
-
-  return [...byCountry.entries()].map(([countryCode, reminderDays]) => ({
-    countryCode,
-    reminderDays,
-  }));
+  return [
+    {
+      reminderDays: rows.length ? rows.map(r => String(r.reminder_days)) : [""],
+    },
+  ];
 }
 
 export async function buildExpiryReminderAdminConfigs(shopId) {
-  const countryCodes = await getConfiguredCountryCodes(shopId);
-  const saved = await getExpiryReminderConfigs(shopId);
-  const savedMap = new Map(saved.map(entry => [entry.countryCode, entry.reminderDays]));
-
-  if (!countryCodes.length) {
-    const fallbackDays = saved[0]?.reminderDays?.length ? saved[0].reminderDays : [""];
-    return [
-      {
-        countryCode: saved[0]?.countryCode || null,
-        reminderDays: fallbackDays,
-      },
-    ];
-  }
-
-  return countryCodes.map(countryCode => ({
-    countryCode,
-    reminderDays: savedMap.get(countryCode)?.length ? savedMap.get(countryCode) : [""],
-  }));
+  return getExpiryReminderConfigs(shopId);
 }
 
 export async function saveExpiryReminderConfigs(shopId, configs = []) {
@@ -156,58 +70,24 @@ export async function saveExpiryReminderConfigs(shopId, configs = []) {
     throw new Error("expiryReminderConfigs must be an array");
   }
 
-  const allowedCountries = new Set(await getConfiguredCountryCodes(shopId));
-  const settings = await getExtendedWarrantySettings(shopId);
-  const settingsCountry = normalizeCountryCode(settings.region_code);
+  const entry = configs[0] || { reminderDays: [] };
+  const rawDays = entry.reminderDays ?? entry.reminder_days;
+  if (!Array.isArray(rawDays) || !rawDays.length) {
+    throw new Error("At least one reminder day must be configured");
+  }
 
   const normalized = [];
-  const seenCountries = new Set();
-
-  for (const entry of configs) {
-    let countryCode = normalizeCountryCode(
-      entry.countryCode || entry.country_code
-    );
-
-    if (!countryCode) {
-      if (allowedCountries.size === 1) {
-        countryCode = [...allowedCountries][0];
-      } else if (settingsCountry) {
-        countryCode = settingsCountry;
-      } else if (!allowedCountries.size && configs.length === 1) {
-        countryCode = settingsCountry || "DEFAULT";
-      } else {
-        throw new Error("Each reminder configuration requires a country");
-      }
+  const daySet = new Set();
+  for (const raw of rawDays) {
+    const days = Number(raw);
+    if (!Number.isInteger(days) || days < 1 || days > 3650) {
+      throw new Error("Reminder days must be whole numbers between 1 and 3650");
     }
-
-    if (allowedCountries.size && !allowedCountries.has(countryCode)) {
-      throw new Error(
-        `Country ${countryCode} is not configured for this store`
-      );
+    if (daySet.has(days)) {
+      throw new Error(`Duplicate reminder day ${days}`);
     }
-
-    const rawDays = entry.reminderDays ?? entry.reminder_days;
-    if (!Array.isArray(rawDays) || !rawDays.length) {
-      throw new Error(
-        `Country ${countryCode} must have at least one reminder day configured`
-      );
-    }
-
-    const daySet = new Set();
-    for (const raw of rawDays) {
-      const days = Number(raw);
-      if (!Number.isInteger(days) || days < 1 || days > 3650) {
-        throw new Error(
-          `Reminder days for ${countryCode} must be whole numbers between 1 and 3650`
-        );
-      }
-      if (daySet.has(days)) {
-        throw new Error(`Duplicate reminder day ${days} for country ${countryCode}`);
-      }
-      daySet.add(days);
-      normalized.push({ countryCode, days });
-    }
-    seenCountries.add(countryCode);
+    daySet.add(days);
+    normalized.push(days);
   }
 
   const conn = await pool.getConnection();
@@ -218,14 +98,14 @@ export async function saveExpiryReminderConfigs(shopId, configs = []) {
       [shopId]
     );
 
-    for (const { countryCode, days } of normalized) {
+    for (const days of normalized) {
       await conn.query(
         `
         INSERT INTO extended_warranty_expiry_reminder_configs (
           shop_id, country_code, reminder_days
         ) VALUES (?, ?, ?)
         `,
-        [shopId, countryCode, days]
+        [shopId, SHOP_REMINDER_SCOPE, days]
       );
     }
 
@@ -239,36 +119,22 @@ export async function saveExpiryReminderConfigs(shopId, configs = []) {
   }
 }
 
-export async function getReminderDaysForCountry(shopId, countryCode) {
-  const normalized = normalizeCountryCode(countryCode);
-  if (normalized) {
-    const [rows] = await pool.query(
-      `
-      SELECT reminder_days
-      FROM extended_warranty_expiry_reminder_configs
-      WHERE shop_id = ? AND country_code = ?
-      ORDER BY reminder_days DESC
-      `,
-      [shopId, normalized]
-    );
-
-    if (rows.length) {
-      return rows.map(r => r.reminder_days);
-    }
-  }
-
-  const [fallbackRows] = await pool.query(
+export async function getReminderDaysForShop(shopId) {
+  const [rows] = await pool.query(
     `
     SELECT reminder_days
     FROM extended_warranty_expiry_reminder_configs
     WHERE shop_id = ?
     ORDER BY reminder_days DESC
-    LIMIT 10
     `,
     [shopId]
   );
+  return rows.map(r => r.reminder_days);
+}
 
-  return fallbackRows.map(r => r.reminder_days);
+/** @deprecated Use getReminderDaysForShop — country scoping removed. */
+export async function getReminderDaysForCountry(shopId) {
+  return getReminderDaysForShop(shopId);
 }
 
 function daysSinceDate(value, referenceDate = new Date()) {
@@ -318,7 +184,6 @@ export async function evaluatePurchaseWindowEligibility(shopId, registered) {
     extendedWarrantyPurchaseDays: purchaseDays,
     daysSinceRegistration: elapsedDays,
     daysRemaining: purchaseDays - elapsedDays,
-    regionCode: settings.region_code || null,
   };
 }
 
@@ -326,11 +191,8 @@ export async function getExtendedWarrantySettings(shopId) {
   const [[row]] = await pool.query(
     `
     SELECT
-      enabled,
-      offer_after_registration,
       terms_url,
       coverage_text,
-      region_code,
       extended_warranty_purchase_days,
       warranty_pricing_type
     FROM extended_warranty_settings
@@ -341,15 +203,52 @@ export async function getExtendedWarrantySettings(shopId) {
 
   return (
     row || {
-      enabled: 1,
-      offer_after_registration: 1,
       terms_url: null,
       coverage_text: null,
-      region_code: null,
       extended_warranty_purchase_days: null,
       warranty_pricing_type: DEFAULT_WARRANTY_PRICING_TYPE,
     }
   );
+}
+
+export async function fetchProductPrice(session, registered) {
+  if (!session?.shop || !registered) return null;
+
+  if (registered.shopify_variant_id) {
+    return fetchVariantPrice(
+      session,
+      registered.shopify_variant_id,
+      registered.shopify_product_id
+    );
+  }
+
+  const productId = registered.shopify_product_id;
+  if (!productId) return null;
+
+  try {
+    const admin = new shopify.api.clients.Graphql({ session });
+    const productGid = String(productId).startsWith("gid://")
+      ? productId
+      : `gid://shopify/Product/${productId}`;
+    const response = await admin.request(
+      `
+      query ProductPrice($id: ID!) {
+        product(id: $id) {
+          variants(first: 1) {
+            edges {
+              node { price }
+            }
+          }
+        }
+      }
+      `,
+      { variables: { id: productGid } }
+    );
+    const price = response.data?.product?.variants?.edges?.[0]?.node?.price;
+    return price != null ? Number(price) : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchVariantPrice(session, variantId, productId = null) {
@@ -447,18 +346,19 @@ export function mapPlanForApi(planRow, pricingType, productVariantPrice = null) 
 
   if (type === "percentage") {
     base.percentage = Number(planRow.price);
-    if (productVariantPrice != null) {
-      try {
-        const resolved = resolvePlanPrice({
-          configuredPrice: planRow.price,
-          pricingType: type,
-          productVariantPrice,
-        });
-        base.calculatedPrice = resolved.calculatedPrice;
-        base.displayPrice = String(resolved.calculatedPrice);
-      } catch {
-        return null;
-      }
+    if (productVariantPrice == null) {
+      return null;
+    }
+    try {
+      const resolved = resolvePlanPrice({
+        configuredPrice: planRow.price,
+        pricingType: type,
+        productVariantPrice,
+      });
+      base.calculatedPrice = resolved.calculatedPrice;
+      base.displayPrice = String(resolved.calculatedPrice);
+    } catch {
+      return null;
     }
     return base;
   }
@@ -570,45 +470,72 @@ export async function loadRegisteredProduct(shopId, registerId) {
   return row || null;
 }
 
-/** Load active EW plans eligible for a registered product (variant + region aware). */
-export async function loadEligiblePlans(shopId, registeredProduct, regionCode = null) {
+/** Load active EW plans for a registered product (scoped by shop + product + variant). */
+export async function loadEligiblePlans(shopId, registeredProduct) {
   const productId = Number(registeredProduct.shopify_product_id);
   const variantId = registeredProduct.shopify_variant_id
-    ? Number(registeredProduct.shopify_variant_id)
+    ? Number(String(registeredProduct.shopify_variant_id).split("/").pop())
     : null;
 
-  let sql = `
-    SELECT
-      p.id AS plan_id,
-      p.plan_name,
-      p.duration_years,
-      p.duration_months,
-      p.price,
-      p.currency,
-      p.status,
-      p.region_code,
-      p.coverage_text,
-      p.shopify_checkout_variant_id
-    FROM extended_warranty_plans p
-    WHERE p.shop_id = ?
-      AND p.shopify_product_id = ?
-      AND p.status = 'active'
-  `;
-  const params = [shopId, productId];
+  const queryPlans = async (forVariantId, productLevelOnly = false) => {
+    let sql = `
+      SELECT
+        p.id AS plan_id,
+        p.plan_name,
+        p.duration_years,
+        p.duration_months,
+        p.price,
+        p.currency,
+        p.status,
+        p.coverage_text,
+        p.shopify_checkout_variant_id
+      FROM extended_warranty_plans p
+      WHERE p.shop_id = ?
+        AND p.shopify_product_id = ?
+        AND p.status = 'active'
+    `;
+    const params = [shopId, productId];
 
-  if (variantId) {
-    sql += ` AND p.shopify_variant_id = ?`;
-    params.push(variantId);
+    if (productLevelOnly) {
+      sql += ` AND (p.shopify_variant_id IS NULL OR p.shopify_variant_id = 0)`;
+    } else if (forVariantId) {
+      sql += ` AND p.shopify_variant_id = ?`;
+      params.push(forVariantId);
+    }
+
+    sql += ` ORDER BY p.duration_months ASC`;
+    const [rows] = await pool.query(sql, params);
+    return rows;
+  };
+
+  let rows = variantId ? await queryPlans(variantId) : [];
+  if (!rows.length) {
+    rows = await queryPlans(null, true);
+  }
+  if (!rows.length && productId) {
+    const [allProductRows] = await pool.query(
+      `
+      SELECT
+        p.id AS plan_id,
+        p.plan_name,
+        p.duration_years,
+        p.duration_months,
+        p.price,
+        p.currency,
+        p.status,
+        p.coverage_text,
+        p.shopify_checkout_variant_id
+      FROM extended_warranty_plans p
+      WHERE p.shop_id = ?
+        AND p.shopify_product_id = ?
+        AND p.status = 'active'
+      ORDER BY p.duration_months ASC
+      `,
+      [shopId, productId]
+    );
+    rows = allProductRows;
   }
 
-  if (regionCode) {
-    sql += ` AND (p.region_code IS NULL OR p.region_code = ?)`;
-    params.push(regionCode);
-  }
-
-  sql += ` ORDER BY p.duration_months ASC`;
-
-  const [rows] = await pool.query(sql, params);
   return rows;
 }
 
@@ -1084,11 +1011,6 @@ export function formatMoney(amount, currency, locale) {
 export async function buildExtendedWarrantyOffer(shopId, registerId, options = {}) {
   const { session = null } = options;
   const settings = await getExtendedWarrantySettings(shopId);
-  const regionCode = settings.region_code || null;
-
-  if (!settings.enabled) {
-    return { eligible: false, reason: "extended_warranty_disabled" };
-  }
 
   const registered = await loadRegisteredProduct(shopId, registerId);
   if (!registered) {
@@ -1104,6 +1026,14 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
     };
   }
 
+  if (existing?.status === "pending_payment") {
+    return {
+      eligible: false,
+      reason: "pending_payment",
+      pendingEntitlement: formatEntitlementForApi(existing, registered),
+    };
+  }
+
   const purchaseWindow = await evaluatePurchaseWindowEligibility(shopId, registered);
   if (!purchaseWindow.allowed) {
     return {
@@ -1113,7 +1043,7 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
     };
   }
 
-  const plans = await loadEligiblePlans(shopId, registered, regionCode);
+  const plans = await loadEligiblePlans(shopId, registered);
   if (!plans.length) {
     return { eligible: false, reason: "no_plans_configured" };
   }
@@ -1121,11 +1051,7 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
   const pricingType = normalizeWarrantyPricingType(settings.warranty_pricing_type);
   const productVariantPrice =
     pricingType === "percentage" && session
-      ? await fetchVariantPrice(
-          session,
-          registered.shopify_variant_id,
-          registered.shopify_product_id
-        )
+      ? await fetchProductPrice(session, registered)
       : null;
 
   const shopCurrency = plans[0]?.currency || null;
@@ -1206,7 +1132,6 @@ export async function canPurchaseExtendedWarranty(shopId, registerId) {
   };
 }
 
-/** Safety net when ORDERS_PAID webhook was missed (e.g. tunnel downtime). */
 export async function trySyncPendingEntitlementActivation({
   session,
   shopId,
@@ -1269,7 +1194,6 @@ export async function trySyncPendingEntitlementActivation({
         break;
       }
     }
-
     await activateEntitlementFromPayment({
       shopId,
       registerId,

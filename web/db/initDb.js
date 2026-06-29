@@ -25,8 +25,7 @@ async function ensureSchemaUpdates() {
   }
 
   const planColumns = [
-    ["region_code", "VARCHAR(10) NULL AFTER status"],
-    ["coverage_text", "TEXT NULL AFTER region_code"],
+    ["coverage_text", "TEXT NULL AFTER status"],
     [
       "shopify_checkout_variant_id",
       "BIGINT NULL AFTER coverage_text",
@@ -208,7 +207,7 @@ async function ensureSchemaUpdates() {
   }
 
   const ewSettingsColumns = [
-    ["extended_warranty_purchase_days", "INT NULL AFTER region_code"],
+    ["extended_warranty_purchase_days", "INT NULL AFTER coverage_text"],
     [
       "warranty_pricing_type",
       "ENUM('amount', 'percentage') NOT NULL DEFAULT 'amount' AFTER extended_warranty_purchase_days",
@@ -240,6 +239,9 @@ async function ensureSchemaUpdates() {
     "default_warranty_image_url",
     "store_display_name",
     "default_purchase_window_days",
+    "region_code",
+    "enabled",
+    "offer_after_registration",
   ];
 
   for (const col of ewSettingsDropColumns) {
@@ -249,6 +251,11 @@ async function ensureSchemaUpdates() {
       );
       console.log(`✅ Removed extended_warranty_settings.${col}`);
     }
+  }
+
+  if (await columnExists("extended_warranty_plans", "region_code")) {
+    await pool.query(`ALTER TABLE extended_warranty_plans DROP COLUMN region_code`);
+    console.log("✅ Removed extended_warranty_plans.region_code");
   }
 
   try {
@@ -531,11 +538,8 @@ export async function initDb() {
       CREATE TABLE IF NOT EXISTS extended_warranty_settings (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         shop_id BIGINT UNSIGNED NOT NULL,
-        enabled TINYINT(1) NOT NULL DEFAULT 1,
-        offer_after_registration TINYINT(1) NOT NULL DEFAULT 1,
         terms_url VARCHAR(500) NULL,
         coverage_text TEXT NULL,
-        region_code VARCHAR(10) NULL,
         extended_warranty_purchase_days INT NULL,
         warranty_pricing_type ENUM('amount', 'percentage') NOT NULL DEFAULT 'amount',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

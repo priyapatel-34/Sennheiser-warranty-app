@@ -315,34 +315,11 @@
 
         window.WarrantyToast?.showSuccess("Product registered successfully");
 
-        if (
-          data.showExtendedWarrantyOffer &&
-          data.extendedWarrantyOffer?.eligible &&
-          window.ExtendedWarrantyOffer
-        ) {
-          try {
-            const rendered = window.ExtendedWarrantyOffer.renderOffer(
-              data.extendedWarrantyOffer,
-              {
-                myProductsLink: myProductLink,
-                customerEmail: emailInput?.value?.trim() || "",
-                customerName: nameInput?.value?.trim() || "",
-                onSkip: () => {
-                  window.WarrantyFlowState?.clearPostRegistration();
-                  window.location.href = myProductLink;
-                },
-              }
-            );
-            if (rendered) return;
-          } catch (err) {
-            console.error("Extended warranty offer render failed:", err);
-          }
-        }
-
-        window.setTimeout(() => {
-          window.WarrantyFlowState?.clearPostRegistration();
-          window.location.href = myProductLink;
-        }, 4500);
+        await window.WarrantyFlowState?.handlePostRegistrationNavigation(data, {
+          myProductsLink: myProductLink,
+          customerEmail: emailInput?.value?.trim() || "",
+          customerName: nameInput?.value?.trim() || "",
+        });
       }
       
     } catch {

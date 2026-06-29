@@ -160,6 +160,38 @@
   color: #d93025;
 }
 
+.mp-warranty-badge.mp-ew-refunded {
+  background: rgba(224, 183, 25, 0.2);
+  color: #9a6700;
+}
+
+.mp-warranty-badge.mp-ew-cancelled {
+  background: rgba(68, 71, 74, 0.12);
+  color: #44474a;
+}
+
+.mp-warranty-badge.mp-ew-pending {
+  background: rgba(26, 82, 118, 0.12);
+  color: #1a5276;
+}
+
+.mp-warranty-badge.mp-ew-active {
+  background: rgba(40, 212, 136, 0.2);
+  color: #28D488;
+}
+
+.mp-warranty-badge.mp-ew-expired,
+.mp-warranty-badge.mp-ew-status {
+  background: rgba(217, 48, 37, 0.2);
+  color: #d93025;
+}
+
+.mp-detail-extended-warranty #mp-detail-extended-refund {
+  margin-top: 8px;
+  color: #9a6700;
+  font-size: 14px;
+}
+
 .mp-detail-status {
   margin-left: 8px;
   font-weight: 600;

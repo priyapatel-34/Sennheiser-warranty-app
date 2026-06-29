@@ -4,6 +4,8 @@ dotenv.config();
 
 const EMAIL_MODE = (process.env.EMAIL_MODE || "auto").toLowerCase();
 const SENDGRID_KEY = process.env.SENDGRID_API_KEY || "";
+const DEFAULT_FROM =
+  process.env.DEFAULT_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || "";
 
 function isTestMode() {
   if (EMAIL_MODE === "test" || EMAIL_MODE === "log") return true;
@@ -15,6 +17,34 @@ if (SENDGRID_KEY && !isTestMode()) {
   sgMail.setApiKey(SENDGRID_KEY);
 }
 
+function normalizeEmailAddress(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function extractSendGridError(error) {
+  const body = error.response?.body;
+  if (!body) {
+    return {
+      message: error.message,
+      statusCode: error.code || error.response?.statusCode || null,
+    };
+  }
+
+  const errors = Array.isArray(body.errors) ? body.errors : [];
+  return {
+    message: errors.map(e => e.message).filter(Boolean).join("; ") || error.message,
+    statusCode: error.code || error.response?.statusCode || null,
+    errors,
+  };
+}
+
+/**
+ * SendGrid supports sending to the same address as the verified sender
+ * (from === to). Delivery still requires the FROM address to be verified
+ * as a Single Sender or authenticated domain in SendGrid.
+ */
 export const sendEmailService = async ({
   to,
   subject,
@@ -23,9 +53,10 @@ export const sendEmailService = async ({
   from,
   replyTo,
 }) => {
+  const resolvedFrom = from || DEFAULT_FROM || "noreply@example.com";
   const payload = {
     to,
-    from: from || process.env.DEFAULT_FROM_EMAIL || "noreply@example.com",
+    from: resolvedFrom,
     subject,
     html,
     text: text || (html ? html.replace(/<[^>]*>?/gm, "") : ""),
@@ -37,6 +68,8 @@ export const sendEmailService = async ({
       to: payload.to,
       from: payload.from,
       subject: payload.subject,
+      sameAddress:
+        normalizeEmailAddress(payload.to) === normalizeEmailAddress(payload.from),
       mode: EMAIL_MODE || "auto",
       preview: payload.text?.slice(0, 200),
     });
@@ -53,18 +86,53 @@ export const sendEmailService = async ({
     return { success: false, error: "SendGrid not configured", skipped: true };
   }
 
+  if (!DEFAULT_FROM && !from) {
+    console.warn(
+      "⚠️ DEFAULT_FROM_EMAIL is not set — SendGrid requires a verified sender address"
+    );
+  }
+
   try {
     const response = await sgMail.send(payload);
-    console.log("📧 Email sent:", { to, subject, messageId: response[0].headers["x-message-id"] });
+    const messageId = response[0]?.headers?.["x-message-id"] || null;
+    const statusCode = response[0]?.statusCode || 202;
+
+    console.log("📧 Email accepted by SendGrid:", {
+      to: payload.to,
+      from: payload.from,
+      subject: payload.subject,
+      statusCode,
+      messageId,
+      sameAddress:
+        normalizeEmailAddress(payload.to) === normalizeEmailAddress(payload.from),
+    });
+
     return {
       success: true,
-      messageId: response[0].headers["x-message-id"],
+      messageId,
+      statusCode,
     };
   } catch (error) {
-    console.error("SendGrid Error:", error.response?.body || error.message);
+    const parsed = extractSendGridError(error);
+    console.error("SendGrid Error:", {
+      to: payload.to,
+      from: payload.from,
+      subject: payload.subject,
+      statusCode: parsed.statusCode,
+      message: parsed.message,
+      hint:
+        parsed.statusCode === 403
+          ? "Verify the sender address in SendGrid (Settings → Sender Authentication)."
+          : parsed.message?.toLowerCase().includes("suppression")
+            ? "Recipient may be on SendGrid suppression list."
+            : undefined,
+      details: parsed.errors || undefined,
+    });
+
     return {
       success: false,
-      error: error.message,
+      error: parsed.message || error.message,
+      statusCode: parsed.statusCode || null,
     };
   }
 };
