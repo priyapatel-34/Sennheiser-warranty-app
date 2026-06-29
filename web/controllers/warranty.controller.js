@@ -1291,8 +1291,6 @@ export async function getProductDetail(req, res) {
 
 export async function getUnregisteredProductDetail(req, res) {
   try {
-    console.log("🔥 Incoming proxy query:", req.query);
-
     const { shop, logged_in_customer_id } = req.query;
 
     if (!shop || !logged_in_customer_id) {
@@ -1302,9 +1300,6 @@ export async function getUnregisteredProductDetail(req, res) {
     // 1️⃣ Build IDs
     const productGid = `gid://shopify/Product/${req.params.productId}`;
     const customerGid = `gid://shopify/Customer/${logged_in_customer_id}`;
-
-    console.log("🧩 Product GID:", productGid);
-    console.log("🧩 Customer GID:", customerGid);
 
     // 2️⃣ Get OFFLINE session (already validated in middleware)
     const session = res.locals.shopifySession;
@@ -1336,8 +1331,6 @@ export async function getUnregisteredProductDetail(req, res) {
     if (!customerEmail) {
       return res.status(404).json({ error: "Customer email not found" });
     }
-
-    console.log("📧 Customer Email:", customerEmail);
 
     /**
      * 5️⃣ Fetch ORDERS by EMAIL (PRODUCTION-SAFE)
@@ -2969,13 +2962,7 @@ export async function registerProducts(req, res) {
         warrantyPeriod: warrantyPeriodText,
       });
 
-      // const dynamicFrom = shopSenderEmail
-      //   ? `${shopName} <${shopSenderEmail}>`
-      //   : process.env.DEFAULT_FROM_EMAIL;
-
       const dynamicFrom = process.env.DEFAULT_FROM_EMAIL;
-
-      console.log("From email:", dynamicFrom);
 
       const emailResult = await sendEmailService({
         to: customerEmail,
@@ -3000,13 +2987,6 @@ export async function registerProducts(req, res) {
             statusCode: emailResult.statusCode,
           });
         }
-      } else {
-        console.log("Registration email accepted:", {
-          flow,
-          to: customerEmail,
-          messageId: emailResult.messageId,
-          testMode: emailResult.testMode || false,
-        });
       }
 
       const primaryRegistration = createdProducts[0];

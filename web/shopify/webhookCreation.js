@@ -1,9 +1,4 @@
 export async function registerProductUpdateWebhook(admin) {
-
-    console.log("In registerProductUpdateWebhook 111");
-
-    console.log("in registerProductUpdateWebhook 222::", process.env.SHOPIFY_APP_URL);
-
     await admin.request(`
       mutation {
         webhookSubscriptionCreate(

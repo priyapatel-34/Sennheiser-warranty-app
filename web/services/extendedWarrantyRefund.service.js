@@ -1,9 +1,7 @@
 import { pool } from "../db/mysql.js";
 import { sendEmailService } from "./email.service.js";
-import RefundCreatedTemplate from "../emailTemp/extended_warranty_refund_created.js";
 import RefundApprovedTemplate from "../emailTemp/extended_warranty_refund_approved.js";
 import RefundRejectedTemplate from "../emailTemp/extended_warranty_refund_rejected.js";
-import RefundCompletedTemplate from "../emailTemp/extended_warranty_refund_completed.js";
 import { calculateProRataRefund } from "./extendedWarrantyRefund.utils.js";
 
 const MS_PER_DAY = 86400000;
@@ -179,19 +177,8 @@ async function sendRefundCustomerEmail(
   const planName = record.warranty_plan || entitlement.plan_name;
   const formattedAmount = formatMoney(record.net_refund_amount, record.currency);
 
+  // Only approved and rejected refund emails are ever sent to customers.
   const templates = {
-    created: {
-      subject: "Extended Warranty Refund Request Received",
-      html: RefundCreatedTemplate({
-        customerName,
-        productTitle,
-        serialNumber: record.serial_number || entitlement.serial_number,
-        planName,
-        refundAmount: formattedAmount,
-        currency: record.currency,
-        storeName,
-      }),
-    },
     approved: {
       subject: "Extended Warranty Refund Approved",
       html: RefundApprovedTemplate({
@@ -210,17 +197,6 @@ async function sendRefundCustomerEmail(
         productTitle,
         planName,
         rejectionReason: record.rejection_reason,
-        storeName,
-      }),
-    },
-    completed: {
-      subject: "Extended Warranty Refund Processed",
-      html: RefundCompletedTemplate({
-        customerName,
-        productTitle,
-        planName,
-        refundAmount: formattedAmount,
-        currency: record.currency,
         storeName,
       }),
     },
@@ -422,8 +398,6 @@ export async function createRefundRequest({
     `SELECT * FROM extended_warranty_refund_records WHERE id = ?`,
     [refundId]
   );
-
-  await sendRefundCustomerEmail("created", record, entitlement, storeName);
 
   const financeSubject = `New EW refund request #${refundId} — ${formatMoney(calculation.netRefundAmount, entitlement.currency)}`;
   const financeHtml = `<p>A new extended warranty refund request requires finance review.</p>
@@ -763,7 +737,7 @@ export async function completeRefundRequest(shopId, refundId, actor, adminNotes)
     throw new Error("Only approved refund requests can be marked as refunded");
   }
 
-  const { entitlement, record } = await updateRefundStatus({
+  const { record } = await updateRefundStatus({
     shopId,
     refundId,
     status: "refunded",
@@ -776,7 +750,6 @@ export async function completeRefundRequest(shopId, refundId, actor, adminNotes)
     },
   });
 
-  await sendRefundCustomerEmail("completed", record, entitlement, "Sennheiser");
   return mapRefundRow(record);
 }
 

@@ -8,21 +8,20 @@
     "debug": "node --inspect-brk index.js",
     "dev": "cross-env NODE_ENV=development nodemon index.js --ignore ./frontend",
     "serve": "cross-env NODE_ENV=production node index.js",
-    "test": "node --test services/extendedWarrantyPricing.test.js"
+    "test": "node --test"
   },
   "type": "module",
   "engines": {
     "node": ">=16.13.0"
   },
   "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
     "@shopify/shopify-app-express": "^5.0.8",
     "@shopify/shopify-app-session-storage-mysql": "^5.0.5",
-    "compression": "^1.7.4",
     "cross-env": "^7.0.3",
     "dotenv": "^17.3.1",
     "express": "^4.22.1",
-    "mysql2": "^3.18.2",
-    "serve-static": "^1.14.1"
+    "mysql2": "^3.18.2"
   },
   "devDependencies": {
     "nodemon": "^2.0.15",

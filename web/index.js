@@ -1,21 +1,14 @@
-
 import dotenv from "dotenv";
 dotenv.config();
-
-console.log("API KEY:", process.env.SHOPIFY_API_KEY);
-console.log("HOST:", process.env.HOST);
 
 // @ts-check
 import { join } from "path";
 import { readFileSync } from "fs";
 import express from "express";
-import serveStatic from "serve-static";
 
 import shopify from "./shopify.js";
-import productCreator from "./product-creator.js";
 import PrivacyWebhookHandlers from "./privacy.js";
 import { OrderWebhookHandlers, registerOrderWebhooks } from "./orderWebhooks.js";
-
 
 import { verifyAppProxy } from "./middleware/verifyAppProxy.js";
 import warrantyRoutes from "./routes/warranty.routes.js";
@@ -23,9 +16,7 @@ import retailersRoutes from "./routes/retailers.routes.js";
 import settingRoutes from "./routes/settings.routes.js";
 import standardWarranty from "./routes/standardWarranty.routes.js";
 import extendedWarranty from "./routes/extendedWarranty.routes.js";
-//import webHookRoutes from "./routes/webhook.routes.js";
 import registeredProducts from "./routes/registeredProducts.routes.js";
-
 
 import { createStandardWarrantyMetafield } from "./shopify/metafieldDefinitions.js";
 import { registerProductUpdateWebhook } from "./shopify/webhookCreation.js";
@@ -52,18 +43,14 @@ const STATIC_PATH =
       : join(__dirname, "frontend");
 const app = express();
 app.set("trust proxy", 1);
-//app.use("/webhooks", webHookRoutes);
 
 // Set up Shopify authentication and webhook handling
 app.get(shopify.config.auth.path, shopify.auth.begin());
 app.get(
   shopify.config.auth.callbackPath,
   shopify.auth.callback(),
-  //shopify.redirectToShopifyOrAppRoot()
   async (req, res) => {
     const session = res.locals.shopify.session;
-
-  // console.log("Session data::", session);
 
     if (!session) {
       return res.status(500).send("No session found");
@@ -166,53 +153,6 @@ async function authenticateUser(req, res, next) {
 app.use("/tws-warranty" ,warrantyRoutes);
 
 app.use("/api/*", shopify.validateAuthenticatedSession());
-
-// const STATIC_PATH = join(process.cwd(), "web/dist");
-
-// app.use(express.static(STATIC_PATH));
-
-// app.get("*", (_req, res) => {
-//   res.sendFile(join(STATIC_PATH, "index.html"));
-// });
-
-
-// app.get("/api/products/count", async (_req, res) => {
-//   const client = new shopify.api.clients.Graphql({
-//     session: res.locals.shopify.session,
-//   });
-
-//   const countData = await client.request(`
-//     query shopifyProductCount {
-//       productsCount {
-//         count
-//       }
-//     }
-//   `);
-
-//   res.status(200).send({ count: countData.data.productsCount.count });
-// });
-
-// app.post("/api/products", async (_req, res) => {
-//   let status = 200;
-//   let error = null;
-
-//   try {
-//     await productCreator(res.locals.shopify.session);
-//   } catch (e) {
-//     console.log(`Failed to process products/create: ${e.message}`);
-//     status = 500;
-//     error = e.message;
-//   }
-//   res.status(status).send({ success: status === 200, error });
-// });
-
-console.log("ENV CHECK:");
-console.log("API KEY:", process.env.SHOPIFY_API_KEY);
-console.log("API SECRET:", process.env.SHOPIFY_API_SECRET);
-console.log("port:", process.env.PORT);
-
-console.log("HOST:", process.env.HOST);
-console.log("SCOPES:", process.env.SCOPES);
 
 app.use(shopify.cspHeaders());
 // Serve only static assets folder
