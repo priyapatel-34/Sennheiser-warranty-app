@@ -1,10 +1,6 @@
 import shopify from "../shopify.js";
 import { pool } from "../db/mysql.js";
 import {
-  DEFAULT_COVERAGE_SUMMARY,
-  DEFAULT_COVERAGE_POINTS,
-} from "../constants/defaultCoverageTemplates.js";
-import {
   MERCHANDISING_BADGE_LABELS,
   buildExpiryReminderAdminConfigs,
   saveExpiryReminderConfigs,
@@ -1028,8 +1024,6 @@ export async function getEWSettings(req, res) {
     return res.json({
       success: true,
       settings: mapSettingsRow(row, expiryReminderConfigs),
-      defaultCoverageSummary: DEFAULT_COVERAGE_SUMMARY,
-      defaultCoveragePoints: DEFAULT_COVERAGE_POINTS,
     });
   } catch (err) {
     console.error("❌ getEWSettings error:", err);

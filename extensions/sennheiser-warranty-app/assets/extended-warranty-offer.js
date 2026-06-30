@@ -185,7 +185,7 @@ function renderOffer(offerData, options = {}) {
 
     const coverageHtml = coverageLines.length
       ? `<ul>${coverageLines.map(line => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
-      : `<p>${escapeHtml("Extended protection after your standard warranty ends.")}</p>`;
+      : "";
 
     const defaultPlanIndex = getDefaultPlanIndex(plans);
 
@@ -249,10 +249,13 @@ function renderOffer(offerData, options = {}) {
           </div>
 
           <div class="ew-offer-grid${isOfferExpired ? " ew-offer-expired" : ""}">
-              <div class="ew-coverage-box">
+              ${coverageHtml
+        ? `<div class="ew-coverage-box">
                   <h4 class="ew-section-label">What’s Covered</h4>
                   ${coverageHtml}
-              </div>
+              </div>`
+        : ""
+      }
               ${isOfferExpired
         ? `<div class="ew-expired-message">
             <p>The extended warranty purchase window for this product has closed.</p>
