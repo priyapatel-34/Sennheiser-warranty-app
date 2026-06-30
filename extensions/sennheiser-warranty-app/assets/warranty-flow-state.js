@@ -4,6 +4,40 @@
   const CHECKOUT_PENDING_KEY = "ew_checkout_pending";
   const MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
+  const TOAST = {
+    registrationSuccess:
+      "Your product has been registered successfully.",
+    selectEwPlan:
+      "Choose an extended warranty plan, or skip for now to continue.",
+    skipEw:
+      "Registration complete. You can extend your warranty anytime from My Products.",
+    offerExpired:
+      "Your product has been registered. The extended warranty offer has ended.",
+    ewAlreadyActive:
+      "Extended warranty is already active for this product.",
+    ewPurchaseSuccess:
+      "Extended warranty purchased successfully.",
+    checkoutRedirect:
+      "Redirecting to secure checkout...",
+    checkoutFailed:
+      "Unable to start checkout. Please try again.",
+    registrationFailed:
+      "Registration failed. Please check your details and try again.",
+  };
+
+  function showToast(type, message, { queue = false } = {}) {
+    const toast = window.WarrantyToast;
+    if (!toast || !message) return;
+    if (queue) {
+      const queueFn =
+        toast[`queue${type.charAt(0).toUpperCase()}${type.slice(1)}`];
+      if (typeof queueFn === "function") queueFn(message);
+      return;
+    }
+    const showFn = toast[`show${type.charAt(0).toUpperCase()}${type.slice(1)}`];
+    if (typeof showFn === "function") showFn(message);
+  }
+
   function readJson(key) {
     try {
       const raw = sessionStorage.getItem(key);
@@ -81,8 +115,13 @@
     clearOfferHistoryState();
   }
 
-  function redirectToMyProducts(myProductsLink, reason) {
+  function redirectToMyProducts(myProductsLink, reason, toast) {
     clearOfferFlowState();
+    if (toast?.message) {
+      showToast(toast.type || "success", toast.message, {
+        queue: toast.queue !== false,
+      });
+    }
     navigateReplace(myProductsLink);
     return { allowed: false, action: "redirected", reason };
   }
@@ -103,7 +142,10 @@
       const data = await fetchExtendedWarrantyOffer(registerId);
 
       if (data.reason === "already_purchased" || data.entitlement?.status === "active") {
-        return redirectToMyProducts(myProductsLink, "already_purchased");
+        return redirectToMyProducts(myProductsLink, "already_purchased", {
+          message: TOAST.ewAlreadyActive,
+          type: "info",
+        });
       }
 
       if (!data.eligible) {
@@ -130,6 +172,7 @@
   }
 
   window.WarrantyFlowState = {
+    TOAST,
     savePostRegistration(state) {
       writeJson(POST_REG_KEY, { ...state, savedAt: Date.now() });
     },
@@ -208,6 +251,7 @@
           customerEmail: options.customerEmail || "",
           customerName: options.customerName || "",
           onSkip: () => {
+            showToast("success", TOAST.skipEw, { queue: true });
             clearOfferFlowState();
             navigateReplace(myProductsLink);
           },
@@ -242,19 +286,27 @@
       const reason = offer?.reason || navigation.reason || null;
       const purchaseWindowExpired = reason === "purchase_window_expired";
 
+      showToast("success", TOAST.registrationSuccess);
+
       if (offer?.eligible) {
         const rendered = await this.renderEligibleOffer(offer, {
           myProductsLink,
           customerEmail,
           customerName,
         });
-        if (rendered) return { shownOffer: true };
+        if (rendered) {
+          window.setTimeout(() => {
+            showToast("info", TOAST.selectEwPlan);
+          }, 600);
+          return { shownOffer: true };
+        }
       }
 
       this.clearPostRegistration();
       this.clearCheckoutPending();
 
       if (purchaseWindowExpired) {
+        showToast("info", TOAST.offerExpired, { queue: true });
         navigateReplace(myProductsLink);
         return { redirected: true, reason: "purchase_window_expired" };
       }
@@ -264,6 +316,26 @@
       }, redirectDelayMs);
 
       return { redirected: true, delayed: true, reason: reason || "no_offer" };
+    },
+
+    async checkMyProductsToasts() {
+      window.WarrantyToast?.flushPending?.();
+
+      const checkoutPending = readJson(CHECKOUT_PENDING_KEY);
+      if (!checkoutPending?.registerId) return;
+
+      try {
+        const data = await fetchExtendedWarrantyOffer(checkoutPending.registerId);
+        if (
+          data.reason === "already_purchased" ||
+          data.entitlement?.status === "active"
+        ) {
+          showToast("success", TOAST.ewPurchaseSuccess);
+          sessionStorage.removeItem(CHECKOUT_PENDING_KEY);
+        }
+      } catch (err) {
+        console.warn("Post-checkout toast check failed:", err.message);
+      }
     },
 
     async restoreExtendedWarrantyOffer(options = {}) {
@@ -287,9 +359,12 @@
 
         if (!data.eligible) {
           if (data.reason === "already_purchased") {
-          redirectToMyProducts(myProductsLink, "already_purchased");
-          return false;
-        }
+            redirectToMyProducts(myProductsLink, "already_purchased", {
+              message: TOAST.ewAlreadyActive,
+              type: "info",
+            });
+            return false;
+          }
           return false;
         }
 

@@ -287,6 +287,10 @@ function renderOffer(offerData, options = {}) {
         onSkip();
         return;
       }
+      window.WarrantyToast?.queueSuccess?.(
+        window.WarrantyFlowState?.TOAST?.skipEw ||
+          "Registration complete. You can extend your warranty from My Products."
+      );
       window.WarrantyFlowState?.clearPostRegistration?.();
       window.location.replace(myProductsLink);
     });
@@ -294,7 +298,7 @@ function renderOffer(offerData, options = {}) {
     section.querySelector("#ew-purchase-btn")?.addEventListener("click", async () => {
       const selected = section.querySelector('input[name="ew_plan"]:checked');
       if (!selected) {
-        alert("Please select a plan.");
+        window.WarrantyToast?.showWarning?.("Please select a plan.");
         return;
       }
 
@@ -303,6 +307,10 @@ function renderOffer(offerData, options = {}) {
       showLoader(section, "Preparing secure checkout...");
 
       try {
+        window.WarrantyToast?.showInfo?.(
+          window.WarrantyFlowState?.TOAST?.checkoutRedirect ||
+            "Redirecting to secure checkout..."
+        );
         window.WarrantyFlowState?.markCheckoutStarted?.({
           registerId: reg.registerId,
           myProductsLink,
@@ -315,7 +323,11 @@ function renderOffer(offerData, options = {}) {
         );
       } catch (err) {
         hideLoader(section);
-        alert(err.message || "Unable to start checkout.");
+        window.WarrantyToast?.showError?.(
+          err.message ||
+            window.WarrantyFlowState?.TOAST?.checkoutFailed ||
+            "Unable to start checkout."
+        );
         btn.disabled = false;
       }
     });

@@ -167,6 +167,9 @@
 {% endif %} 
 
 {{ 'new-myProducts.css' | asset_url | stylesheet_tag }}
+{{ 'warranty-toast.css' | asset_url | stylesheet_tag }}
+<script src="{{ 'warranty-toast.js' | asset_url }}" defer></script>
+<script src="{{ 'warranty-flow-state.js' | asset_url }}" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/swiper@12/swiper-bundle.min.js"></script>
 <script src="{{ 'new-my-product.js' | asset_url }}" defer></script>
 <script>

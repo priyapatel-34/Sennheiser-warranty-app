@@ -1,6 +1,8 @@
 (() => {
   const TOAST_DURATION_MS = 4000;
   const MAX_VISIBLE = 4;
+  const PENDING_TOAST_KEY = "warranty_pending_toast";
+  const PENDING_TOAST_MAX_AGE_MS = 2 * 60 * 1000;
 
   function ensureContainer() {
     let container = document.getElementById("warranty-toast-container");
@@ -38,16 +40,25 @@
     const toast = document.createElement("div");
     toast.className = `warranty-toast warranty-toast-${type}`;
     toast.setAttribute("role", "status");
-    toast.innerHTML = `
-      <span class="warranty-toast-icon" aria-hidden="true">${ICONS[type] || ICONS.info}</span>
-      <span class="warranty-toast-message">${message}</span>
-      <button type="button" class="warranty-toast-close" aria-label="Dismiss">×</button>
-    `;
-    container.appendChild(toast);
 
-    toast.querySelector(".warranty-toast-close")?.addEventListener("click", () => {
-      dismissToast(toast);
-    });
+    const icon = document.createElement("span");
+    icon.className = "warranty-toast-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = ICONS[type] || ICONS.info;
+
+    const messageEl = document.createElement("span");
+    messageEl.className = "warranty-toast-message";
+    messageEl.textContent = message;
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "warranty-toast-close";
+    closeBtn.setAttribute("aria-label", "Dismiss");
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", () => dismissToast(toast));
+
+    toast.append(icon, messageEl, closeBtn);
+    container.appendChild(toast);
 
     requestAnimationFrame(() => toast.classList.add("show"));
 
@@ -56,10 +67,62 @@
     }, TOAST_DURATION_MS);
   }
 
+  function queueToast(message, type = "success") {
+    if (!message) return;
+    try {
+      sessionStorage.setItem(
+        PENDING_TOAST_KEY,
+        JSON.stringify({ message, type, savedAt: Date.now() })
+      );
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  function flushPendingToast() {
+    let raw = null;
+    try {
+      raw = sessionStorage.getItem(PENDING_TOAST_KEY);
+      if (!raw) return;
+      sessionStorage.removeItem(PENDING_TOAST_KEY);
+    } catch {
+      return;
+    }
+
+    try {
+      const pending = JSON.parse(raw);
+      if (
+        !pending?.message ||
+        !pending?.savedAt ||
+        Date.now() - pending.savedAt > PENDING_TOAST_MAX_AGE_MS
+      ) {
+        return;
+      }
+      showToast(pending.message, pending.type || "success");
+    } catch {
+      // ignore invalid payload
+    }
+  }
+
+  function initToastOnLoad() {
+    flushPendingToast();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initToastOnLoad);
+  } else {
+    initToastOnLoad();
+  }
+
   window.WarrantyToast = {
-    showSuccess: message => showToast(message, "success"),
-    showError: message => showToast(message, "error"),
-    showWarning: message => showToast(message, "warning"),
-    showInfo: message => showToast(message, "info"),
+    showSuccess: (message) => showToast(message, "success"),
+    showError: (message) => showToast(message, "error"),
+    showWarning: (message) => showToast(message, "warning"),
+    showInfo: (message) => showToast(message, "info"),
+    queueSuccess: (message) => queueToast(message, "success"),
+    queueError: (message) => queueToast(message, "error"),
+    queueWarning: (message) => queueToast(message, "warning"),
+    queueInfo: (message) => queueToast(message, "info"),
+    flushPending: flushPendingToast,
   };
 })();

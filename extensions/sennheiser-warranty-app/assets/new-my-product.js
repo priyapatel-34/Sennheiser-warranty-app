@@ -117,6 +117,10 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
 
 (async () => {
   const rootWarpper = document.getElementById("mp-app-root");
+  if (!rootWarpper) return;
+
+  await window.WarrantyFlowState?.checkMyProductsToasts?.();
+
   const registerLink = rootWarpper.dataset.registerLink;
   const web_register_label =
     rootWarpper.dataset.webRegisterLabel || "+ Register product";

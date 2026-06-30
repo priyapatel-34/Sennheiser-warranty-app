@@ -453,6 +453,11 @@
             data.message || "This product has already been registered.",
           );
         }
+        window.WarrantyToast?.showError?.(
+          data.message ||
+            window.WarrantyFlowState?.TOAST?.registrationFailed ||
+            "Registration failed. Please check your details and try again."
+        );
         return;
       }
 
@@ -490,8 +495,6 @@
           });
         }
 
-        window.WarrantyToast?.showSuccess("Product registered successfully");
-
         await window.WarrantyFlowState?.handlePostRegistrationNavigation(data, {
           myProductsLink: myProductLink,
           customerEmail: emailInput.value.trim(),
@@ -499,8 +502,10 @@
         });
       }
     } catch {
-      throw new Error("Something went wrong. Please try again.");
-      //alert("Something went wrong. Please try again.");
+      window.WarrantyToast?.showError?.(
+        window.WarrantyFlowState?.TOAST?.registrationFailed ||
+          "Something went wrong. Please try again."
+      );
     }
   });
 
@@ -519,8 +524,9 @@
       myProductsLink: myProductLink,
     });
     if (initResult?.restored && !initResult?.redirected) {
-      window.WarrantyToast?.showInfo(
-        "Continue selecting your extended warranty plan."
+      window.WarrantyToast?.showInfo?.(
+        window.WarrantyFlowState?.TOAST?.selectEwPlan ||
+          "Continue selecting your extended warranty plan."
       );
     }
   });
