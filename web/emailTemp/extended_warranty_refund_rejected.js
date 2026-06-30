@@ -6,6 +6,7 @@ export default function ExtendedWarrantyRefundRejectedTemplate({
   planName,
   rejectionReason,
   storeName,
+  productDetailsHtml = "",
 }) {
   const bodyHtml = `
     <p>Dear ${customerName || "Customer"},</p>
@@ -16,6 +17,7 @@ export default function ExtendedWarrantyRefundRejectedTemplate({
       ${rejectionReason ? `<strong>Reason:</strong> ${rejectionReason}<br/>` : ""}
     </p>
     <p>If you have questions, please contact our support team.</p>
+    ${productDetailsHtml}
   `;
 
   return renderEmailLayout({

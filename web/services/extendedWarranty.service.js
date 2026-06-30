@@ -4,6 +4,10 @@ import { sendEmailService } from "./email.service.js";
 import ExtendedWarrantyPurchaseTemplate from "../emailTemp/extended_warranty_purchase.js";
 import ExtendedWarrantyActivationTemplate from "../emailTemp/extended_warranty_activation.js";
 import {
+  renderViewProductDetailsButton,
+  resolveShopDomain,
+} from "./emailLink.service.js";
+import {
   DEFAULT_WARRANTY_PRICING_TYPE,
   normalizeWarrantyPricingType,
   resolvePlanPrice,
@@ -1027,6 +1031,12 @@ export async function activateEntitlementFromPayment({
 
     const purchasePrice = activeEntitlement?.price ?? plan.price;
     const purchaseCurrency = activeEntitlement?.currency ?? plan.currency;
+    const shopDomain =
+      session?.shop || (await resolveShopDomain(shopId));
+    const productDetailsHtml = renderViewProductDetailsButton(
+      shopDomain,
+      registerId
+    );
 
     const purchaseHtml = ExtendedWarrantyPurchaseTemplate({
       customerName: customerName || registered.customer_name || "Customer",
@@ -1037,6 +1047,7 @@ export async function activateEntitlementFromPayment({
       price: String(purchasePrice),
       currency: purchaseCurrency,
       storeName,
+      productDetailsHtml,
     });
 
     await sendEmailService({
@@ -1054,6 +1065,7 @@ export async function activateEntitlementFromPayment({
       activationDate: activationDate.toISOString().split("T")[0],
       expiryDate: expiryDate.toISOString().split("T")[0],
       storeName,
+      productDetailsHtml,
     });
 
     await sendEmailService({

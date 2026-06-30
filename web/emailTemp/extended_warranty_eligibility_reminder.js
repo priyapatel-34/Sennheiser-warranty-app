@@ -7,6 +7,7 @@ export default function ExtendedWarrantyEligibilityReminderTemplate({
   daysRemaining,
   eligibilityEndDate,
   extendWarrantyUrl,
+  productDetailsHtml = "",
   storeName,
 }) {
   const dayLabel = daysRemaining === 1 ? "day" : "days";
@@ -25,6 +26,7 @@ export default function ExtendedWarrantyEligibilityReminderTemplate({
     <p>
       ${emailButton({ href: extendWarrantyUrl, label: "Extend Warranty Now" })}
     </p>
+    ${productDetailsHtml}
   `;
 
   return renderEmailLayout({

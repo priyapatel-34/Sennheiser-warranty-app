@@ -5,6 +5,7 @@ export default function WarrantyRegistrationSuccessTemplate({
   productTitle,
   orderNumber,
   warrantyPeriod,
+  productDetailsHtml = "",
 }) {
   const bodyHtml = `
     <p>Dear ${customerName || "Customer"},</p>
@@ -19,6 +20,8 @@ export default function WarrantyRegistrationSuccessTemplate({
       ${orderNumber && orderNumber !== "N/A" ? `<strong>Order Number:</strong> ${orderNumber}<br/>` : ""}
       <strong>Warranty Period:</strong> ${warrantyPeriod}<br/>
     </p>
+
+    ${productDetailsHtml}
 
     <p>
        Please keep this email for your records. It serves as confirmation

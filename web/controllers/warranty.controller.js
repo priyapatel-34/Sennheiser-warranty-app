@@ -2,6 +2,7 @@ import shopify from "../shopify.js";
 import { pool } from "../db/mysql.js";
 import { sendEmailService } from "../services/email.service.js";
 import WarrantyRegistrationSuccessTemplate from "../emailTemp/standard_warranty.js";
+import { renderViewProductDetailsButton } from "../services/emailLink.service.js";
 import {
   getEntitlementsForRegistrations,
   formatEntitlementForApiExport,
@@ -1024,15 +1025,8 @@ export async function getMyProducts(req, res) {
 
 export async function getProductDetail(req, res) {
   try {
-    const { registration_id, product_id, order_id, line_item_id, flow } =
+    let { registration_id, product_id, order_id, line_item_id, flow } =
       req.body;
-
-    if (!flow) {
-      return res.status(400).json({
-        success: false,
-        error: "flow is required",
-      });
-    }
 
     const session = res.locals.shopifySession;
     if (!session) {
@@ -1061,8 +1055,65 @@ export async function getProductDetail(req, res) {
     }
 
     const shopId = shopRows[0].id;
-
     const client = new shopify.api.clients.Graphql({ session });
+
+    if (!flow && registration_id) {
+      const { logged_in_customer_id } = req.query;
+      let detailCustomerEmail = null;
+      let detailCustomerId = logged_in_customer_id
+        ? String(logged_in_customer_id)
+        : null;
+
+      if (logged_in_customer_id) {
+        try {
+          const resolved = await resolveShopifyCustomer(
+            client,
+            logged_in_customer_id
+          );
+          detailCustomerEmail = resolved.customerEmail;
+          detailCustomerId = resolved.customerId || detailCustomerId;
+        } catch (customerErr) {
+          console.warn(
+            "⚠️ Product detail customer lookup failed:",
+            customerErr.message
+          );
+        }
+      }
+
+      const registered = await findRegisteredProductForCustomer({
+        shopId,
+        registrationId: registration_id,
+        customerEmail: detailCustomerEmail,
+        customerId: detailCustomerId,
+      });
+
+      if (!registered) {
+        return res.status(404).json({
+          success: false,
+          error: "Registration not found",
+        });
+      }
+
+      flow = registered.purchase_type === "external" ? "external" : "shopify";
+      registration_id = registered.id;
+
+      if (flow === "shopify") {
+        if (registered.shopify_order_id) {
+          order_id = String(registered.shopify_order_id).startsWith("gid://")
+            ? registered.shopify_order_id
+            : `gid://shopify/Order/${registered.shopify_order_id}`;
+        }
+        line_item_id = registered.shopify_line_item_id || line_item_id;
+        product_id = registered.shopify_product_id || product_id;
+      }
+    }
+
+    if (!flow) {
+      return res.status(400).json({
+        success: false,
+        error: "flow is required",
+      });
+    }
 
     /* =====================================================
        1️⃣ SHOPIFY FLOW
@@ -3054,11 +3105,16 @@ export async function registerProducts(req, res) {
           firstProduct.warrantyStart.getMonth());
 
       const warrantyPeriodText = `${diffMonths} Months`;
+      const productDetailsHtml = renderViewProductDetailsButton(
+        session.shop,
+        firstProduct.registerId
+      );
       const emailHtml = WarrantyRegistrationSuccessTemplate({
         customerName: customerName || "Customer",
         productTitle: firstProduct.productName,
         orderNumber: firstProduct.orderNumber || "N/A",
         warrantyPeriod: warrantyPeriodText,
+        productDetailsHtml,
       });
 
       const dynamicFrom = process.env.DEFAULT_FROM_EMAIL;

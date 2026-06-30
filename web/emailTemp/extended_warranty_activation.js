@@ -7,7 +7,7 @@ export default function ExtendedWarrantyActivationTemplate({
   planName,
   activationDate,
   expiryDate,
-  storeName,
+  productDetailsHtml = "",
 }) {
   const bodyHtml = `
     <p>Dear ${customerName || "Customer"},</p>
@@ -19,6 +19,7 @@ export default function ExtendedWarrantyActivationTemplate({
       <strong>Activation Date:</strong> ${activationDate}<br/>
       <strong>Expiry Date:</strong> ${expiryDate}<br/>
     </p>
+    ${productDetailsHtml}
     <p>
        Please keep this email for your records. It serves as confirmation
        of your warranty registration.

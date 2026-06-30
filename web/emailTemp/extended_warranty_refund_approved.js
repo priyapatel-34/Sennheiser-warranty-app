@@ -7,6 +7,7 @@ export default function ExtendedWarrantyRefundApprovedTemplate({
   refundAmount,
   currency,
   storeName,
+  productDetailsHtml = "",
 }) {
   const bodyHtml = `
     <p>Dear ${customerName || "Customer"},</p>
@@ -17,6 +18,7 @@ export default function ExtendedWarrantyRefundApprovedTemplate({
       <strong>Approved refund amount:</strong> ${refundAmount} ${currency || ""}<br/>
     </p>
     <p>Our finance team will process your reimbursement shortly. You will receive confirmation once the refund is completed.</p>
+    ${productDetailsHtml}
   `;
 
   return renderEmailLayout({

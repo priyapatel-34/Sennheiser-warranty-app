@@ -211,6 +211,56 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
     });
   }
 
+  let pendingRegistrationId = null;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const rawId = params.get("registration_id");
+    if (rawId) {
+      const parsed = Number(rawId);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        pendingRegistrationId = parsed;
+      }
+    }
+  } catch {
+    pendingRegistrationId = null;
+  }
+
+  function clearRegistrationIdFromUrl() {
+    try {
+      const url = new URL(window.location.href);
+      if (!url.searchParams.has("registration_id")) return;
+      url.searchParams.delete("registration_id");
+      const query = url.searchParams.toString();
+      const next = url.pathname + (query ? `?${query}` : "");
+      history.replaceState(history.state, "", next);
+    } catch {
+      // ignore URL cleanup errors
+    }
+  }
+
+  async function openProductDetailFromDeepLink(registrationId) {
+    if (!registrationId) return;
+
+    clearRegistrationIdFromUrl();
+
+    const card = document.querySelector(
+      `.mp-card[data-registration-id="${registrationId}"]`
+    );
+
+    if (card) {
+      await fetchAndShowProductDetail({
+        registrationId: card.dataset.registrationId,
+        lineItemId: card.dataset.lineItemId,
+        productId: card.dataset.productId,
+        orderId: card.dataset.orderId || null,
+        flow: card.dataset.source || "shopify",
+      });
+      return;
+    }
+
+    await fetchAndShowProductDetail({ registrationId });
+  }
+
   showProductsLoader();
 
   try {
@@ -222,14 +272,12 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
 
     if (!products.length) {
       sliderWrapper?.classList.add("hidden");
-      return;
-    }
+    } else {
+      console.log("from my product api", data);
 
-    console.log("from my product api", data);
+      sliderWrapper.classList.remove("hidden");
 
-    sliderWrapper.classList.remove("hidden");
-
-    track.innerHTML = products
+      track.innerHTML = products
       .map((p) => {
         const action = getProductCardAction(p);
         const warrantyStatus = p.is_registered
@@ -303,7 +351,8 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
       })
       .join("");
 
-    initMpSlider();
+      initMpSlider();
+    }
   } catch (err) {
     hideProductsLoader();
     console.error("Warranty error:", err);
@@ -636,5 +685,13 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
       .getElementById("breadcrumb-container")
       ?.classList.add("hidden");
     rootWarpper.classList.remove("breadcrumb-mobile");
+  }
+
+  if (pendingRegistrationId) {
+    try {
+      await openProductDetailFromDeepLink(pendingRegistrationId);
+    } catch (deepLinkErr) {
+      console.error("Registration deep-link failed:", deepLinkErr);
+    }
   }
 })();

@@ -2,6 +2,10 @@ import { pool } from "../db/mysql.js";
 import { sendEmailService } from "./email.service.js";
 import RefundApprovedTemplate from "../emailTemp/extended_warranty_refund_approved.js";
 import RefundRejectedTemplate from "../emailTemp/extended_warranty_refund_rejected.js";
+import {
+  renderViewProductDetailsButton,
+  resolveShopDomain,
+} from "./emailLink.service.js";
 import { calculateProRataRefund } from "./extendedWarrantyRefund.utils.js";
 
 const MS_PER_DAY = 86400000;
@@ -176,6 +180,15 @@ async function sendRefundCustomerEmail(
   const productTitle = record.product_name || entitlement.product_name || "Product";
   const planName = record.warranty_plan || entitlement.plan_name;
   const formattedAmount = formatMoney(record.net_refund_amount, record.currency);
+  const registerId =
+    entitlement.registered_product_id || record.registered_product_id;
+  const shopDomain = await resolveShopDomain(
+    record.shop_id || entitlement.shop_id
+  );
+  const productDetailsHtml = renderViewProductDetailsButton(
+    shopDomain,
+    registerId
+  );
 
   // Only approved and rejected refund emails are ever sent to customers.
   const templates = {
@@ -188,6 +201,7 @@ async function sendRefundCustomerEmail(
         refundAmount: formattedAmount,
         currency: record.currency,
         storeName,
+        productDetailsHtml,
       }),
     },
     rejected: {
@@ -198,6 +212,7 @@ async function sendRefundCustomerEmail(
         planName,
         rejectionReason: record.rejection_reason,
         storeName,
+        productDetailsHtml,
       }),
     },
   };

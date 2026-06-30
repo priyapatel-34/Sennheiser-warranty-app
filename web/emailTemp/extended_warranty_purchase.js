@@ -9,6 +9,7 @@ export default function ExtendedWarrantyPurchaseTemplate({
   price,
   currency,
   storeName,
+  productDetailsHtml = "",
 }) {
   const bodyHtml = `
     <p>Dear ${customerName || "Customer"},</p>
@@ -21,6 +22,7 @@ export default function ExtendedWarrantyPurchaseTemplate({
       <strong>Amount Paid:</strong> ${price} ${currency}<br/>
     </p>
     <p>Your extended warranty will be activated upon payment confirmation.</p>
+    ${productDetailsHtml}
     <p>
        Please keep this email for your records. It serves as confirmation
        of your warranty registration.

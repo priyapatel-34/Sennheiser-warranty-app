@@ -3,6 +3,9 @@ import { pool } from "../db/mysql.js";
 import { sendEmailService } from "./email.service.js";
 import ExtendedWarrantyEligibilityReminderTemplate from "../emailTemp/extended_warranty_eligibility_reminder.js";
 import {
+  renderViewProductDetailsButton,
+} from "./emailLink.service.js";
+import {
   evaluatePurchaseWindowFromSettings,
   getExtendedWarrantySettings,
   getReminderDaysForShop,
@@ -150,6 +153,10 @@ async function sendReminderForRegistration(row, purchaseWindow) {
     daysRemaining,
     eligibilityEndDate,
     extendWarrantyUrl: buildMyProductsUrl(row.shop_domain),
+    productDetailsHtml: renderViewProductDetailsButton(
+      row.shop_domain,
+      row.id
+    ),
     storeName,
   });
 
