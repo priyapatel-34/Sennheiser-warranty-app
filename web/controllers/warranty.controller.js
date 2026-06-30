@@ -22,6 +22,99 @@ function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
 
+function normalizeSerialNumber(serial) {
+  return String(serial || "").trim();
+}
+
+function normalizeShopifyLineItemId(lineItemId) {
+  if (!lineItemId) return null;
+  return String(lineItemId).split("/").pop();
+}
+
+function customerOwnsRegistration(row, { customerEmail, customerId } = {}) {
+  if (!row) return false;
+  const normalizedEmail = customerEmail ? normalizeEmail(customerEmail) : null;
+  if (
+    customerId &&
+    row.customer_id &&
+    String(row.customer_id) === String(customerId)
+  ) {
+    return true;
+  }
+  if (
+    normalizedEmail &&
+    row.customer_email &&
+    normalizeEmail(row.customer_email) === normalizedEmail
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function buildRegisteredProductsByLineItem(registeredRows) {
+  const map = new Map();
+  for (const rp of registeredRows) {
+    if (rp.purchase_type !== "shopify" || !rp.shopify_line_item_id) continue;
+    const key = String(rp.shopify_line_item_id);
+    if (!map.has(key)) {
+      map.set(key, rp);
+    }
+  }
+  return map;
+}
+
+async function findRegisteredProductForCustomer({
+  shopId,
+  registrationId = null,
+  lineItemId = null,
+  customerEmail = null,
+  customerId = null,
+  connection = pool,
+}) {
+  const ownership = { customerEmail, customerId };
+  const normalizedLineItemId = normalizeShopifyLineItemId(lineItemId);
+
+  if (registrationId) {
+    const [[row]] = await connection.query(
+      `
+      SELECT *
+      FROM registered_products
+      WHERE shop_id = ?
+        AND id = ?
+      LIMIT 1
+      `,
+      [shopId, Number(registrationId)]
+    );
+    if (customerOwnsRegistration(row, ownership)) {
+      return row;
+    }
+  }
+
+  if (normalizedLineItemId) {
+    const [rows] = await connection.query(
+      `
+      SELECT *
+      FROM registered_products
+      WHERE shop_id = ?
+        AND shopify_line_item_id = ?
+      ORDER BY created_at DESC, id DESC
+      `,
+      [shopId, normalizedLineItemId]
+    );
+    const owned = rows.find((row) => customerOwnsRegistration(row, ownership));
+    if (owned) return owned;
+  }
+
+  return null;
+}
+
+function registrationConflictResponse(res) {
+  return res.status(409).json({
+    success: false,
+    message: "This product has already been registered.",
+  });
+}
+
 async function fetchShopifyProductImages(client, productIds) {
   const map = new Map();
   const uniqueIds = [
@@ -717,19 +810,7 @@ export async function getMyProducts(req, res) {
       [shopId, normalizedCustomerEmail, loggedInCustomerId],
     );
 
-    const registeredMap = new Map();
-
-    for (const rp of registeredRows) {
-      //registeredMap.set(String(rp.shopify_product_id), rp);
-      if (
-        rp.purchase_type === "shopify" &&
-        rp.shopify_product_id &&
-        rp.shopify_order_id
-      ) {
-        const key = `${rp.shopify_product_id}_${rp.shopify_order_id}`;
-        registeredMap.set(key, rp);
-      }
-    }
+    const registeredMap = buildRegisteredProductsByLineItem(registeredRows);
 
     /* =====================================
        3️⃣ SHOPIFY ORDER PRODUCTS
@@ -793,10 +874,7 @@ export async function getMyProducts(req, res) {
         const lineItemId = item.id;
         const numericLineItemId = lineItemId.split("/").pop();
 
-        const numericOrderId = order.id.split("/").pop();
-        const key = `${numericProductId}_${numericOrderId}`;
-
-        const registered = registeredMap.get(key);
+        const registered = registeredMap.get(numericLineItemId);
 
         /* =====================================
            VARIANT LOGIC
@@ -1087,19 +1165,29 @@ export async function getProductDetail(req, res) {
       const product = node.product;
       const variant = node.variant;
 
-      /* ---- Check registration by shop + line item ---- */
+      const { logged_in_customer_id } = req.query;
+      let detailCustomerEmail = null;
+      let detailCustomerId = logged_in_customer_id
+        ? String(logged_in_customer_id)
+        : null;
 
-      const [registeredRows] = await pool.query(
-        `
-        SELECT * FROM registered_products
-        WHERE shop_id = ?
-        AND shopify_line_item_id = ?
-        LIMIT 1
-        `,
-        [shopId, line_item_id],
-      );
+      if (logged_in_customer_id) {
+        try {
+          const resolved = await resolveShopifyCustomer(client, logged_in_customer_id);
+          detailCustomerEmail = resolved.customerEmail;
+          detailCustomerId = resolved.customerId || detailCustomerId;
+        } catch (customerErr) {
+          console.warn("⚠️ Product detail customer lookup failed:", customerErr.message);
+        }
+      }
 
-      const registered = registeredRows[0] || null;
+      const registered = await findRegisteredProductForCustomer({
+        shopId,
+        registrationId: registration_id,
+        lineItemId: line_item_id,
+        customerEmail: detailCustomerEmail,
+        customerId: detailCustomerId,
+      });
       const entitlementMap = registered
         ? await getEntitlementsForRegistrations(shopId, [registered.id])
         : new Map();
@@ -2712,6 +2800,14 @@ export async function registerProducts(req, res) {
       const createdProducts = [];
 
       for (const p of products) {
+        const serial = normalizeSerialNumber(p.serial_number);
+
+        if (!/^[a-zA-Z0-9]{1,20}$/.test(serial)) {
+          throw new Error("Invalid serial number");
+        }
+
+        const shopifyLineItemId = normalizeShopifyLineItemId(p.shopify_line_item_id);
+
         /* ===============================
           SERIAL NUMBER DUPLICATE CHECK
         =============================== */
@@ -2720,23 +2816,35 @@ export async function registerProducts(req, res) {
           SELECT id
           FROM registered_products
           WHERE shop_id = ?
-            AND serial_number = ?
+            AND LOWER(TRIM(serial_number)) = LOWER(?)
           LIMIT 1
+          FOR UPDATE
           `,
-          [shopId, p.serial_number?.trim()],
+          [shopId, serial],
         );
 
         if (serialExists) {
-          return res.status(409).json({
-            success: false,
-            message: `Product Serial Number already registered.`,
-          });
+          await conn.rollback();
+          return registrationConflictResponse(res);
         }
 
-        const serial = p.serial_number?.trim();
+        if (flow === "shopify" && shopifyLineItemId) {
+          const [[lineItemExists]] = await conn.query(
+            `
+            SELECT id
+            FROM registered_products
+            WHERE shop_id = ?
+              AND shopify_line_item_id = ?
+            LIMIT 1
+            FOR UPDATE
+            `,
+            [shopId, shopifyLineItemId],
+          );
 
-        if (!/^[a-zA-Z0-9]{1,20}$/.test(serial)) {
-          throw new Error("Invalid serial number");
+          if (lineItemExists) {
+            await conn.rollback();
+            return registrationConflictResponse(res);
+          }
         }
 
         let productId;
@@ -2904,9 +3012,7 @@ export async function registerProducts(req, res) {
             customerName,
             flow,
             p.shopify_order_id || null,
-            p.shopify_line_item_id
-              ? p.shopify_line_item_id.split("/").pop()
-              : null,
+            shopifyLineItemId,
             numericPId,
             variantNumericId ? String(variantNumericId) : null,
             p.sku || null,
@@ -3009,12 +3115,18 @@ export async function registerProducts(req, res) {
       });
     } catch (err) {
       await conn.rollback();
+      if (err.code === "ER_DUP_ENTRY") {
+        return registrationConflictResponse(res);
+      }
       throw err;
     } finally {
       conn.release();
     }
   } catch (err) {
     console.error("❌ Registration failed:", err);
+    if (err.code === "ER_DUP_ENTRY") {
+      return registrationConflictResponse(res);
+    }
     return res.status(500).json({ error: err.message });
   }
 }

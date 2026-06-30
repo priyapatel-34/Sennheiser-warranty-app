@@ -14,6 +14,20 @@ async function columnExists(table, column) {
   return rows[0].cnt > 0;
 }
 
+async function indexExists(table, indexName) {
+  const [[row]] = await pool.query(
+    `
+    SELECT COUNT(*) AS cnt
+    FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = ?
+      AND INDEX_NAME = ?
+    `,
+    [table, indexName]
+  );
+  return row.cnt > 0;
+}
+
 /** Additive schema updates for existing installs (no migration framework). */
 async function ensureSchemaUpdates() {
   if (!(await columnExists("registered_products", "shopify_variant_id"))) {
@@ -77,6 +91,24 @@ async function ensureSchemaUpdates() {
     if (!exists.cnt) {
       await pool.query(`CREATE INDEX ${indexName} ON ${table} (${columns})`);
     }
+  }
+
+  if (!(await indexExists("registered_products", "uniq_shop_line_item"))) {
+    await pool.query(`
+      DELETE rp1
+      FROM registered_products rp1
+      INNER JOIN registered_products rp2
+        ON rp1.shop_id = rp2.shop_id
+       AND rp1.shopify_line_item_id = rp2.shopify_line_item_id
+       AND rp1.shopify_line_item_id IS NOT NULL
+       AND rp1.id < rp2.id
+    `);
+
+    await pool.query(`
+      ALTER TABLE registered_products
+      ADD UNIQUE KEY uniq_shop_line_item (shop_id, shopify_line_item_id)
+    `);
+    console.log("✅ Added registered_products.uniq_shop_line_item");
   }
 
   const refundRecordColumns = [

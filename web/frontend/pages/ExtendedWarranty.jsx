@@ -934,7 +934,7 @@ export default function ExtendedWarrantyAdmin() {
                 </div>
                 <div style={{ marginTop: 16, maxWidth: 360 }}>
                   <Select
-                    label="Warranty pricing type"
+                    label=""
                     options={WARRANTY_PRICING_TYPE_OPTIONS}
                     value={settings.warrantyPricingType}
                     onChange={(v) =>

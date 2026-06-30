@@ -298,7 +298,7 @@
         if (serialInput) {
           showError(
             serialInput,
-            data.message || "Product Serial Number already registered.",
+            data.message || "This product has already been registered.",
           );
         }
         return;

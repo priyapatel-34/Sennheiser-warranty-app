@@ -389,7 +389,57 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
      UPDATED PRODUCT DETAIL VIEW
      (Now uses POST API)
   =============================== */
+  async function fetchAndShowProductDetail({
+    registrationId,
+    lineItemId,
+    productId,
+    orderId,
+    flow,
+  }) {
+    const response = await fetch("/apps/warranty/product-detail", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        registration_id: registrationId ? Number(registrationId) : null,
+        product_id: productId,
+        line_item_id: lineItemId,
+        order_id: orderId,
+        flow,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!data.success) {
+      console.error("Product detail error:", data.error);
+      return;
+    }
+
+    renderProductDetail(data);
+  }
+
   document.addEventListener("click", async (e) => {
+    const viewDetailsBtn = e.target.closest(".mp-view-details-btn");
+    if (viewDetailsBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const card = viewDetailsBtn.closest(".mp-card");
+      if (!card) return;
+
+      try {
+        await fetchAndShowProductDetail({
+          registrationId: card.dataset.registrationId,
+          lineItemId: card.dataset.lineItemId,
+          productId: card.dataset.productId,
+          orderId: card.dataset.orderId || null,
+          flow: card.dataset.source || "shopify",
+        });
+      } catch (error) {
+        console.error("Product detail fetch failed:", error);
+      }
+      return;
+    }
+
     const card = e.target.closest(".mp-card");
     if (!card) return;
 
@@ -404,32 +454,13 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
     const flow = card.dataset.source || "shopify";
 
     try {
-      /* ===== UPDATED: NEW API CALL ===== */
-      const response = await fetch("/apps/warranty/product-detail", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          registration_id: registrationId,
-          product_id: productId,
-          line_item_id: lineItemId,
-          order_id: orderId,
-          flow,
-        }),
+      await fetchAndShowProductDetail({
+        registrationId,
+        lineItemId,
+        productId,
+        orderId,
+        flow,
       });
-
-      const data = await response.json();
-
-      if (!data.success) {
-        console.log("product detail json 222: ", data.success);
-
-        console.error("Product detail error:", data.error);
-        return;
-      }
-
-      console.log("product detail json 333: ", data.success);
-
-      renderProductDetail(data);
-
     } catch (error) {
       console.error("Product detail fetch failed:", error);
     }
