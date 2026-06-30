@@ -13,7 +13,7 @@ import {
   useIndexResourceState,
   Select,
 } from "@shopify/polaris";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "../hooks/useToast.js";
 import LoadingPanel from "../components/LoadingPanel.jsx";
 import ExtendedWarrantyRefundsTab from "../components/ExtendedWarrantyRefundsTab.jsx";
@@ -93,6 +93,7 @@ function countConfiguredPlans(product) {
 export default function ExtendedWarrantyAdmin() {
   const toast = useToast();
   const [tab, setTab] = useState(0);
+  const prevTabRef = useRef(0);
 
   const [durations, setDurations] = useState([]);
   const [newDuration, setNewDuration] = useState("");
@@ -136,6 +137,19 @@ export default function ExtendedWarrantyAdmin() {
   } = useIndexResourceState(products, {
     resourceIDResolver: (p) => p.id,
   });
+
+  const resetProductsTabState = useCallback(() => {
+    setProductSearchInput("");
+    setProductSearchQuery("");
+    setPage(1);
+    setCursorStack([null]);
+    setProductsLoaded(false);
+    setModalOpen(false);
+    setConfigureProducts([]);
+    setVariantPricing({});
+    setBulkDurationPricing({});
+    clearSelection();
+  }, [clearSelection]);
 
   const loadDurations = async () => {
     setDurationsLoading(true);
@@ -239,18 +253,31 @@ export default function ExtendedWarrantyAdmin() {
   }, []);
 
   useEffect(() => {
-    if (tab === 1) {
-      loadProducts({ targetPage: page, search: productSearchQuery });
-      fetch(`${API_BASE}/settings`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          const pricingType = data?.settings?.warrantyPricingType;
-          if (pricingType) setWarrantyPricingType(pricingType);
-        })
-        .catch(() => {});
-    }
     if (tab === 3) loadSettings();
-  }, [tab, page, productSearchQuery]);
+
+    if (tab !== 1) {
+      prevTabRef.current = tab;
+      return;
+    }
+
+    const enteringProductsTab = prevTabRef.current !== 1;
+    prevTabRef.current = tab;
+
+    if (enteringProductsTab) {
+      resetProductsTabState();
+      loadProducts({ targetPage: 1, search: "" });
+    } else {
+      loadProducts({ targetPage: page, search: productSearchQuery });
+    }
+
+    fetch(`${API_BASE}/settings`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const pricingType = data?.settings?.warrantyPricingType;
+        if (pricingType) setWarrantyPricingType(pricingType);
+      })
+      .catch(() => {});
+  }, [tab, page, productSearchQuery, resetProductsTabState]);
 
   const runProductSearch = () => {
     setPage(1);
