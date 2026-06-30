@@ -148,6 +148,28 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
 
   if (!track) return;
 
+  let detailHistoryActive = false;
+
+  function activateDetailHistory() {
+    if (detailHistoryActive) return;
+    history.pushState({ mpProductDetail: true }, "", window.location.href);
+    detailHistoryActive = true;
+  }
+
+  function requestCloseProductDetail() {
+    if (detailHistoryActive) {
+      history.back();
+      return;
+    }
+    showMyProductsView();
+  }
+
+  window.addEventListener("popstate", () => {
+    if (!detailHistoryActive) return;
+    detailHistoryActive = false;
+    showMyProductsView({ fromPopstate: true });
+  });
+
   function showProductsLoader() {
     if (!productsSection) return;
     let loader = productsSection.querySelector(".mp-products-loader");
@@ -425,8 +447,10 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
     }
 
     const backBtn = e.target.closest("#mp-detail-back-btn");
-    if (!backBtn) return;
-    showMyProductsView();
+    if (backBtn) {
+      requestCloseProductDetail();
+      return;
+    }
   });
 
   function renderProductDetail(data) {
@@ -561,12 +585,20 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
       "click",
       (e) => {
         e.preventDefault();
-        showMyProductsView();
+        requestCloseProductDetail();
       }
     );
+
+    activateDetailHistory();
   }
 
-  function showMyProductsView() {
+  function showMyProductsView(options = {}) {
+    if (!options.fromPopstate && detailHistoryActive) {
+      detailHistoryActive = false;
+      const nextState = { ...(history.state || {}) };
+      delete nextState.mpProductDetail;
+      history.replaceState(nextState, "", window.location.href);
+    }
     productsSection.classList.remove("hidden");
     detailSection.classList.add("hidden");
     document

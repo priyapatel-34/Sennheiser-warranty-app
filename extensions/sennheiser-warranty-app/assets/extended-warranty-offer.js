@@ -92,7 +92,7 @@
       throw new Error(data.error || "Checkout failed");
     }
     if (data.checkoutUrl) {
-      window.location.href = data.checkoutUrl;
+      window.location.replace(data.checkoutUrl);
       return;
     }
     throw new Error("No checkout URL returned");
@@ -283,9 +283,12 @@ function renderOffer(offerData, options = {}) {
     `;
 
     section.querySelector("#ew-skip-btn")?.addEventListener("click", () => {
-      window.WarrantyFlowState?.clearPostRegistration();
-      if (typeof onSkip === "function") onSkip();
-      else window.location.href = myProductsLink;
+      if (typeof onSkip === "function") {
+        onSkip();
+        return;
+      }
+      window.WarrantyFlowState?.clearPostRegistration?.();
+      window.location.replace(myProductsLink);
     });
 
     section.querySelector("#ew-purchase-btn")?.addEventListener("click", async () => {
@@ -300,7 +303,10 @@ function renderOffer(offerData, options = {}) {
       showLoader(section, "Preparing secure checkout...");
 
       try {
-        window.WarrantyFlowState?.clearPostRegistration();
+        window.WarrantyFlowState?.markCheckoutStarted?.({
+          registerId: reg.registerId,
+          myProductsLink,
+        });
         await purchasePlan(
           reg.registerId,
           Number(selected.value),

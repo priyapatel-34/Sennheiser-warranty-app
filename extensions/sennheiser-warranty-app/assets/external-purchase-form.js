@@ -515,11 +515,13 @@
 
     const myProductLink =
       document.getElementById("my_products_link")?.value || "/pages/my-products";
-    const restored = await window.WarrantyFlowState?.restoreExtendedWarrantyOffer({
+    const initResult = await window.WarrantyFlowState?.initRegistrationPage({
       myProductsLink: myProductLink,
     });
-    if (restored) {
-      window.WarrantyToast?.showInfo("Continue selecting your extended warranty plan.");
+    if (initResult?.restored && !initResult?.redirected) {
+      window.WarrantyToast?.showInfo(
+        "Continue selecting your extended warranty plan."
+      );
     }
   });
 

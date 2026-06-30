@@ -88,11 +88,15 @@
     document.getElementById("my_products_link")?.value || "/pages/my-products";
 
   (async function initRegistrationPage() {
-    const restored = await window.WarrantyFlowState?.restoreExtendedWarrantyOffer({
+    const initResult = await window.WarrantyFlowState?.initRegistrationPage({
       myProductsLink: myProductLink,
     });
-    if (restored) {
-      window.WarrantyToast?.showInfo("Continue selecting your extended warranty plan.");
+    if (initResult?.redirected || initResult?.restored) {
+      if (initResult.restored && !initResult.redirected) {
+        window.WarrantyToast?.showInfo(
+          "Continue selecting your extended warranty plan."
+        );
+      }
       return;
     }
     await loadOrders();
