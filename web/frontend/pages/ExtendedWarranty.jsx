@@ -929,7 +929,7 @@ export default function ExtendedWarrantyAdmin() {
                   </Text>
                   <Text as="p" tone="subdued">
                     Choose whether extended warranty is sold at a fixed price or
-                    as a percentage of the product price.
+                    as a percentage of the product MSRP.
                   </Text>
                 </div>
                 <div style={{ marginTop: 16, maxWidth: 360 }}>
@@ -940,7 +940,8 @@ export default function ExtendedWarrantyAdmin() {
                     onChange={(v) =>
                       setSettings((p) => ({ ...p, warrantyPricingType: v }))
                     }
-                    helpText="Amount uses fixed prices. Percentage calculates warranty price from the product variant price."
+                    helpText="Amount uses fixed prices and Percentage uses MSRP when set; otherwise variant price"
+
                   />
                 </div>
               </div>

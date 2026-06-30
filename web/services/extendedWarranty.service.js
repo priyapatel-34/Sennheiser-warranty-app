@@ -273,11 +273,11 @@ export async function getExtendedWarrantySettings(shopId) {
   );
 }
 
-export async function fetchProductPrice(session, registered) {
+export async function fetchProductPricing(session, registered) {
   if (!session?.shop || !registered) return null;
 
   if (registered.shopify_variant_id) {
-    return fetchVariantPrice(
+    return fetchVariantPricing(
       session,
       registered.shopify_variant_id,
       registered.shopify_product_id
@@ -298,7 +298,10 @@ export async function fetchProductPrice(session, registered) {
         product(id: $id) {
           variants(first: 1) {
             edges {
-              node { price }
+              node {
+                price
+                compareAtPrice
+              }
             }
           }
         }
@@ -306,14 +309,40 @@ export async function fetchProductPrice(session, registered) {
       `,
       { variables: { id: productGid } }
     );
-    const price = response.data?.product?.variants?.edges?.[0]?.node?.price;
-    return price != null ? Number(price) : null;
+    const variantNode = response.data?.product?.variants?.edges?.[0]?.node;
+    if (!variantNode) return null;
+    return {
+      compareAtPrice:
+        variantNode.compareAtPrice != null
+          ? Number(variantNode.compareAtPrice)
+          : null,
+      variantPrice:
+        variantNode.price != null ? Number(variantNode.price) : null,
+    };
   } catch {
     return null;
   }
 }
 
-export async function fetchVariantPrice(session, variantId, productId = null) {
+/** @deprecated Use fetchProductPricing for percentage calculations. */
+export async function fetchProductPrice(session, registered) {
+  const pricing = await fetchProductPricing(session, registered);
+  return pricing?.variantPrice ?? null;
+}
+
+function mapVariantPricingNode(variantNode) {
+  if (!variantNode) return null;
+  return {
+    compareAtPrice:
+      variantNode.compareAtPrice != null
+        ? Number(variantNode.compareAtPrice)
+        : null,
+    variantPrice:
+      variantNode.price != null ? Number(variantNode.price) : null,
+  };
+}
+
+export async function fetchVariantPricing(session, variantId, productId = null) {
   if (!session?.shop || !variantId) return null;
 
   try {
@@ -327,14 +356,17 @@ export async function fetchVariantPrice(session, variantId, productId = null) {
       query VariantPrice($id: ID!) {
         productVariant(id: $id) {
           price
+          compareAtPrice
         }
       }
       `,
       { variables: { id: variantGid } }
     );
 
-    const price = response.data?.productVariant?.price;
-    if (price != null) return Number(price);
+    const pricing = mapVariantPricingNode(response.data?.productVariant);
+    if (pricing?.variantPrice != null || pricing?.compareAtPrice != null) {
+      return pricing;
+    }
 
     if (productId) {
       const productGid = String(productId).startsWith("gid://")
@@ -342,13 +374,14 @@ export async function fetchVariantPrice(session, variantId, productId = null) {
         : `gid://shopify/Product/${productId}`;
       const productResponse = await admin.request(
         `
-        query ProductVariantPrice($id: ID!, $variantId: ID!) {
+        query ProductVariantPrice($id: ID!) {
           product(id: $id) {
             variants(first: 100) {
               edges {
                 node {
                   id
                   price
+                  compareAtPrice
                 }
               }
             }
@@ -358,33 +391,38 @@ export async function fetchVariantPrice(session, variantId, productId = null) {
         {
           variables: {
             id: productGid,
-            variantId: variantGid,
           },
         }
       );
       const suffix = `/${variantId}`;
       const variantEdge = (productResponse.data?.product?.variants?.edges || []).find(
-        edge => edge.node.id.endsWith(suffix)
+        (edge) => edge.node.id.endsWith(suffix)
       );
-      if (variantEdge?.node?.price != null) {
-        return Number(variantEdge.node.price);
-      }
+      return mapVariantPricingNode(variantEdge?.node);
     }
   } catch (err) {
-    console.warn("Failed to fetch variant price:", err.message);
+    console.warn("Failed to fetch variant pricing:", err.message);
   }
 
   return null;
 }
 
+/** @deprecated Use fetchVariantPricing for percentage calculations. */
+export async function fetchVariantPrice(session, variantId, productId = null) {
+  const pricing = await fetchVariantPricing(session, variantId, productId);
+  return pricing?.variantPrice ?? null;
+}
+
 export async function resolvePlanRowForCheckout({
   planRow,
   pricingType,
+  variantPricing,
   productVariantPrice,
 }) {
   const resolved = resolvePlanPrice({
     configuredPrice: planRow.price,
     pricingType,
+    variantPricing,
     productVariantPrice,
   });
 
@@ -395,10 +433,12 @@ export async function resolvePlanRowForCheckout({
     pricing_type: resolved.pricingType,
     percentage: resolved.percentage,
     calculated_price: resolved.calculatedPrice,
+    base_price: resolved.basePrice,
+    base_price_source: resolved.basePriceSource,
   };
 }
 
-export function mapPlanForApi(planRow, pricingType, productVariantPrice = null) {
+export function mapPlanForApi(planRow, pricingType, variantPricing = null) {
   const type = normalizeWarrantyPricingType(pricingType);
   const base = {
     pricingType: type,
@@ -408,17 +448,19 @@ export function mapPlanForApi(planRow, pricingType, productVariantPrice = null) 
 
   if (type === "percentage") {
     base.percentage = Number(planRow.price);
-    if (productVariantPrice == null) {
+    if (variantPricing == null) {
       return null;
     }
     try {
       const resolved = resolvePlanPrice({
         configuredPrice: planRow.price,
         pricingType: type,
-        productVariantPrice,
+        variantPricing,
       });
       base.calculatedPrice = resolved.calculatedPrice;
       base.displayPrice = String(resolved.calculatedPrice);
+      base.basePrice = resolved.basePrice;
+      base.basePriceSource = resolved.basePriceSource;
     } catch {
       return null;
     }
@@ -958,8 +1000,8 @@ export async function activateEntitlementFromPayment({
     );
 
     if (!entitlement) {
-      const variantPrice = session
-        ? await fetchVariantPrice(
+      const variantPricing = session
+        ? await fetchVariantPricing(
             session,
             registered.shopify_variant_id,
             registered.shopify_product_id
@@ -971,11 +1013,11 @@ export async function activateEntitlementFromPayment({
         settings.warranty_pricing_type
       );
 
-      if (resolvedPricingType === "percentage" && variantPrice != null) {
+      if (resolvedPricingType === "percentage" && variantPricing) {
         const resolved = resolvePlanPrice({
           configuredPrice: plan.price,
           pricingType: resolvedPricingType,
-          productVariantPrice: variantPrice,
+          variantPricing,
         });
         resolvedPrice = resolved.resolvedPrice;
       }
@@ -1139,16 +1181,16 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
   }
 
   const pricingType = normalizeWarrantyPricingType(settings.warranty_pricing_type);
-  const productVariantPrice =
+  const variantPricing =
     pricingType === "percentage" && session
-      ? await fetchProductPrice(session, registered)
+      ? await fetchProductPricing(session, registered)
       : null;
 
   const shopCurrency = plans[0]?.currency || null;
 
   const basePlans = [];
   for (const p of plans) {
-    const pricing = mapPlanForApi(p, pricingType, productVariantPrice);
+    const pricing = mapPlanForApi(p, pricingType, variantPricing);
     if (!pricing) continue;
 
     const projected = computeExtendedWarrantyDates(registered, {

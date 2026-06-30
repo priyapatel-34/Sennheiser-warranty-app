@@ -95,6 +95,7 @@ const PRODUCTS_WITH_VARIANTS_QUERY = `
                 displayName
                 sku
                 price
+                compareAtPrice
                 selectedOptions {
                   name
                   value
@@ -163,6 +164,7 @@ const PRODUCT_VARIANTS_QUERY = `
             displayName
             sku
             price
+            compareAtPrice
             selectedOptions {
               name
               value
@@ -208,7 +210,12 @@ async function loadPlansForShop(shopId, { productId = null, variantId = null } =
 }
 
 /** Group plan rows by variant numeric ID. */
-function groupPlansByVariantId(planRows, warrantyPricingType, currency, variantPriceById = {}) {
+function groupPlansByVariantId(
+  planRows,
+  warrantyPricingType,
+  currency,
+  variantPricingById = {}
+) {
   const pricingType = normalizeWarrantyPricingType(warrantyPricingType);
   const map = {};
   for (const row of planRows) {
@@ -223,20 +230,20 @@ function groupPlansByVariantId(planRows, warrantyPricingType, currency, variantP
       currency: row.currency || currency,
     });
 
-    const variantPrice = variantPriceById[key];
-    if (pricingType === "percentage" && variantPrice != null) {
+    const variantPricing = variantPricingById[key];
+    if (pricingType === "percentage" && variantPricing) {
       try {
         const resolved = resolvePlanPrice({
           configuredPrice: row.price,
           pricingType,
-          productVariantPrice: variantPrice,
+          variantPricing,
         });
         displayPrice = new Intl.NumberFormat(undefined, {
           style: "currency",
           currency: row.currency || currency || "USD",
         }).format(resolved.calculatedPrice);
       } catch {
-        // keep percentage label when variant price unavailable
+        // keep percentage label when variant pricing unavailable
       }
     }
 
@@ -440,13 +447,21 @@ export async function getWarrantyProducts(req, res) {
       );
       allPlanRows = planRows;
 
-      const variantPriceById = {};
+      const variantPricingById = {};
       for (const edge of filteredEdges) {
         for (const variantEdge of edge.node.variants?.edges || []) {
           const variantNumericId = getNumericIdFromGid(variantEdge.node.id);
-          if (variantNumericId && variantEdge.node.price != null) {
-            variantPriceById[variantNumericId] = Number(variantEdge.node.price);
-          }
+          if (!variantNumericId) continue;
+          variantPricingById[variantNumericId] = {
+            compareAtPrice:
+              variantEdge.node.compareAtPrice != null
+                ? Number(variantEdge.node.compareAtPrice)
+                : null,
+            variantPrice:
+              variantEdge.node.price != null
+                ? Number(variantEdge.node.price)
+                : null,
+          };
         }
       }
 
@@ -454,7 +469,7 @@ export async function getWarrantyProducts(req, res) {
         planRows,
         warrantyPricingType,
         currency,
-        variantPriceById
+        variantPricingById
       );
     }
 
@@ -551,18 +566,26 @@ export async function getProductVariants(req, res) {
     const warrantyPricingType =
       ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
     const currency = response.data?.shop?.currencyCode || "USD";
-    const variantPriceById = {};
+    const variantPricingById = {};
     for (const variantEdge of product.variants?.edges || []) {
       const variantNumericId = getNumericIdFromGid(variantEdge.node.id);
-      if (variantNumericId && variantEdge.node.price != null) {
-        variantPriceById[variantNumericId] = Number(variantEdge.node.price);
-      }
+      if (!variantNumericId) continue;
+      variantPricingById[variantNumericId] = {
+        compareAtPrice:
+          variantEdge.node.compareAtPrice != null
+            ? Number(variantEdge.node.compareAtPrice)
+            : null,
+        variantPrice:
+          variantEdge.node.price != null
+            ? Number(variantEdge.node.price)
+            : null,
+      };
     }
     const plansByVariantId = groupPlansByVariantId(
       planRows,
       warrantyPricingType,
       currency,
-      variantPriceById
+      variantPricingById
     );
 
     const variants = (product.variants?.edges || []).map(v =>

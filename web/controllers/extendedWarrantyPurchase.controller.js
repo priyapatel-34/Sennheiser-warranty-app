@@ -10,7 +10,7 @@ import {
   getExtendedWarrantySettings,
   getNumericIdFromGid,
   canPurchaseExtendedWarranty,
-  fetchProductPrice,
+  fetchProductPricing,
   resolvePlanRowForCheckout,
 } from "../services/extendedWarranty.service.js";
 import { normalizeWarrantyPricingType } from "../services/extendedWarrantyPricing.js";
@@ -107,14 +107,14 @@ export async function initiateExtendedWarrantyCheckout(req, res) {
     const email = customer_email || registered.customer_email;
 
     const pricingType = normalizeWarrantyPricingType(settings.warranty_pricing_type);
-    const variantPrice = await fetchProductPrice(session, registered);
+    const variantPricing = await fetchProductPricing(session, registered);
 
     let resolvedPlanRow;
     try {
       resolvedPlanRow = await resolvePlanRowForCheckout({
         planRow,
         pricingType,
-        productVariantPrice: variantPrice,
+        variantPricing,
       });
     } catch (resolveErr) {
       return res.status(400).json({ error: resolveErr.message });
