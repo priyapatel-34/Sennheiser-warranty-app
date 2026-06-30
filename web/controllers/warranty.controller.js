@@ -122,7 +122,7 @@ function getExtendedWarrantyDisplayStatus(entitlement, refundRecord = null) {
   const refundStatus = getCustomerFacingRefundStatus(entitlement, refundRecord);
   if (refundStatus) return refundStatus;
 
-  if (entitlement.status === "pending_payment") return "Pending Payment";
+  if (entitlement.status === "pending_payment") return null;
   if (entitlement.status === "cancelled") return "Cancelled";
   if (entitlement.status === "refunded") return "Refunded";
   if (entitlement.status === "expired") return "Expired";
@@ -175,7 +175,7 @@ async function enrichProductWarrantyFields(
 
   const hasActiveExtendedWarranty = entitlementRow?.status === "active";
 
-  if (entitlementRow) {
+  if (entitlementRow && entitlementRow.status !== "pending_payment") {
     const registeredProduct = {
       warranty_end: product.warranty_end,
     };
@@ -203,15 +203,8 @@ async function enrichProductWarrantyFields(
   }
 
   product.can_extend_warranty = false;
-  product.can_resume_warranty_payment = false;
 
-  if (entitlementRow?.status === "pending_payment" && !hasActiveExtendedWarranty) {
-    product.can_resume_warranty_payment = true;
-    product.extended_warranty_eligibility = {
-      eligible: false,
-      reason: "pending_payment",
-    };
-  } else if (
+  if (
     product.is_registered &&
     product.register_id &&
     !hasActiveExtendedWarranty

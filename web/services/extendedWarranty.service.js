@@ -226,9 +226,6 @@ export function canExtendWarrantyLight({
   if (entitlement?.status === "active") {
     return { eligible: false, reason: "already_purchased" };
   }
-  if (entitlement?.status === "pending_payment") {
-    return { eligible: false, reason: "pending_payment" };
-  }
 
   const purchaseWindow = evaluatePurchaseWindowFromSettings(ewSettings, registered, {
     logContext: `list:register:${registered?.id ?? "unknown"}`,
@@ -1115,14 +1112,6 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
     };
   }
 
-  if (existing?.status === "pending_payment") {
-    return {
-      eligible: false,
-      reason: "pending_payment",
-      pendingEntitlement: formatEntitlementForApi(existing, registered),
-    };
-  }
-
   const purchaseWindow = await evaluatePurchaseWindowEligibility(shopId, registered);
   if (!purchaseWindow.allowed) {
     return {
@@ -1213,10 +1202,6 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
       variantId: registered.shopify_variant_id,
       productId: registered.shopify_product_id,
     },
-    pendingEntitlement:
-      existing?.status === "pending_payment"
-        ? formatEntitlementForApi(existing, registered)
-        : null,
   };
 }
 
