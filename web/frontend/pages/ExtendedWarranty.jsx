@@ -72,6 +72,13 @@ const styles = {
     padding: "16px 20px",
     borderBottom: "1px solid #e1e3e5",
   },
+  settingsSection: {
+    padding: "20px 0",
+    borderBottom: "1px solid #e1e3e5",
+  },
+  settingsSectionLast: {
+    padding: "20px 0 0",
+  },
 };
 
 function countConfiguredPlans(product) {
@@ -592,7 +599,23 @@ export default function ExtendedWarrantyAdmin() {
     productsLoaded && !productsLoading && paginationMeta.totalPages > 1;
 
   return (
-    <Page title="Extended Warranty">
+    <Page
+      title="Extended Warranty"
+      subtitle={
+        tab === 3
+          ? "Manage store-wide extended warranty rules, content, and customer reminders."
+          : undefined
+      }
+      primaryAction={
+        tab === 3 && !settingsLoading
+          ? {
+              content: "Save settings",
+              onAction: saveSettings,
+              loading: saving,
+            }
+          : undefined
+      }
+    >
       <Tabs
         tabs={[
           { id: "durations", content: "Durations" },
@@ -894,39 +917,44 @@ export default function ExtendedWarrantyAdmin() {
 
       {/* ── TAB 3: Store Settings ── */}
       {tab === 3 && (
-        <div style={styles.stack(16)}>
+        <LegacyCard>
           {settingsLoading ? (
-            <LegacyCard sectioned>
-              <LoadingPanel label="Loading settings..." />
-            </LegacyCard>
+            <LoadingPanel label="Loading settings..." />
           ) : (
-            <>
-              {/* Warranty pricing type */}
-              <LegacyCard sectioned>
-                <div style={styles.stack(16)}>
+            <div style={{ padding: "4px 20px 20px" }}>
+              <div style={{ ...styles.settingsSection, paddingTop: 16 }}>
+                <div style={styles.stack(4)}>
                   <Text as="h2" variant="headingMd">
                     Warranty pricing type
                   </Text>
-                  <div style={{ maxWidth: 320 }}>
-                    <Select
-                      label="Warranty Pricing Type"
-                      options={WARRANTY_PRICING_TYPE_OPTIONS}
-                      value={settings.warrantyPricingType}
-                      onChange={(v) =>
-                        setSettings((p) => ({ ...p, warrantyPricingType: v }))
-                      }
-                      helpText="Amount uses fixed prices. Percentage calculates warranty price from the product variant price."
-                    />
-                  </div>
+                  <Text as="p" tone="subdued">
+                    Choose whether extended warranty is sold at a fixed price or
+                    as a percentage of the product price.
+                  </Text>
                 </div>
-              </LegacyCard>
+                <div style={{ marginTop: 16, maxWidth: 360 }}>
+                  <Select
+                    label="Warranty pricing type"
+                    options={WARRANTY_PRICING_TYPE_OPTIONS}
+                    value={settings.warrantyPricingType}
+                    onChange={(v) =>
+                      setSettings((p) => ({ ...p, warrantyPricingType: v }))
+                    }
+                    helpText="Amount uses fixed prices. Percentage calculates warranty price from the product variant price."
+                  />
+                </div>
+              </div>
 
-              {/* Content & legal */}
-              <LegacyCard sectioned>
-                <div style={styles.stack(16)}>
+              <div style={styles.settingsSection}>
+                <div style={styles.stack(4)}>
                   <Text as="h2" variant="headingMd">
                     Content &amp; legal
                   </Text>
+                  <Text as="p" tone="subdued">
+                    Shown to customers on the extended warranty offer screen.
+                  </Text>
+                </div>
+                <div style={{ ...styles.stack(16), marginTop: 16 }}>
                   <TextField
                     label="Terms & Conditions URL"
                     value={settings.termsUrl}
@@ -938,7 +966,7 @@ export default function ExtendedWarrantyAdmin() {
                   />
                   <TextField
                     label="Coverage summary"
-                    helpText="Shown on the warranty offer screen."
+                    helpText="Brief description of what the extended warranty covers."
                     value={settings.coverageText}
                     onChange={(v) =>
                       setSettings((p) => ({ ...p, coverageText: v }))
@@ -948,49 +976,53 @@ export default function ExtendedWarrantyAdmin() {
                     placeholder="Describe what the extended warranty covers…"
                   />
                 </div>
-              </LegacyCard>
+              </div>
 
-              {/* Purchase window */}
-              <LegacyCard sectioned>
-                <div style={styles.stack(16)}>
+              <div style={styles.settingsSection}>
+                <div style={styles.stack(4)}>
                   <Text as="h2" variant="headingMd">
                     Purchase window
                   </Text>
-                  <div style={{ maxWidth: 320 }}>
-                    <TextField
-                      label="Days after registration to allow purchase"
-                      type="number"
-                      value={settings.extendedWarrantyPurchaseDays}
-                      onChange={(v) =>
-                        setSettings((p) => ({
-                          ...p,
-                          extendedWarrantyPurchaseDays: v,
-                        }))
-                      }
-                      autoComplete="off"
-                      placeholder="e.g. 90"
-                    />
-                  </div>
+                  <Text as="p" tone="subdued">
+                    How long after product registration customers can buy
+                    extended warranty.
+                  </Text>
                 </div>
-              </LegacyCard>
+                <div style={{ marginTop: 16, maxWidth: 360 }}>
+                  <TextField
+                    label="Days after registration to allow purchase"
+                    type="number"
+                    value={settings.extendedWarrantyPurchaseDays}
+                    onChange={(v) =>
+                      setSettings((p) => ({
+                        ...p,
+                        extendedWarrantyPurchaseDays: v,
+                      }))
+                    }
+                    autoComplete="off"
+                    placeholder="e.g. 90"
+                    helpText="Leave empty for no time limit."
+                  />
+                </div>
+              </div>
 
-              {/* Expiry reminder emails */}
-              <LegacyCard sectioned>
-                <div style={styles.stack(16)}>
-                  <div style={styles.stack(4)}>
-                    <Text as="h2" variant="headingMd">
-                      Expiry reminder emails
-                    </Text>
-                    <Text as="p" tone="subdued">
-                      Set how many days before the purchase window closes to
-                      send each reminder.
-                    </Text>
-                  </div>
+              <div style={styles.settingsSectionLast}>
+                <div style={styles.stack(4)}>
+                  <Text as="h2" variant="headingMd">
+                    Expiry reminder emails
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    Send reminders this many days before the purchase window
+                    closes.
+                  </Text>
+                </div>
 
+                <div style={{ marginTop: 16 }}>
                   {(settings.expiryReminderConfigs || []).length === 0 ? (
                     <div style={styles.infoBanner}>
-                      No reminder schedules configured. Add reminder days below
-                      to notify customers before the purchase window closes.
+                      No reminder schedules configured. Add reminder days when
+                      a schedule is available to notify customers before the
+                      purchase window closes.
                     </div>
                   ) : (
                     <div style={styles.stack(12)}>
@@ -1004,7 +1036,12 @@ export default function ExtendedWarrantyAdmin() {
                               padding: "12px 14px",
                             }}
                           >
-                            <div style={{ ...styles.row(8, "center"), flexWrap: "wrap" }}>
+                            <div
+                              style={{
+                                ...styles.row(8, "center"),
+                                flexWrap: "wrap",
+                              }}
+                            >
                               {(entry.reminderDays || []).map((day, dayIndex) => (
                                 <div
                                   key={`reminder-day-${configIndex}-${dayIndex}`}
@@ -1040,24 +1077,35 @@ export default function ExtendedWarrantyAdmin() {
                                       MozAppearance: "textfield",
                                     }}
                                   />
-                                  <Text as="span" variant="bodySm" tone="subdued">
+                                  <Text
+                                    as="span"
+                                    variant="bodySm"
+                                    tone="subdued"
+                                  >
                                     days
                                   </Text>
                                   <button
-                                    disabled={(entry.reminderDays || []).length <= 1}
+                                    disabled={
+                                      (entry.reminderDays || []).length <= 1
+                                    }
                                     onClick={() =>
-                                      removeExpiryReminderDay(configIndex, dayIndex)
+                                      removeExpiryReminderDay(
+                                        configIndex,
+                                        dayIndex
+                                      )
                                     }
                                     style={{
                                       marginLeft: 2,
                                       background: "none",
                                       border: "none",
-                                      cursor: (entry.reminderDays || []).length <= 1
-                                        ? "not-allowed"
-                                        : "pointer",
-                                      color: (entry.reminderDays || []).length <= 1
-                                        ? "#c9cccf"
-                                        : "#d72c0d",
+                                      cursor:
+                                        (entry.reminderDays || []).length <= 1
+                                          ? "not-allowed"
+                                          : "pointer",
+                                      color:
+                                        (entry.reminderDays || []).length <= 1
+                                          ? "#c9cccf"
+                                          : "#d72c0d",
                                       fontSize: 14,
                                       lineHeight: 1,
                                       padding: "0 2px",
@@ -1081,16 +1129,10 @@ export default function ExtendedWarrantyAdmin() {
                     </div>
                   )}
                 </div>
-              </LegacyCard>
-
-              <div style={{ paddingBottom: 24 }}>
-                <Button variant="primary" onClick={saveSettings} loading={saving}>
-                  Save settings
-                </Button>
               </div>
-            </>
+            </div>
           )}
-        </div>
+        </LegacyCard>
       )}
 
       {/* ── Pricing Modal ── */}
