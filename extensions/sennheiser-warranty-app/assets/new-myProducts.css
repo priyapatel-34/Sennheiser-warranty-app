@@ -430,6 +430,11 @@
 
 .mp-product-detail .mp-detail-content .mp-detail-warranty {
   margin: 22px 0 40px;
+  padding: 22px 0 40px to 22px 0 22px
+}
+
+.mp-product-detail .mp-detail-content .mp-detail-warranty .btn{
+  margin-top: 20px
 }
 
 .mp-product-detail .mp-detail-bottom {
@@ -577,6 +582,7 @@
 
   .mp-product-detail .mp-detail-bottom {
     justify-content: center;
+    margin-top: 35px;
   }
 
   .mp-product-detail .mp-detail-bottom .right-block {
@@ -584,6 +590,11 @@
   }
   .mp-product-detail .mp-detail-content h2 {
     font-size: 18px;
+  }
+
+  .mp-product-detail .mp-detail-content .mp-detail-warranty .btn{
+    width: 100%;
+
   }
 }
 
