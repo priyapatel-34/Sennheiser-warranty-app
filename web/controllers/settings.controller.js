@@ -1,33 +1,25 @@
 import { pool } from "../db/mysql.js";
 
 export async function saveStoreSettings(req, res) {
-    const session = res.locals.shopify.session;
+  const session = res.locals.shopify.session;
 
-   // console.log("saveStoreSettings `111", session);
+  if (!session || !session.shop) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
 
-    if (!session || !session.shop) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
+  const shopDomain = session.shop; 
+  const { retailer_required } = req.body;
 
-    const shopDomain = session.shop; // ✅ CORRECT
-  //  console.log("🚨 Settings.controller.js LOADED 111",shop);
-    const { retailer_required } = req.body;
+  const [[shopRow]] = await pool.query(
+    `SELECT id FROM shops WHERE shop_domain = ? AND is_installed = TRUE`,
+    [shopDomain]
+  );
 
-    console.log("saveStoreSettings `222", retailer_required);
+  if (!shopRow) {
+    return res.status(404).json({ error: "Shop not registered" });
+  }
 
-    // 1️⃣ Get shop_id
-    const [[shopRow]] = await pool.query(
-      `SELECT id FROM shops WHERE shop_domain = ? AND is_installed = TRUE`,
-      [shopDomain]
-    );
-
-    if (!shopRow) {
-      return res.status(404).json({ error: "Shop not registered" });
-    }
-
-    const shopId = shopRow.id;
-
-
+  const shopId = shopRow.id;
   await pool.query(
     `
     INSERT INTO store_settings (shop_id, retailer_required)
@@ -38,9 +30,6 @@ export async function saveStoreSettings(req, res) {
     [shopId, retailer_required]
   );
 
-  console.log("saveStoreSettings `333");
-
-
   res.json({ success: true });
 }
 
@@ -48,17 +37,13 @@ export async function saveStoreSettings(req, res) {
 export async function getStoreSettings(req, res) {
   const session = res.locals.shopify.session;
 
-  console.log("saveStoreSettings `111", session);
-
   if (!session || !session.shop) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const shopDomain = session.shop; // ✅ CORRECT
-//  console.log("in getStoreSettings 111",shop);
+  const shopDomain = session.shop; 
 
-   // 1️⃣ Get shop_id
-   const [[shopRow]] = await pool.query(
+  const [[shopRow]] = await pool.query(
     `SELECT id FROM shops WHERE shop_domain = ? AND is_installed = TRUE`,
     [shopDomain]
   );
@@ -73,8 +58,6 @@ export async function getStoreSettings(req, res) {
     "SELECT retailer_required FROM store_settings WHERE shop_id = ?",
     [shopId]
   );
-
-  console.log("in getStoreSettings 222");
 
   res.json(row || { retailer_required: 1 });
 }

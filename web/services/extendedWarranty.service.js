@@ -1,11 +1,12 @@
 import shopify from "../shopify.js";
 import { pool } from "../db/mysql.js";
 import { sendEmailService } from "./email.service.js";
+import { sendShopEmail } from "./emailSettings.service.js";
 import ExtendedWarrantyPurchaseTemplate from "../emailTemp/extended_warranty_purchase.js";
-import ExtendedWarrantyActivationTemplate from "../emailTemp/extended_warranty_activation.js";
 import {
   renderViewProductDetailsButton,
   resolveShopDomain,
+  resolveCustomerFacingShopDomain,
 } from "./emailLink.service.js";
 import {
   DEFAULT_WARRANTY_PRICING_TYPE,
@@ -816,6 +817,24 @@ export async function createPendingEntitlement({
   return result.insertId;
 }
 
+export async function cancelPendingEntitlementForRegistration(
+  shopId,
+  registeredProductId
+) {
+  if (!shopId || !registeredProductId) return { cancelled: 0 };
+  const [result] = await pool.query(
+    `
+    UPDATE extended_warranty_entitlements
+    SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+    WHERE shop_id = ?
+      AND registered_product_id = ?
+      AND status = 'pending_payment'
+    `,
+    [shopId, registeredProductId]
+  );
+  return { cancelled: result.affectedRows || 0 };
+}
+
 export async function createDraftOrderCheckout({
   session,
   customerEmail,
@@ -1060,8 +1079,6 @@ export async function activateEntitlementFromPayment({
 
     await conn.commit();
 
-    const storeName = shopDisplayName || "Sonova Team";
-
     const [[activeEntitlement]] = await pool.query(
       `
       SELECT * FROM extended_warranty_entitlements
@@ -1073,12 +1090,17 @@ export async function activateEntitlementFromPayment({
 
     const purchasePrice = activeEntitlement?.price ?? plan.price;
     const purchaseCurrency = activeEntitlement?.currency ?? plan.currency;
-    const shopDomain =
-      session?.shop || (await resolveShopDomain(shopId));
+    const shopDomain = await resolveCustomerFacingShopDomain(
+      session ? new shopify.api.clients.Graphql({ session }) : null,
+      session?.shop || (await resolveShopDomain(shopId))
+    );
     const productDetailsHtml = renderViewProductDetailsButton(
       shopDomain,
       registerId
     );
+
+    const activationDateText = formatDateOnly(activationDate);
+    const expiryDateText = formatDateOnly(expiryDate);
 
     const purchaseHtml = ExtendedWarrantyPurchaseTemplate({
       customerName: customerName || registered.customer_name || "Customer",
@@ -1088,33 +1110,30 @@ export async function activateEntitlementFromPayment({
       durationMonths: plan.duration_months,
       price: String(purchasePrice),
       currency: purchaseCurrency,
-      storeName,
-      productDetailsHtml,
-    });
-
-    await sendEmailService({
-      to: customerEmail || registered.customer_email,
-      subject: "Extended Warranty Purchase Confirmation",
-      html: purchaseHtml,
-      from: process.env.DEFAULT_FROM_EMAIL,
-    });
-
-    const activationHtml = ExtendedWarrantyActivationTemplate({
-      customerName: customerName || registered.customer_name || "Customer",
-      productTitle: registered.product_name,
       serialNumber: registered.serial_number,
-      planName: plan.plan_name,
-      activationDate: activationDate.toISOString().split("T")[0],
-      expiryDate: expiryDate.toISOString().split("T")[0],
-      storeName,
+      activationDate: activationDateText,
+      expiryDate: expiryDateText,
       productDetailsHtml,
     });
 
-    await sendEmailService({
+    await sendShopEmail({
+      shopId,
+      templateKey: "extended_warranty_purchase",
       to: customerEmail || registered.customer_email,
-      subject: "Extended Warranty Activated",
-      html: activationHtml,
-      from: process.env.DEFAULT_FROM_EMAIL,
+      data: {
+        customerName: customerName || registered.customer_name || "Customer",
+        productName: registered.product_name,
+        orderNumber: shopifyOrderName || shopifyOrderId,
+        planName: plan.plan_name,
+        warrantyDuration: `${plan.duration_months} Months`,
+        warrantyNumber: registered.serial_number,
+        registrationDate: activationDateText,
+        warrantyExpiry: expiryDateText,
+      },
+      renderDefault: async () => ({
+        subject: "Extended Warranty Purchase Confirmation",
+        html: purchaseHtml,
+      }),
     });
 
     return { registerId, planId, expiryDate };
@@ -1149,12 +1168,16 @@ export function formatMoney(amount, currency, locale) {
 }
 
 export async function buildExtendedWarrantyOffer(shopId, registerId, options = {}) {
-  const { session = null } = options;
+  const { session = null, justRegistered = false } = options;
   const settings = await getExtendedWarrantySettings(shopId);
 
   const registered = await loadRegisteredProduct(shopId, registerId);
   if (!registered) {
     return { eligible: false, reason: "registration_not_found" };
+  }
+
+  if (justRegistered && !resolveRegistrationTimestamp(registered)) {
+    registered.created_at = new Date();
   }
 
   const existing = await getActiveEntitlement(shopId, registerId);

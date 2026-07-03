@@ -1,0 +1,236 @@
+import {
+  Page,
+  LegacyCard,
+  TextField,
+  Button,
+  Text,
+  Tabs,
+  Checkbox,
+  Banner,
+  Modal,
+  LegacyStack,
+} from "@shopify/polaris";
+import { useCallback, useEffect, useState } from "react";
+import LoadingPanel from "../components/LoadingPanel.jsx";
+import EmailRichTextEditor from "../components/EmailRichTextEditor.jsx";
+import { useToast } from "../hooks/useToast.js";
+
+const API_BASE = "/app/email-settings";
+
+export default function EmailSettings() {
+  const toast = useToast();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [globalEnabled, setGlobalEnabled] = useState(true);
+  const [templates, setTemplates] = useState([]);
+  const [selectedTab, setSelectedTab] = useState(0);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState("");
+  const [previewSubject, setPreviewSubject] = useState("");
+  const [error, setError] = useState(null);
+
+  const loadSettings = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(API_BASE, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load email settings");
+      const data = await res.json();
+      setGlobalEnabled(Boolean(data.globalEnabled));
+      setTemplates(Array.isArray(data.templates) ? data.templates : []);
+    } catch (err) {
+      setError(err.message || "Failed to load email settings");
+      setTemplates([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
+
+  const activeTemplate = templates[selectedTab];
+
+  const updateTemplate = (patch) => {
+    setTemplates((prev) =>
+      prev.map((item, index) =>
+        index === selectedTab ? { ...item, ...patch } : item
+      )
+    );
+  };
+
+  const saveSettings = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(API_BASE, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          globalEnabled,
+          templates: templates.map((template) => ({
+            key: template.key,
+            enabled: template.enabled,
+            subject: template.subject,
+            bodyHtml: template.bodyHtml,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to save email settings");
+      setGlobalEnabled(Boolean(data.globalEnabled));
+      setTemplates(Array.isArray(data.templates) ? data.templates : []);
+      toast.showSuccess("Email settings saved");
+    } catch (err) {
+      setError(err.message || "Failed to save email settings");
+      toast.showError(err.message || "Failed to save email settings");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const previewTemplate = async () => {
+    if (!activeTemplate) return;
+    if (!activeTemplate.subject?.trim()) {
+      toast.showError("Subject is required to preview");
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/preview`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          templateKey: activeTemplate.key,
+          subject: activeTemplate.subject,
+          bodyHtml: activeTemplate.bodyHtml,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to preview email");
+      setPreviewSubject(data.subject);
+      setPreviewHtml(data.html);
+      setPreviewOpen(true);
+    } catch (err) {
+      toast.showError(err.message || "Failed to preview email");
+    }
+  };
+
+  if (loading) {
+    return (
+      <Page title="Email Settings">
+        <LoadingPanel label="Loading email settings..." />
+      </Page>
+    );
+  }
+
+  return (
+    <Page
+      title="Email Settings"
+      subtitle="Manage notification emails sent to customers"
+      primaryAction={{
+        content: "Save settings",
+        onAction: saveSettings,
+        loading: saving,
+      }}
+    >
+      {error ? (
+        <div className="wa-admin-section-gap">
+          <Banner tone="critical">{error}</Banner>
+        </div>
+      ) : null}
+
+      <LegacyCard sectioned>
+        <Checkbox
+          label="Enable email notifications"
+          helpText="When disabled, no customer emails are sent. Application functionality continues normally."
+          checked={globalEnabled}
+          onChange={setGlobalEnabled}
+        />
+      </LegacyCard>
+
+      {templates.length > 0 ? (
+        <>
+          <div className="wa-admin-section-gap">
+            <Tabs
+              tabs={templates.map((template) => ({
+                id: template.key,
+                content: template.label,
+              }))}
+              selected={selectedTab}
+              onSelect={setSelectedTab}
+            />
+          </div>
+
+          {activeTemplate ? (
+            <LegacyCard sectioned>
+              <LegacyStack vertical gap="400">
+                <Checkbox
+                  label={`Enable ${activeTemplate.label}`}
+                  checked={activeTemplate.enabled}
+                  onChange={(enabled) => updateTemplate({ enabled })}
+                />
+
+                <TextField
+                  label="Email subject"
+                  value={activeTemplate.subject || ""}
+                  onChange={(subject) => updateTemplate({ subject })}
+                  autoComplete="off"
+                  helpText="Optional. Leave as default or customize the subject line."
+                />
+
+                {activeTemplate.description ? (
+                  <Banner tone="info">{activeTemplate.description}</Banner>
+                ) : (
+                  <Banner tone="info">
+                    Registration details are added automatically by the app.
+                    You only need to add optional extra content.
+                  </Banner>
+                )}
+
+                <EmailRichTextEditor
+                  label="Additional content (optional)"
+                  value={activeTemplate.bodyHtml || ""}
+                  onChange={(bodyHtml) => updateTemplate({ bodyHtml })}
+                />
+
+                <Text as="p" tone="subdued" variant="bodySm">
+                  This content is appended to the standard email.
+                </Text>
+
+                <div className="wa-compact-form-actions">
+                  <Button onClick={previewTemplate}>Preview email</Button>
+                </div>
+              </LegacyStack>
+            </LegacyCard>
+          ) : null}
+        </>
+      ) : null}
+
+      <Modal
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        title="Email preview"
+        large
+        primaryAction={{
+          content: "Close",
+          onAction: () => setPreviewOpen(false),
+        }}
+      >
+        <Modal.Section>
+          <LegacyStack vertical gap="300">
+            <Text as="p" variant="bodyMd">
+              <strong>Subject:</strong> {previewSubject}
+            </Text>
+            <div
+              className="wa-email-preview-frame"
+              dangerouslySetInnerHTML={{ __html: previewHtml }}
+            />
+          </LegacyStack>
+        </Modal.Section>
+      </Modal>
+    </Page>
+  );
+}

@@ -4,6 +4,7 @@ export default function WarrantyRegistrationSuccessTemplate({
   customerName,
   productTitle,
   orderNumber,
+  purchaseDate,
   warrantyPeriod,
   productDetailsHtml = "",
 }) {
@@ -14,23 +15,16 @@ export default function WarrantyRegistrationSuccessTemplate({
       Thank you for registering your product with us. We are pleased to confirm
       that your warranty has been successfully activated.
     </p>
-
+    </br>
     <p>
       <strong>Product:</strong> ${productTitle}<br/>
       ${orderNumber && orderNumber !== "N/A" ? `<strong>Order Number:</strong> ${orderNumber}<br/>` : ""}
+      ${purchaseDate ? `<strong>Purchase Date:</strong> ${purchaseDate}<br/>` : ""}
       <strong>Warranty Period:</strong> ${warrantyPeriod}<br/>
     </p>
 
     ${productDetailsHtml}
-
-    <p>
-       Please keep this email for your records. It serves as confirmation
-       of your warranty registration.
-    </p>
-
-    <p>
-      If you require any assistance, our support team will be happy to help.
-    </p>
+ <br/>
   `;
 
   return renderEmailLayout({

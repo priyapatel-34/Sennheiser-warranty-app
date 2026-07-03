@@ -278,10 +278,18 @@
 
 .register-warranty-form-section .consent-text a {
   color: #057CC1;
+  text-decoration: none;
+  -webkit-tap-highlight-color: rgba(5, 124, 193, 0.25);
 }
 
-.register-warranty-form-section .consent-text a:hover {
+.register-warranty-form-section .consent-text a:hover,
+.register-warranty-form-section .consent-text a:focus,
+.register-warranty-form-section .consent-text a:focus-visible,
+.register-warranty-form-section .consent-text a:active,
+.register-warranty-form-section .consent-text a:visited {
+  color: #057CC1;
   text-decoration: underline;
+  opacity: 1;
 }
 
 .register-warranty-form-section .label-with-icon-wrap .info-icon {

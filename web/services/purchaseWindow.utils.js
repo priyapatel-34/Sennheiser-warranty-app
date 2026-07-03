@@ -1,20 +1,33 @@
 const MS_PER_DAY = 86400000;
+/** Show "Extension Offer Expires in X Days" only when this many days or fewer remain. */
+const EXTENSION_OFFER_EXPIRY_LABEL_MAX_DAYS = 10;
 
 /**
  * Registration timestamp for purchase-window math.
- * Must NOT use warranty_start — that is coverage start, not registration time.
+ * Must NOT use warranty_start or purchase_date — those are not registration time.
  */
+function parseDateValue(raw) {
+  if (raw == null || raw === "") return null;
+  if (raw instanceof Date) {
+    return Number.isNaN(raw.getTime()) ? null : new Date(raw.getTime());
+  }
+
+  const str = String(raw).trim();
+  if (!str) return null;
+
+  const normalized =
+    str.includes(" ") && !str.includes("T") ? str.replace(" ", "T") : str;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 export function resolveRegistrationTimestamp(registered) {
   const raw =
     registered?.created_at ??
     registered?.registered_at ??
-    registered?.registration_date ??
-    registered?.purchase_date;
+    registered?.registration_date;
 
-  if (raw == null || raw === "") return null;
-
-  const date = raw instanceof Date ? new Date(raw.getTime()) : new Date(raw);
-  return Number.isNaN(date.getTime()) ? null : date;
+  return parseDateValue(raw);
 }
 
 function utcDayIndex(date) {
@@ -117,6 +130,8 @@ export function formatExtensionOfferExpiryLabel(purchaseWindow) {
 
   const remaining = Number(purchaseWindow.daysRemaining);
   if (!Number.isFinite(remaining)) return null;
+
+  if (remaining > EXTENSION_OFFER_EXPIRY_LABEL_MAX_DAYS) return null;
 
   const purchaseDays = Number(purchaseWindow.extendedWarrantyPurchaseDays);
 

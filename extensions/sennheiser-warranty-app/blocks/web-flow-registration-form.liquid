@@ -1,171 +1,171 @@
 {% if customer or request.design_mode %}
-<div id="tws-warranty" class="register-warranty-form-section">
-
-  <!-- HEADER -->
-  <section class="mp-header">
-    <div class="mp-user-info">
-      <div class="mp-avatar">
-        {{ customer.first_name | default: 'U' | slice: 0, 1 }}
+  <div id="tws-warranty" class="register-warranty-form-section">
+  
+    <!-- HEADER -->
+    <section class="mp-header">
+      <div class="mp-user-info">
+        <div class="mp-avatar">
+          {{ customer.first_name | default: 'U' | slice: 0, 1 }}
+        </div>
+  
+        <div class="mp-user-text">
+          <h1>
+            {{ block.settings.greeting_text }}
+  
+            {% if customer.first_name != blank %}
+              {{ customer.first_name }}
+            {% else %}
+              Customer
+            {% endif %}
+          </h1>
+  
+          <p>{{ customer.email }}</p>
+          <a href="{{ routes.account_logout_url }}" class="mp-logout">
+            <em class="logout-icon">
+              <img src="{{ 'logout-icon.svg' | asset_url }}" alt="Logout Icon"/>
+            </em>
+            <span>Logout</span>
+          </a>
+        </div>
+  
+  
+        <div class="mp-header-desc">
+          <p>
+            Welcome to your account. Check your order history,
+            register your products, and manage your personal data – all in one place!
+          </p>
+        </div>
       </div>
-
-      <div class="mp-user-text">
-        <h1>
-          {{ block.settings.greeting_text }}
-
-          {% if customer.first_name != blank %}
-            {{ customer.first_name }}
-          {% else %}
-            Customer
-          {% endif %}
-        </h1>
-
-        <p>{{ customer.email }}</p>
-        <a href="{{ routes.account_logout_url }}" class="mp-logout">
-          <em class="logout-icon">
-            <img src="{{ 'logout-icon.svg' | asset_url }}" alt="Logout Icon"/>
-          </em>
-          <span>Logout</span>
-        </a>
-      </div>
-
-
-      <div class="mp-header-desc">
-        <p>
-          Welcome to your account. Check your order history,
-          register your products, and manage your personal data – all in one place!
-        </p>
-      </div>
-    </div>
-
-
+  
+  
+      
+    </section>
+  
+    <div id="ew-offer-section" class="ew-offer-section hidden"></div>
+  
+    <div class="tws-bg ew-registration-form-panel">
+      <div class="tws-wrap">
+      <div id="successMessage" class="tws-success-message">
+        <img 
+          src="{{ 'active-icon.svg' | asset_url }}" 
+          alt="Success Icon" 
+          class="success-icon"
+        >
+        <span>Thank you. Product Registered Successfully!</span>
+       </div>
+        <div class="title-wrapper">
+          <h2 class="tws-title">Register Your Product Warranty</h2>
+        </div>
+  
+        <form class="custom-register-warranty-form" id="twsForm" novalidate>
+  
+          <div class="form-inner-wrap">
+            <!-- CUSTOMER INFO -->
+            <input type="hidden" id="customerId" value="{{ customer.id }}">
+            <input type="hidden" id="info-icon" value="{{ 'info-icon.svg' | asset_url }}">
+                      <input type="hidden" id="my_products_link" value="{{ block.settings.my_products_link }}">
     
-  </section>
-
-  <div id="ew-offer-section" class="ew-offer-section hidden"></div>
-
-  <div class="tws-bg ew-registration-form-panel">
-    <div class="tws-wrap">
-    <div id="successMessage" class="tws-success-message">
-      <img 
-        src="{{ 'active-icon.svg' | asset_url }}" 
-        alt="Success Icon" 
-        class="success-icon"
-      >
-      <span>Thank you. Product Registered Successfully!</span>
-     </div>
-      <div class="title-wrapper">
-        <h2 class="tws-title">Register Your Product Warranty</h2>
+            <div class="form-control form-input">
+              <label>Name</label>
+              <input id="customerName" value="{{ customer.first_name }} {{ customer.last_name }}">
+            </div>
+    
+            <div class="form-control form-input">
+              <label>Email</label>
+              <input id="customerEmail" readonly value="{{ customer.email }}">
+            </div>
+            
+            <!-- SHOPIFY PURCHASE (ALWAYS VISIBLE) -->
+            <div class="form-control form-input">
+              <label>Order Number</label>
+              <input id="orderNumber" readonly>
+            </div>
+            <div class="form-control form-input">
+              <label>Purchased on</label>
+              <input id="orderDate" readonly>
+            </div>
+          </div>
+          <div class="product-wrap">
+            <h3>Products</h3>
+            <div id="shopifyProducts"></div>
+          </div>
+    
+          <!-- CONSENTS -->
+          <div class="panel-inner">
+            <div class="consent-wrapper">
+              <label class="consent-label">
+                <input type="checkbox" id="consentCheckbox1">
+                <span class="consent-text">
+                  Your product warranty information will be processed in compliance with our
+                  <a href="{{ block.settings.privacy_notice_link }}" target="_blank">
+                    Privacy Notice
+                  </a>.
+                </span>
+              </label>
+              <div class="field-error" id="consentPrivacyError"></div>
+            </div>
+            <div class="consent-wrapper">
+              <label class="consent-label">
+                <input type="checkbox" id="consentCheckbox2">
+                <span class="consent-text">
+                  Please retain your proof of purchase. A valid proof of purchase is required to make a warranty claim.
+                  Full warranty terms are available here:
+                  <a href="{{ block.settings.warranty_terms_link }}" target="_blank" rel="noopener">
+                    Warranty Conditions
+                  </a>.
+                </span>
+              </label>
+              <div class="field-error" id="consentConfirmError"></div>
+            </div>
+          </div>
+          <div class="btn-wrap">
+            <button type="submit" class="btn submit-btn">Submit</button>
+          </div>
+        </form>
       </div>
-
-      <form class="custom-register-warranty-form" id="twsForm" novalidate>
-
-        <div class="form-inner-wrap">
-          <!-- CUSTOMER INFO -->
-          <input type="hidden" id="customerId" value="{{ customer.id }}">
-          <input type="hidden" id="info-icon" value="{{ 'info-icon.svg' | asset_url }}">
-                    <input type="hidden" id="my_products_link" value="{{ block.settings.my_products_link }}">
-  
-          <div class="form-control form-input">
-            <label>Name</label>
-            <input id="customerName" value="{{ customer.first_name }} {{ customer.last_name }}">
-          </div>
-  
-          <div class="form-control form-input">
-            <label>Email</label>
-            <input id="customerEmail" readonly value="{{ customer.email }}">
-          </div>
-          
-          <!-- SHOPIFY PURCHASE (ALWAYS VISIBLE) -->
-          <div class="form-control form-input">
-            <label>Order Number</label>
-            <input id="orderNumber" readonly>
-          </div>
-          <div class="form-control form-input">
-            <label>Purchased on</label>
-            <input id="orderDate" readonly>
-          </div>
-        </div>
-        <div class="product-wrap">
-          <h3>Products</h3>
-          <div id="shopifyProducts"></div>
-        </div>
-  
-        <!-- CONSENTS -->
-        <div class="panel-inner">
-          <div class="consent-wrapper">
-            <label class="consent-label">
-              <input type="checkbox" id="consentCheckbox1">
-              <span class="consent-text">
-                Your product warranty information will be processed in compliance with our
-                <a href="{{ block.settings.privacy_notice_link }}" target="_blank">
-                  Privacy Notice
-                </a>.
-              </span>
-            </label>
-            <div class="field-error" id="consentPrivacyError"></div>
-          </div>
-          <div class="consent-wrapper">
-            <label class="consent-label">
-              <input type="checkbox" id="consentCheckbox2">
-              <span class="consent-text">
-                Please retain your proof of purchase. A valid proof of purchase is required to make a warranty claim.
-                Full warranty terms are available here:
-                <a href="{{ block.settings.warranty_terms_link }}" target="_blank" rel="noopener">
-                  Warranty Conditions
-                </a>.
-              </span>
-            </label>
-            <div class="field-error" id="consentConfirmError"></div>
-          </div>
-        </div>
-        <div class="btn-wrap">
-          <button type="submit" class="btn submit-btn">Submit</button>
-        </div>
-      </form>
     </div>
   </div>
-</div>
-
-{% else %}
-<script>location.href='/account/login'</script>
-{% endif %} 
-
-{{ 'web-purchase-form.css' | asset_url | stylesheet_tag }}
-{{ 'warranty-toast.css' | asset_url | stylesheet_tag }}
-{{ 'extended-warranty-offer.css' | asset_url | stylesheet_tag }}
-{{ 'warranty-toast.js' | asset_url | script_tag }}
-{{ 'warranty-flow-state.js' | asset_url | script_tag }}
-{{ 'extended-warranty-offer.js' | asset_url | script_tag }}
-{{ 'web-purchase-form.js' | asset_url | script_tag }}
-
-{% schema %}
-{
-  "name": "Web Flow Register Form",
-  "target": "section",
-  "settings": [
-    {
-      "type": "text",
-      "id": "greeting_text",
-      "label": "Greeting text",
-      "default": "Hi"
-    },
-    {
-      "type": "url",
-      "id": "privacy_notice_link",
-      "label": "Privacy Notice Link"
-    },
-    {
-      "type": "url",
-      "id": "warranty_terms_link",
-      "label": "Warranty Terms Link",
-      "info": "Link to full warranty terms and conditions"
-       },
-    {
-      "type": "url",
-      "id": "my_products_link",
-      "label": "My Products page Link",
-      "info": "My products page link"
-    }
-  ]
-}
-{% endschema %}
+  
+  {% else %}
+  <script>location.href='/account/login'</script>
+  {% endif %} 
+  
+  {{ 'web-purchase-form.css' | asset_url | stylesheet_tag }}
+  {{ 'warranty-toast.css' | asset_url | stylesheet_tag }}
+  {{ 'extended-warranty-offer.css' | asset_url | stylesheet_tag }}
+  {{ 'warranty-toast.js' | asset_url | script_tag }}
+  {{ 'warranty-flow-state.js' | asset_url | script_tag }}
+  {{ 'extended-warranty-offer.js' | asset_url | script_tag }}
+  {{ 'web-purchase-form.js' | asset_url | script_tag }}
+  
+  {% schema %}
+  {
+    "name": "Web Flow Register Form",
+    "target": "section",
+    "settings": [
+      {
+        "type": "text",
+        "id": "greeting_text",
+        "label": "Greeting text",
+        "default": "Hi"
+      },
+      {
+        "type": "url",
+        "id": "privacy_notice_link",
+        "label": "Privacy Notice Link"
+      },
+      {
+        "type": "url",
+        "id": "warranty_terms_link",
+        "label": "Warranty Terms Link",
+        "info": "Link to full warranty terms and conditions"
+         },
+      {
+        "type": "url",
+        "id": "my_products_link",
+        "label": "My Products page Link",
+        "info": "My products page link"
+      }
+    ]
+  }
+  {% endschema %}

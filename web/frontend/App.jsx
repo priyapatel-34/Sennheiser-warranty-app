@@ -1,43 +1,21 @@
-import { BrowserRouter, useLocation } from "react-router-dom";
-import { Frame, Navigation } from "@shopify/polaris";
+import { BrowserRouter, Link } from "react-router-dom";
+import { NavMenu } from "@shopify/app-bridge-react";
 import Routes from "./Routes";
 import { QueryProvider, PolarisProvider } from "./components";
-
-import { useNavigate } from "react-router-dom";
+import AppLayout from "./components/AppLayout.jsx";
 
 function AppContent({ pages }) {
-  const location = useLocation();
-  const navigate = useNavigate();
-
   return (
-    <Frame
-      navigation={
-        <Navigation location={location.pathname}>
-          <Navigation.Section
-            items={[
-              {
-                label: "Standard Warranty Setup",
-                onClick: () => navigate("/StandardWarranty"),
-              },
-              {
-                label: "Extended Warranty Setup",
-                onClick: () => navigate("/ExtendedWarranty"),
-              },
-              {
-                label: "Retailers Setup",
-                onClick: () => navigate("/Retailers"),
-              },
-              {
-                label: "Registered Products",
-                onClick: () => navigate("/RegisteredProducts"),
-              },
-            ]}
-          />
-        </Navigation>
-      }
-    >
-      <Routes pages={pages} />
-    </Frame>
+    <>
+      <NavMenu>
+        <Link to="/" rel="home">
+          Sonova Warranty App
+        </Link>
+      </NavMenu>
+      <AppLayout>
+        <Routes pages={pages} />
+      </AppLayout>
+    </>
   );
 }
 

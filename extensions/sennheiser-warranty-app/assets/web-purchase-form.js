@@ -95,7 +95,7 @@
       if (initResult.restored && !initResult.redirected) {
         window.WarrantyToast?.showInfo?.(
           window.WarrantyFlowState?.TOAST?.selectEwPlan ||
-            "Continue selecting your extended warranty plan."
+          "Continue selecting your extended warranty plan."
         );
       }
       return;
@@ -291,26 +291,27 @@
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       console.log("Response ::", data.success, data.message);
 
       if (!res.ok || data.success === false) {
+        const errorMessage =
+          data.message ||
+          data.error ||
+          "Registration failed. Please check your details and try again.";
         const serialInput = document.querySelector("input[data-serial]");
         if (serialInput) {
-          showError(
-            serialInput,
-            data.message || "This product has already been registered.",
-          );
+          showError(serialInput, errorMessage);
         }
         window.WarrantyToast?.showError?.(
-          data.message ||
+          errorMessage ||
             window.WarrantyFlowState?.TOAST?.registrationFailed ||
             "Registration failed. Please check your details and try again."
         );
         return;
       }
       //if (!res.ok) throw new Error();
-              console.log("outer if sucess msg", data.success);
+      console.log("outer if sucess msg", data.success);
 
       if (data.success === true) {
         const primary = data.registrations?.[0];
@@ -329,11 +330,11 @@
           customerName: nameInput?.value?.trim() || "",
         });
       }
-      
+
     } catch {
       window.WarrantyToast?.showError?.(
         window.WarrantyFlowState?.TOAST?.registrationFailed ||
-          "Something went wrong. Please try again."
+        "Something went wrong. Please try again."
       );
     }
   });

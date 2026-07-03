@@ -1,9 +1,10 @@
 import shopify from "../shopify.js";
 import { pool } from "../db/mysql.js";
-import { sendEmailService } from "./email.service.js";
+import { sendShopEmail } from "./emailSettings.service.js";
 import ExtendedWarrantyEligibilityReminderTemplate from "../emailTemp/extended_warranty_eligibility_reminder.js";
 import {
   renderViewProductDetailsButton,
+  buildMyProductsLoginUrl,
 } from "./emailLink.service.js";
 import {
   evaluatePurchaseWindowFromSettings,
@@ -23,9 +24,6 @@ function formatDisplayDate(value) {
   });
 }
 
-function buildMyProductsUrl(shopDomain) {
-  return `https://${shopDomain}/pages/my-products`;
-}
 
 function normalizeReminderDays(reminderDays) {
   return [
@@ -130,17 +128,7 @@ async function sendReminderForRegistration(row, purchaseWindow) {
   }
 
   const session = await getShopSession(row.shop_domain);
-  let storeName = row.shop_domain?.split(".")[0] || "Sonova Team";
-
-  if (session) {
-    try {
-      const admin = new shopify.api.clients.Graphql({ session });
-      const shopResponse = await admin.request(`query { shop { name } }`);
-      storeName = shopResponse.data?.shop?.name || storeName;
-    } catch {
-      // use fallback store name
-    }
-  }
+  const storeName = "Sonova Team";
 
   const eligibilityEndDate = formatDisplayDate(
     purchaseWindow.lastEligibleDate || purchaseWindow.purchaseExpiryDate
@@ -152,7 +140,9 @@ async function sendReminderForRegistration(row, purchaseWindow) {
     serialNumber: row.serial_number,
     daysRemaining,
     eligibilityEndDate,
-    extendWarrantyUrl: buildMyProductsUrl(row.shop_domain),
+    extendWarrantyUrl:
+      buildMyProductsLoginUrl(row.shop_domain) ||
+      `https://${row.shop_domain}/pages/my-products`,
     productDetailsHtml: renderViewProductDetailsButton(
       row.shop_domain,
       row.id
@@ -160,11 +150,22 @@ async function sendReminderForRegistration(row, purchaseWindow) {
     storeName,
   });
 
-  const result = await sendEmailService({
+  const result = await sendShopEmail({
+    shopId,
+    templateKey: "extended_warranty_reminder",
     to: row.customer_email,
-    subject: `Reminder: ${daysRemaining} day${daysRemaining === 1 ? "" : "s"} left to extend your warranty`,
-    html,
-    from: process.env.DEFAULT_FROM_EMAIL,
+    data: {
+      customerName: row.customer_name || "Customer",
+      productName: row.product_name,
+      warrantyNumber: row.serial_number,
+      warrantyExpiry: eligibilityEndDate,
+      storeName,
+    },
+    renderDefault: async () => ({
+      subject: `Reminder: ${daysRemaining} day${daysRemaining === 1 ? "" : "s"} left to extend your warranty`,
+      html,
+      from: process.env.DEFAULT_FROM_EMAIL,
+    }),
   });
 
   if (result.success) {

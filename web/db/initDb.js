@@ -356,6 +356,14 @@ async function ensureSchemaUpdates() {
     `);
     console.log("✅ Added extended_warranty_entitlements.pricing_type");
   }
+
+  if (!(await columnExists("retailers", "retailer_name_ja"))) {
+    await pool.query(`
+      ALTER TABLE retailers
+      ADD COLUMN retailer_name_ja VARCHAR(255) NULL AFTER retailer_name
+    `);
+    console.log("✅ Added retailers.retailer_name_ja");
+  }
 }
 
 export async function initDb() {
@@ -407,7 +415,7 @@ export async function initDb() {
           FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
         )
       `);
-      
+
     console.log("✅ Retailers table ready");
 
     await pool.query(`
@@ -488,10 +496,10 @@ export async function initDb() {
       )
     `);
 
-     /* -----------------------------
-       STORE SETTINGS TABLE
-       (Retailer Required Toggle)
-    ------------------------------ */
+    /* -----------------------------
+      STORE SETTINGS TABLE
+      (Retailer Required Toggle)
+   ------------------------------ */
     await pool.query(`
       CREATE TABLE IF NOT EXISTS store_settings (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -668,8 +676,33 @@ export async function initDb() {
 
     console.log("✅ Extended warranty refund records table ready");
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS email_settings (
+        shop_id BIGINT UNSIGNED PRIMARY KEY,
+        global_enabled TINYINT(1) NOT NULL DEFAULT 1,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS email_template_settings (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        shop_id BIGINT UNSIGNED NOT NULL,
+        template_key VARCHAR(64) NOT NULL,
+        enabled TINYINT(1) NOT NULL DEFAULT 1,
+        subject VARCHAR(500) NULL,
+        body_html MEDIUMTEXT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_shop_email_template (shop_id, template_key),
+        FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+      )
+    `);
+
+    console.log("✅ Email settings tables ready");
+
     await ensureSchemaUpdates();
-    
+
   } catch (err) {
     console.error("❌ DB init failed:", err);
     process.exit(1); // fail fast

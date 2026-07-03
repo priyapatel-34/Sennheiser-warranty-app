@@ -8,29 +8,27 @@ export default function ExtendedWarrantyPurchaseTemplate({
   durationMonths,
   price,
   currency,
-  storeName,
+  serialNumber,
+  activationDate,
+  expiryDate,
   productDetailsHtml = "",
 }) {
   const bodyHtml = `
-    <p>Dear ${customerName || "Customer"},</p>
-    <p>Thank you for purchasing extended warranty coverage for your registered product.</p>
+    <p>Dear ${customerName || "Customer"},</p><br/>
+    <p>Thank you for purchasing extended warranty coverage for your registered product.</p><br/>
     <p>
       <strong>Product:</strong> ${productTitle}<br/>
       ${orderNumber ? `<strong>Order Number:</strong> ${orderNumber}<br/>` : ""}
+      ${serialNumber ? `<strong>Serial Number:</strong> ${serialNumber}<br/>` : ""}
       <strong>Plan:</strong> ${planName}<br/>
       <strong>Duration:</strong> ${durationMonths} months<br/>
       <strong>Amount Paid:</strong> ${price} ${currency}<br/>
+      ${activationDate ? `<strong>Coverage starts:</strong> ${activationDate}<br/>` : ""}
+      ${expiryDate ? `<strong>Coverage ends:</strong> ${expiryDate}<br/>` : ""}
     </p>
-    <p>Your extended warranty will be activated upon payment confirmation.</p>
+  <br/>
     ${productDetailsHtml}
-    <p>
-       Please keep this email for your records. It serves as confirmation
-       of your warranty registration.
-    </p>
-
-    <p>
-      If you require any assistance, our support team will be happy to help.
-    </p>
+     <br/>
   `;
 
   return renderEmailLayout({

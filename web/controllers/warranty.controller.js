@@ -1,8 +1,9 @@
 import shopify from "../shopify.js";
 import { pool } from "../db/mysql.js";
 import { sendEmailService } from "../services/email.service.js";
+import { sendShopEmail } from "../services/emailSettings.service.js";
 import WarrantyRegistrationSuccessTemplate from "../emailTemp/standard_warranty.js";
-import { renderViewProductDetailsButton } from "../services/emailLink.service.js";
+import { renderViewProductDetailsButton, resolveCustomerFacingShopDomain, formatEmailDate } from "../services/emailLink.service.js";
 import {
   getEntitlementsForRegistrations,
   formatEntitlementForApiExport,
@@ -18,6 +19,7 @@ import {
   getLatestRefundForEntitlements,
   getCustomerFacingRefundStatus,
 } from "../services/extendedWarrantyRefund.service.js";
+import { retailerSearchColumn } from "../services/retailerLocale.utils.js";
 
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
@@ -174,27 +176,31 @@ async function resolveShopifyCustomer(client, loggedInCustomerId, fallback = {})
     return { customerId, customerEmail, customerName };
   }
 
-  const customerResult = await client.request(
-    `
-    query ($id: ID!) {
-      customer(id: $id) {
-        email
-        displayName
+  try {
+    const customerResult = await client.request(
+      `
+      query ($id: ID!) {
+        customer(id: $id) {
+          email
+          displayName
+        }
+      }
+      `,
+      {
+        variables: { id: `gid://shopify/Customer/${loggedInCustomerId}` },
+      }
+    );
+
+    const shopifyCustomer = customerResult?.data?.customer;
+    if (shopifyCustomer?.email) {
+      customerEmail = shopifyCustomer.email.trim();
+      customerId = String(loggedInCustomerId);
+      if (!customerName && shopifyCustomer.displayName) {
+        customerName = shopifyCustomer.displayName;
       }
     }
-    `,
-    {
-      variables: { id: `gid://shopify/Customer/${loggedInCustomerId}` },
-    }
-  );
-
-  const shopifyCustomer = customerResult?.data?.customer;
-  if (shopifyCustomer?.email) {
-    customerEmail = shopifyCustomer.email.trim();
-    customerId = String(loggedInCustomerId);
-    if (!customerName && shopifyCustomer.displayName) {
-      customerName = shopifyCustomer.displayName;
-    }
+  } catch (err) {
+    console.warn("Shopify customer lookup failed, using request payload:", err.message);
   }
 
   return { customerId, customerEmail, customerName };
@@ -705,7 +711,7 @@ export async function getMyProductsWorkingOld1702(req, res) {
           );
 
           image = result?.data?.product?.featuredImage?.url || null;
-        } catch {}
+        } catch { }
       }
 
       products.push({
@@ -1244,12 +1250,12 @@ export async function getProductDetail(req, res) {
         : new Map();
       const entitlement = registered
         ? await resolveEntitlementWithSync({
-            session,
-            shopId,
-            registerId: registered.id,
-            customerEmail: registered.customer_email,
-            entitlement: entitlementMap.get(registered.id) || null,
-          })
+          session,
+          shopId,
+          registerId: registered.id,
+          customerEmail: registered.customer_email,
+          entitlement: entitlementMap.get(registered.id) || null,
+        })
         : null;
       const refundMap =
         entitlement?.id
@@ -1804,9 +1810,6 @@ export async function getRetailers(req, res) {
       return res.json([]);
     }
 
-    if(!lang || lang == '')
-      lang = 'en';
-
     const shopDomain = shop;
 
     if (!shopDomain) {
@@ -1823,15 +1826,7 @@ export async function getRetailers(req, res) {
       return res.status(404).json({ error: "Shop not registered" });
     }
 
-    let columnName = "";
-    switch(lang){
-      case 'en':
-        columnName = "retailer_name";
-        break;
-      case 'ja':
-        columnName = "retailer_name_ja";
-        break;
-    }
+    const columnName = retailerSearchColumn(lang);
     const shopId = shopRow.id;
 
     /* -------------------------------------------------
@@ -1857,6 +1852,7 @@ export async function getRetailers(req, res) {
       ------------------------------------------------- */
     const retailers = rows.map((r) => ({
       name_en: r.retailer_name,
+      name_localized: r.retailer_name_ja,
       name_ja: r.retailer_name_ja,
     }));
 
@@ -2777,6 +2773,66 @@ function addMonthsSafe(startDate, months) {
   return new Date(year, targetMonth, safeDay);
 }
 
+const PRODUCT_WARRANTY_METAFIELD_SELECTION = `
+  metafield(namespace: "warranty", key: "standard_duration") {
+    value
+  }
+`;
+
+async function resolveProductWarrantyDurationMonths(
+  conn,
+  shopId,
+  numericProductId,
+  metafieldDurationValue = null,
+) {
+  const [[durRow]] = await conn.query(
+    `
+    SELECT duration_months
+    FROM product_standard_warranty_durations
+    WHERE shop_id = ? AND product_id = ?
+    `,
+    [shopId, numericProductId],
+  );
+
+  if (durRow?.duration_months > 0) {
+    return durRow.duration_months;
+  }
+
+  const months = Number(metafieldDurationValue);
+  if (!Number.isFinite(months) || months <= 0) {
+    return null;
+  }
+
+  await conn.query(
+    `
+    INSERT INTO product_standard_warranty_durations
+      (shop_id, product_id, duration_months)
+    VALUES (?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      duration_months = VALUES(duration_months)
+    `,
+    [shopId, numericProductId, months],
+  );
+
+  return months;
+}
+
+function registrationErrorResponse(res, err) {
+  const message = err?.message || "Registration failed";
+  if (err?.code === "ER_DUP_ENTRY") {
+    return registrationConflictResponse(res);
+  }
+
+  const isClientError =
+    /not configured|not set|not found|invalid|required|missing/i.test(message);
+
+  return res.status(isClientError ? 400 : 500).json({
+    success: false,
+    message,
+    error: message,
+  });
+}
+
 export async function registerProducts(req, res) {
   const session = res.locals.shopifySession;
 
@@ -2900,6 +2956,7 @@ export async function registerProducts(req, res) {
 
         let productId;
         let productName;
+        let productMetafieldDuration = null;
 
         /* ===============================
            SHOPIFY FLOW
@@ -2918,6 +2975,7 @@ export async function registerProducts(req, res) {
             query($id: ID!) {
               product(id: $id) {
                 title
+                ${PRODUCT_WARRANTY_METAFIELD_SELECTION}
               }
             }
             `,
@@ -2930,6 +2988,7 @@ export async function registerProducts(req, res) {
 
           productId = gid;
           productName = response.data.product.title;
+          productMetafieldDuration = response.data.product.metafield?.value ?? null;
         } else {
           /* ===============================
              EXTERNAL FLOW
@@ -2945,6 +3004,7 @@ export async function registerProducts(req, res) {
                 product(id: $id) {
                   id
                   title
+                  ${PRODUCT_WARRANTY_METAFIELD_SELECTION}
                 }
               }
               `,
@@ -2959,6 +3019,8 @@ export async function registerProducts(req, res) {
 
             productId = response.data.product.id;
             productName = response.data.product.title;
+            productMetafieldDuration =
+              response.data.product.metafield?.value ?? null;
           } else if (p.product_name) {
             const response = await client.request(
               `
@@ -2968,6 +3030,7 @@ export async function registerProducts(req, res) {
                     node {
                       id
                       title
+                      ${PRODUCT_WARRANTY_METAFIELD_SELECTION}
                     }
                   }
                 }
@@ -2984,6 +3047,7 @@ export async function registerProducts(req, res) {
 
             productId = found.node.id;
             productName = found.node.title;
+            productMetafieldDuration = found.node.metafield?.value ?? null;
           } else {
             throw new Error("Product name or product ID is required");
           }
@@ -2992,42 +3056,37 @@ export async function registerProducts(req, res) {
         const numericPId = productId.split("/").pop();
         const variantNumericId = p.variant_id
           ? getNumericIdFromGid(
-              p.variant_id.startsWith("gid://")
-                ? p.variant_id
-                : `gid://shopify/ProductVariant/${p.variant_id}`
-            )
+            p.variant_id.startsWith("gid://")
+              ? p.variant_id
+              : `gid://shopify/ProductVariant/${p.variant_id}`
+          )
           : null;
 
         /* ===============================
            WARRANTY DURATION
         =============================== */
-        const [[durRow]] = await conn.query(
-          `
-          SELECT duration_months
-          FROM product_standard_warranty_durations
-          WHERE shop_id=? AND product_id=?
-          `,
-          [shopId, numericPId],
+        const durationMonths = await resolveProductWarrantyDurationMonths(
+          conn,
+          shopId,
+          numericPId,
+          productMetafieldDuration,
         );
 
-        if (!durRow) {
+        if (!durationMonths) {
           throw new Error(
-            `Warranty duration not configured for product ${numericPId}`,
+            "Standard warranty duration has not been set for this product.",
           );
         }
 
         const warrantyStart = p.purchase_date ? new Date(p.purchase_date) : today;
         /*const warrantyEnd = new Date(
           warrantyStart.getFullYear(),
-          warrantyStart.getMonth() + durRow.duration_months,
+          warrantyStart.getMonth() + durationMonths,
           warrantyStart.getDate()
         );*/
 
         // ✅ FIXED: safe month addition
-        const warrantyEnd = addMonthsSafe(
-          warrantyStart,
-          durRow.duration_months,
-        );
+        const warrantyEnd = addMonthsSafe(warrantyStart, durationMonths);
 
         /* ===============================
            INSERT REGISTERED PRODUCT
@@ -3093,37 +3152,49 @@ export async function registerProducts(req, res) {
 
       await conn.commit();
 
-      const emailSubject = "Your Product Warranty Registration is Completed.";
-
       const firstProduct = createdProducts[0];
-
       const diffMonths =
         (firstProduct.warrantyEnd.getFullYear() -
           firstProduct.warrantyStart.getFullYear()) *
-          12 +
+        12 +
         (firstProduct.warrantyEnd.getMonth() -
           firstProduct.warrantyStart.getMonth());
-
       const warrantyPeriodText = `${diffMonths} Months`;
+      const customerFacingDomain = await resolveCustomerFacingShopDomain(
+        client,
+        session.shop
+      );
+      const purchaseDateText = formatEmailDate(firstProduct.purchaseDate);
       const productDetailsHtml = renderViewProductDetailsButton(
-        session.shop,
+        customerFacingDomain,
         firstProduct.registerId
       );
-      const emailHtml = WarrantyRegistrationSuccessTemplate({
-        customerName: customerName || "Customer",
-        productTitle: firstProduct.productName,
-        orderNumber: firstProduct.orderNumber || "N/A",
-        warrantyPeriod: warrantyPeriodText,
-        productDetailsHtml,
-      });
 
-      const dynamicFrom = process.env.DEFAULT_FROM_EMAIL;
-
-      const emailResult = await sendEmailService({
+      const emailResult = await sendShopEmail({
+        shopId,
+        templateKey: "standard_warranty",
         to: customerEmail,
-        subject: emailSubject,
-        html: emailHtml,
-        from: dynamicFrom,
+        data: {
+          customerName: customerName || "Customer",
+          productName: firstProduct.productName,
+          orderNumber: firstProduct.orderNumber || "N/A",
+          purchaseDate: purchaseDateText || "",
+          warrantyDuration: warrantyPeriodText,
+          warrantyExpiry: firstProduct.warrantyEnd.toISOString().split("T")[0],
+          registrationDate: firstProduct.warrantyStart.toISOString().split("T")[0],
+          warrantyNumber: String(firstProduct.registerId),
+        },
+        renderDefault: async () => ({
+          subject: "Your Product Warranty Registration is Completed.",
+          html: WarrantyRegistrationSuccessTemplate({
+            customerName: customerName || "Customer",
+            productTitle: firstProduct.productName,
+            orderNumber: firstProduct.orderNumber || "N/A",
+            purchaseDate: purchaseDateText,
+            warrantyPeriod: warrantyPeriodText,
+            productDetailsHtml,
+          }),
+        }),
       });
 
       if (!emailResult.success) {
@@ -3137,7 +3208,7 @@ export async function registerProducts(req, res) {
           console.error("Registration succeeded but email failed:", {
             flow,
             to: customerEmail,
-            from: dynamicFrom,
+            from: process.env.DEFAULT_FROM_EMAIL,
             error: emailResult.error,
             statusCode: emailResult.statusCode,
           });
@@ -3147,11 +3218,22 @@ export async function registerProducts(req, res) {
       const primaryRegistration = createdProducts[0];
       let extendedWarrantyOffer = null;
       if (primaryRegistration?.registerId) {
-        extendedWarrantyOffer = await buildExtendedWarrantyOffer(
-          shopId,
-          primaryRegistration.registerId,
-          { session }
-        );
+        try {
+          extendedWarrantyOffer = await buildExtendedWarrantyOffer(
+            shopId,
+            primaryRegistration.registerId,
+            { session, justRegistered: true }
+          );
+        } catch (offerErr) {
+          console.error(
+            "Extended warranty offer build failed after registration:",
+            offerErr
+          );
+          extendedWarrantyOffer = {
+            eligible: false,
+            reason: "offer_build_failed",
+          };
+        }
       }
 
       const postRegistrationNavigation = {
@@ -3171,18 +3253,12 @@ export async function registerProducts(req, res) {
       });
     } catch (err) {
       await conn.rollback();
-      if (err.code === "ER_DUP_ENTRY") {
-        return registrationConflictResponse(res);
-      }
-      throw err;
+      return registrationErrorResponse(res, err);
     } finally {
       conn.release();
     }
   } catch (err) {
     console.error("❌ Registration failed:", err);
-    if (err.code === "ER_DUP_ENTRY") {
-      return registrationConflictResponse(res);
-    }
-    return res.status(500).json({ error: err.message });
+    return registrationErrorResponse(res, err);
   }
 }

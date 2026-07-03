@@ -1,18 +1,19 @@
 import express from "express";
 import {
-  getProductDetail,
-  getMyProducts,
-  getUnregisteredProductDetail,
-  getOrdersDetails,
-  productAutocomplete,
-  getRetailers,
-  getStoreSettings,
-  registerProducts,
+    getProductDetail,
+    getMyProducts,
+    getUnregisteredProductDetail,
+    getOrdersDetails,
+    productAutocomplete,
+    getRetailers,
+    getStoreSettings,
+    registerProducts,
 } from "../controllers/warranty.controller.js";
 import {
-  getExtendedWarrantyOffer,
-  initiateExtendedWarrantyCheckout,
-  getCartCheckoutPayload,
+    getExtendedWarrantyOffer,
+    initiateExtendedWarrantyCheckout,
+    getCartCheckoutPayload,
+    cancelExtendedWarrantyPendingCheckout,
 } from "../controllers/extendedWarrantyPurchase.controller.js";
 
 const router = express.Router();
@@ -35,6 +36,7 @@ router.post("/register", registerProducts);
 router.get("/extended-warranty/offer", getExtendedWarrantyOffer);
 router.post("/extended-warranty/offer", getExtendedWarrantyOffer);
 router.post("/extended-warranty/checkout", initiateExtendedWarrantyCheckout);
+router.post("/extended-warranty/cancel-pending", cancelExtendedWarrantyPendingCheckout);
 router.post("/extended-warranty/cart-payload", getCartCheckoutPayload);
 
 

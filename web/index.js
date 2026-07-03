@@ -17,6 +17,7 @@ import settingRoutes from "./routes/settings.routes.js";
 import standardWarranty from "./routes/standardWarranty.routes.js";
 import extendedWarranty from "./routes/extendedWarranty.routes.js";
 import registeredProducts from "./routes/registeredProducts.routes.js";
+import emailSettingsRoutes from "./routes/emailSettings.routes.js";
 
 import { createStandardWarrantyMetafield } from "./shopify/metafieldDefinitions.js";
 import { registerProductUpdateWebhook } from "./shopify/webhookCreation.js";
@@ -38,9 +39,9 @@ const PORT = parseInt(
 );
 
 const STATIC_PATH =
-    process.env.NODE_ENV === "production"
-      ? join(__dirname, "frontend", "dist")
-      : join(__dirname, "frontend");
+  process.env.NODE_ENV === "production"
+    ? join(__dirname, "frontend", "dist")
+    : join(__dirname, "frontend");
 const app = express();
 app.set("trust proxy", 1);
 
@@ -115,13 +116,15 @@ startExtendedWarrantyReminderScheduler();
 
 app.use("/app/retailers", shopify.validateAuthenticatedSession(), retailersRoutes);
 
-app.use("/app/settings", shopify.validateAuthenticatedSession() , settingRoutes);
+app.use("/app/settings", shopify.validateAuthenticatedSession(), settingRoutes);
 
-app.use("/app/standard-warranty", shopify.validateAuthenticatedSession() , standardWarranty);
+app.use("/app/standard-warranty", shopify.validateAuthenticatedSession(), standardWarranty);
 
 app.use("/app/extended-warranty", shopify.validateAuthenticatedSession(), extendedWarranty);
 
-app.use("/app/registered-products", shopify.validateAuthenticatedSession() , registeredProducts);
+app.use("/app/registered-products", shopify.validateAuthenticatedSession(), registeredProducts);
+
+app.use("/app/email-settings", shopify.validateAuthenticatedSession(), emailSettingsRoutes);
 
 app.use("/tws-warranty/*", authenticateUser);
 
@@ -150,7 +153,7 @@ async function authenticateUser(req, res, next) {
   next();
 }
 
-app.use("/tws-warranty" ,warrantyRoutes);
+app.use("/tws-warranty", warrantyRoutes);
 
 app.use("/api/*", shopify.validateAuthenticatedSession());
 

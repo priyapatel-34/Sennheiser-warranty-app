@@ -16,7 +16,7 @@ import { useEffect, useState } from "react";
 import LoadingPanel from "../components/LoadingPanel.jsx";
 import { useToast } from "../hooks/useToast.js";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 25;
 
 const WARRANTY_TYPE_OPTIONS = [
   { label: "All warranty types", value: "all" },
@@ -53,14 +53,30 @@ function TruncatedProductName({ name }) {
 function formatWarrantyType(item) {
   const status = item.extended_warranty_status;
   if (status === "active") return "Extended (Active)";
-  if (status === "pending_payment") return "Extended (Pending)";
+  if (
+    status === "pending_payment" &&
+    item.extended_warranty_draft_order_id
+  ) {
+    return "Extended (Pending)";
+  }
+  if (status === "refunded") return "Extended (Refunded)";
+  if (status === "cancelled") return "Extended (Cancelled)";
+  if (status === "expired") return "Extended (Expired)";
   return "Standard";
 }
 
 function warrantyTone(item) {
   const status = item.extended_warranty_status;
   if (status === "active") return "success";
-  if (status === "pending_payment") return "warning";
+  if (
+    status === "pending_payment" &&
+    item.extended_warranty_draft_order_id
+  ) {
+    return "warning";
+  }
+  if (status === "refunded" || status === "cancelled" || status === "expired") {
+    return "critical";
+  }
   return "info";
 }
 
@@ -258,8 +274,8 @@ export default function RegisteredProductsTable() {
                   />
                 </div>
                 {searchQuery ||
-                warrantyTypeFilter !== "all" ||
-                purchaseTypeFilter !== "all" ? (
+                  warrantyTypeFilter !== "all" ||
+                  purchaseTypeFilter !== "all" ? (
                   <Button onClick={clearFilters}>Clear all</Button>
                 ) : null}
               </div>

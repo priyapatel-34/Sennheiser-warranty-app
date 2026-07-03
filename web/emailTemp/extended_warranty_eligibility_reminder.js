@@ -13,16 +13,16 @@ export default function ExtendedWarrantyEligibilityReminderTemplate({
   const dayLabel = daysRemaining === 1 ? "day" : "days";
 
   const bodyHtml = `
-    <p>Dear ${customerName || "Customer"},</p>
+    <p>Dear ${customerName || "Customer"},</p><br/>
     <p>
       You have <strong>${daysRemaining} ${dayLabel}</strong> left to purchase extended warranty
       coverage for your registered product.
-    </p>
+    </p><br/>
     <p>
       <strong>Product:</strong> ${productTitle}<br/>
       ${serialNumber ? `<strong>Serial Number:</strong> ${serialNumber}<br/>` : ""}
       ${eligibilityEndDate ? `<strong>Offer ends:</strong> ${eligibilityEndDate}<br/>` : ""}
-    </p>
+    </p><br/>
     <p>
       ${emailButton({ href: extendWarrantyUrl, label: "Extend Warranty Now" })}
     </p>
@@ -32,6 +32,6 @@ export default function ExtendedWarrantyEligibilityReminderTemplate({
   return renderEmailLayout({
     heading: "Extended Warranty Offer Ending Soon",
     bodyHtml,
-    storeName: storeName || "Sonova Team",
+    storeName: "Sonova Team",
   });
 }

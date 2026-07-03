@@ -60,97 +60,103 @@ export async function addSWuration(req, res) {
 }*/
 
 export async function getSWDurations(req, res) {
-    try {
-      const session = res.locals.shopify.session;
-  
-      if (!session || !session.shop) {
-        return res.status(401).json({ error: "Unauthorized" });
-      }
-  
-      const shopDomain = session.shop; // string
-  
-      // 1️⃣ Get shop_id from shops table
-      const [[shopRow]] = await pool.query(
-        `SELECT id FROM shops WHERE shop_domain = ? AND is_installed = TRUE`,
-        [shopDomain]
-      );
-  
-      if (!shopRow) {
-        return res.status(404).json({ error: "Shop not registered" });
-      }
-  
-      const shopId = shopRow.id;
-  
-      // 2️⃣ Fetch durations
-      const [rows] = await pool.query(
-        `
+  try {
+    const session = res.locals.shopify.session;
+
+    if (!session || !session.shop) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const shopDomain = session.shop;
+
+    const [[shopRow]] = await pool.query(
+      `SELECT id FROM shops WHERE shop_domain = ? AND is_installed = TRUE`,
+      [shopDomain]
+    );
+
+    if (!shopRow) {
+      return res.status(404).json({ error: "Shop not registered" });
+    }
+
+    const shopId = shopRow.id;
+
+    const [rows] = await pool.query(
+      `
         SELECT months
         FROM standard_warranty_durations
         WHERE shop_id = ?
         ORDER BY months
         `,
-        [shopId]
-      );
-  
-     return res.json(rows.map(r => r.months));
-      //return res.json(rows.map(r => r.months * 12));
-  
-    } catch (err) {
-      console.error("❌ getSWDurations error:", err);
-      return res.status(500).json([]);
-    }
+      [shopId]
+    );
+
+    return res.json(rows.map(r => r.months));
+
+  } catch (err) {
+    console.error("❌ getSWDurations error:", err);
+    return res.status(500).json([]);
+  }
 }
 
 export async function addSWuration(req, res) {
-    try {
-      const session = res.locals.shopify.session;
-  
-      if (!session || !session.shop) {
-        return res.status(401).json({ error: "Unauthorized" });
-      }
-  
-      const shopDomain = session.shop;
-      const { months } = req.body;
-  
-      if (!months || months <= 0) {
-        return res.status(400).json({ error: "Invalid duration" });
-      }
-  
-      // 1️⃣ Get shop_id
-      const [[shopRow]] = await pool.query(
-        `SELECT id FROM shops WHERE shop_domain = ? AND is_installed = TRUE`,
-        [shopDomain]
-      );
-  
-      if (!shopRow) {
-        return res.status(404).json({ error: "Shop not registered" });
-      }
-  
-      const shopId = shopRow.id;
-  
-      // 2️⃣ Insert duration
-      await pool.query(
-        `
+  try {
+    const session = res.locals.shopify.session;
+
+    if (!session || !session.shop) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const shopDomain = session.shop;
+    const { months } = req.body;
+
+    if (!months || months <= 0) {
+      return res.status(400).json({ error: "Invalid duration" });
+    }
+
+    const [[shopRow]] = await pool.query(
+      `SELECT id FROM shops WHERE shop_domain = ? AND is_installed = TRUE`,
+      [shopDomain]
+    );
+
+    if (!shopRow) {
+      return res.status(404).json({ error: "Shop not registered" });
+    }
+
+    const shopId = shopRow.id;
+
+    await pool.query(
+      `
         INSERT IGNORE INTO standard_warranty_durations (shop_id, months)
         VALUES (?, ?)
         `,
-        [shopId, months]
-      );
-  
-      return res.json({ success: true });
-  
-    } catch (err) {
-      console.error("❌ addSWuration error:", err);
-      return res.status(500).json({ error: "Failed to add duration" });
-    }
-}  
+      [shopId, months]
+    );
 
-function buildShopifyProductSearchQuery(searchTerm) {
-  const statusFilter = "(status:active OR status:draft)";
+    return res.json({ success: true });
+
+  } catch (err) {
+    console.error("❌ addSWuration error:", err);
+    return res.status(500).json({ error: "Failed to add duration" });
+  }
+}
+
+function buildShopifyProductSearchQuery(searchTerm, statusFilter = "all") {
+  let statusClause;
+  switch (String(statusFilter || "all").toLowerCase()) {
+    case "active":
+      statusClause = "status:active";
+      break;
+    case "draft":
+      statusClause = "status:draft";
+      break;
+    default:
+      statusClause = "(status:active OR status:draft)";
+  }
+
   const term = String(searchTerm || "").trim();
-  if (!term) return statusFilter;
+  if (!term) return statusClause;
   const sanitized = term.replace(/["\\]/g, " ").trim();
-  return `${sanitized} AND ${statusFilter}`;
+  return `${sanitized} AND ${statusClause}`;
 }
 
 const STANDARD_PRODUCTS_QUERY = `
@@ -194,11 +200,15 @@ export async function getAllProducts(req, res) {
     const jumpLast = req.query.last === "1";
     const cursor = jumpLast ? null : req.query.cursor || null;
     const searchTerm = req.query.q || req.query.search || "";
+    const statusParam = String(req.query.status || "all").toLowerCase();
+    const statusFilter = ["all", "active", "draft"].includes(statusParam)
+      ? statusParam
+      : "all";
     const pageSize = Math.min(
       50,
       Math.max(1, parseInt(req.query.limit, 10) || 25)
     );
-    const productQuery = buildShopifyProductSearchQuery(searchTerm);
+    const productQuery = buildShopifyProductSearchQuery(searchTerm, statusFilter);
 
     const [[shopRow]] = await pool.query(
       `SELECT id FROM shops WHERE shop_domain = ? AND is_installed = TRUE`,

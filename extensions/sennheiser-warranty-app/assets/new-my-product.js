@@ -176,10 +176,14 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
 
   function showProductsLoader() {
     if (!productsSection) return;
-    let loader = productsSection.querySelector(".mp-products-loader");
+    let loader =
+      document.getElementById("mp-products-loader") ||
+      productsSection.querySelector(".mp-products-loader");
     if (!loader) {
       loader = document.createElement("div");
+      loader.id = "mp-products-loader";
       loader.className = "mp-products-loader";
+      loader.setAttribute("aria-live", "polite");
       loader.innerHTML = `
         <div class="mp-loader-spinner"></div>
         <p class="mp-loader-text">Loading your products...</p>
@@ -188,10 +192,34 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
     }
     loader.classList.remove("hidden");
     sliderWrapper?.classList.add("hidden");
+    hideProductsEmptyState();
   }
 
   function hideProductsLoader() {
-    productsSection?.querySelector(".mp-products-loader")?.classList.add("hidden");
+    const loader =
+      document.getElementById("mp-products-loader") ||
+      productsSection?.querySelector(".mp-products-loader");
+    loader?.classList.add("hidden");
+  }
+
+  function showProductsEmptyState() {
+    if (!productsSection) return;
+    let emptyState = productsSection.querySelector(".mp-products-empty");
+    if (!emptyState) {
+      emptyState = document.createElement("div");
+      emptyState.className = "mp-products-empty";
+      emptyState.innerHTML = `
+        <p class="mp-empty-title">No products found</p>
+        <p class="mp-empty-text">You have not registered any products yet. Use the button above to register your first product.</p>
+      `;
+      productsSection.appendChild(emptyState);
+    }
+    emptyState.classList.remove("hidden");
+    sliderWrapper?.classList.add("hidden");
+  }
+
+  function hideProductsEmptyState() {
+    productsSection?.querySelector(".mp-products-empty")?.classList.add("hidden");
   }
 
   function initMpSlider() {
@@ -216,6 +244,8 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
   }
 
   let pendingRegistrationId = null;
+  const PENDING_REGISTRATION_KEY = "warranty_pending_registration_id";
+
   try {
     const params = new URLSearchParams(window.location.search);
     const rawId = params.get("registration_id");
@@ -223,6 +253,15 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
       const parsed = Number(rawId);
       if (Number.isFinite(parsed) && parsed > 0) {
         pendingRegistrationId = parsed;
+        sessionStorage.setItem(PENDING_REGISTRATION_KEY, String(parsed));
+      }
+    } else {
+      const stored = sessionStorage.getItem(PENDING_REGISTRATION_KEY);
+      if (stored) {
+        const parsed = Number(stored);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          pendingRegistrationId = parsed;
+        }
       }
     }
   } catch {
@@ -252,17 +291,19 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
     );
 
     if (card) {
-      await fetchAndShowProductDetail({
+      const opened = await fetchAndShowProductDetail({
         registrationId: card.dataset.registrationId,
         lineItemId: card.dataset.lineItemId,
         productId: card.dataset.productId,
         orderId: card.dataset.orderId || null,
         flow: card.dataset.source || "shopify",
       });
+      if (opened) sessionStorage.removeItem(PENDING_REGISTRATION_KEY);
       return;
     }
 
-    await fetchAndShowProductDetail({ registrationId });
+    const opened = await fetchAndShowProductDetail({ registrationId });
+    if (opened) sessionStorage.removeItem(PENDING_REGISTRATION_KEY);
   }
 
   showProductsLoader();
@@ -275,53 +316,53 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
     hideProductsLoader();
 
     if (!products.length) {
-      sliderWrapper?.classList.add("hidden");
+      showProductsEmptyState();
     } else {
+      hideProductsEmptyState();
       console.log("from my product api", data);
 
       sliderWrapper.classList.remove("hidden");
 
       track.innerHTML = products
-      .map((p) => {
-        const action = getProductCardAction(p);
-        const warrantyStatus = p.is_registered
-          ? getWarrantyStatus(p.warranty_end)
-          : null;
-        const ewBadge = getExtendedWarrantyCardBadge(p);
-        const finalWarrantyExpiry = hasExtendedWarranty(p)
-          ? p.extended_warranty?.extendedWarrantyEndDate ||
+        .map((p) => {
+          const action = getProductCardAction(p);
+          const warrantyStatus = p.is_registered
+            ? getWarrantyStatus(p.warranty_end)
+            : null;
+          const ewBadge = getExtendedWarrantyCardBadge(p);
+          const finalWarrantyExpiry = hasExtendedWarranty(p)
+            ? p.extended_warranty?.extendedWarrantyEndDate ||
             p.extended_warranty?.endDate ||
             p.warranty_end
-          : p.warranty_end;
+            : p.warranty_end;
 
-        const actionButton =
-          action === "extend_warranty"
-            ? `<button type="button" class="btn mp-extend-warranty-btn" data-register-id="${p.register_id}" data-source="${p.source || "shopify"}">Extend Warranty</button>`
-            : action === "view_details"
-              ? `<button type="button" class="btn bordered-btn mp-view-details-btn" data-product-id="${p.product_id}">View Details</button>`
-              : `<div class="btn mp-web-register-btn" data-product-id="${p.product_id}" data-order-id="${p.order_id || ""}" data-source="${p.source || "shopify"}">${web_register_label}</div>`;
+          const actionButton =
+            action === "extend_warranty"
+              ? `<button type="button" class="btn mp-extend-warranty-btn" data-register-id="${p.register_id}" data-source="${p.source || "shopify"}">Extend Warranty</button>`
+              : action === "view_details"
+                ? `<button type="button" class="btn bordered-btn mp-view-details-btn" data-product-id="${p.product_id}">View Details</button>`
+                : `<div class="btn mp-web-register-btn" data-product-id="${p.product_id}" data-order-id="${p.order_id || ""}" data-source="${p.source || "shopify"}">${web_register_label}</div>`;
 
-        const registeredInfo = p.is_registered
-          ? `
+          const registeredInfo = p.is_registered
+            ? `
               <div class="expiry">
-                <span class="gray-text">Serial No.: ${p.serial_number || "-"}</span>
-                ${
-                  ewBadge
-                    ? `<div class="mp-warranty-badge mp-${ewBadge.type}">
+                <span class="warranty-gray-text">Serial No.: ${p.serial_number || "-"}</span>
+                ${ewBadge
+              ? `<div class="mp-warranty-badge mp-${ewBadge.type}">
                         ${ewBadge.label}
                       </div>`
-                    : warrantyStatus
-                    ? `<div class="mp-warranty-badge mp-${warrantyStatus.type}">
+              : warrantyStatus
+                ? `<div class="mp-warranty-badge mp-${warrantyStatus.type}">
                         <img class="mp-warranty-icon" src="${warrantyStatus.icon}" alt="${warrantyStatus.label}" />
                         ${warrantyStatus.label}
                       </div>`
-                    : ""
-                }
-                <span class="gray-text">Warranty Expiry: ${formatDate(finalWarrantyExpiry)}</span>
+                : ""
+            }
+                <span class="warranty-gray-text">Warranty Expiry: ${formatDate(finalWarrantyExpiry)}</span>
               </div>`
-          : `<div class="expiry expiry--placeholder" aria-hidden="true"></div>`;
+            : `<div class="expiry expiry--placeholder" aria-hidden="true"></div>`;
 
-        return `
+          return `
     <div class="swiper-slide">
       <div class="mp-card"
            data-registration-id="${p.register_id || ""}"
@@ -331,18 +372,16 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
            data-source="${p.source || "shopify"}">
         <div class="product-wrapper">
           <div class="mp-card-img">
-            ${
-              p.image
-                ? `<img src="${p.image}" alt="${p.title}">`
-                : `<div class="no-image"></div>`
+            ${p.image
+              ? `<img src="${p.image}" alt="${p.title}">`
+              : `<div class="no-image"></div>`
             }
           </div>
           <h3>${p.title}</h3>
-          ${
-            p.is_registered
+          ${p.is_registered
               ? ""
-              : `<p class="gray-text">Purchased on: ${formatDate(p.purchase_date)}</p>`
-          }
+              : `<p class="warranty-gray-text">Purchased on: ${formatDate(p.purchase_date)}</p>`
+            }
         </div>
         <div class="mp-card-body">
           ${registeredInfo}
@@ -352,8 +391,8 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
         </div>
       </div>
     </div>`;
-      })
-      .join("");
+        })
+        .join("");
 
       initMpSlider();
     }
@@ -373,6 +412,8 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
     if (!btn) return;
 
     e.preventDefault();
+
+    window.WarrantyFlowState?.clearOfferFlowState?.();
 
     const source = btn.dataset.source;
     let sessionPayload = {};
@@ -465,10 +506,11 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
 
     if (!data.success) {
       console.error("Product detail error:", data.error);
-      return;
+      return false;
     }
 
     renderProductDetail(data);
+    return true;
   }
 
   document.addEventListener("click", async (e) => {
@@ -599,11 +641,10 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
         if (refundEl) {
           if (ew.refundDate) {
             refundEl.classList.remove("hidden");
-            refundEl.innerText = `Refund date: ${formatDate(ew.refundDate)}${
-              ew.refundAmount != null
+            refundEl.innerText = `Refund date: ${formatDate(ew.refundDate)}${ew.refundAmount != null
                 ? ` · Amount: ${Number(ew.refundAmount).toFixed(2)} ${ew.currency || ""}`.trim()
                 : ""
-            }`;
+              }`;
           } else {
             refundEl.classList.add("hidden");
             refundEl.innerText = "";

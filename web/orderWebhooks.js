@@ -215,8 +215,8 @@ export const OrderWebhookHandlers = {
       if (!outcome.matched) {
         console.warn(
           `⚠️ REFUNDS_CREATE: no active EW entitlement for order ${orderId} (shop ${shop}). ` +
-            "Refund requests are created only when the refunded order matches the EW purchase order " +
-            "or the original product registration order."
+          "Refund requests are created only when the refunded order matches the EW purchase order " +
+          "or the original product registration order."
         );
         return;
       }
@@ -224,7 +224,7 @@ export const OrderWebhookHandlers = {
       const created = outcome.results.filter(r => r.refundId);
       console.log(
         `✅ REFUNDS_CREATE processed order ${orderId}: ${created.length} refund request(s), ` +
-          `${outcome.results.length - created.length} skipped`
+        `${outcome.results.length - created.length} skipped`
       );
     },
   },

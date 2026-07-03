@@ -12,10 +12,10 @@
 
 @media (max-width: 640px) {
   .warranty-toast-container {
-    right: 12px;
-    bottom: 12px;
-    left: 12px;
-    width: auto;
+      right: 12px;
+      bottom: 12px;
+      left: 12px;
+      width: auto;
   }
 }
 

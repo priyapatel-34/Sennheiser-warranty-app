@@ -19,6 +19,12 @@ import LoadingPanel from "../components/LoadingPanel.jsx";
 const API_BASE = "/app/standard-warranty";
 const PAGE_SIZE = 25;
 
+const STATUS_FILTER_OPTIONS = [
+  { label: "All statuses", value: "all" },
+  { label: "Active", value: "active" },
+  { label: "Draft", value: "draft" },
+];
+
 export default function WarrantyAdmin() {
   const toast = useToast();
   const [tab, setTab] = useState(0);
@@ -29,6 +35,7 @@ export default function WarrantyAdmin() {
   const [products, setProducts] = useState([]);
   const [productSearchInput, setProductSearchInput] = useState("");
   const [productSearchQuery, setProductSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(false);
   const [productsLoaded, setProductsLoaded] = useState(false);
   const [error, setError] = useState(null);
@@ -57,6 +64,7 @@ export default function WarrantyAdmin() {
   const loadProducts = async ({
     targetPage = page,
     search = productSearchQuery,
+    status = statusFilter,
     jumpLast = false,
   } = {}) => {
     setLoading(true);
@@ -74,6 +82,7 @@ export default function WarrantyAdmin() {
         if (cursor) params.set("cursor", cursor);
       }
       if (search) params.set("q", search);
+      if (status && status !== "all") params.set("status", status);
 
       const r = await fetch(`${API_BASE}/products?${params.toString()}`);
       if (!r.ok) throw new Error();
@@ -113,9 +122,13 @@ export default function WarrantyAdmin() {
 
   useEffect(() => {
     if (tab === 1) {
-      loadProducts({ targetPage: page, search: productSearchQuery });
+      loadProducts({
+        targetPage: page,
+        search: productSearchQuery,
+        status: statusFilter,
+      });
     }
-  }, [tab, page, productSearchQuery]);
+  }, [tab, page, productSearchQuery, statusFilter]);
 
   const {
     selectedResources,
@@ -141,9 +154,14 @@ export default function WarrantyAdmin() {
   const clearProductSearch = () => {
     setProductSearchInput("");
     setProductSearchQuery("");
+    setStatusFilter("all");
     setPage(1);
     setCursorStack([null]);
   };
+
+  const statusFilterLabel =
+    STATUS_FILTER_OPTIONS.find(option => option.value === statusFilter)?.label ||
+    "All statuses";
 
   const openSingleModal = product => {
     setModalProductIds([product.id]);
@@ -176,7 +194,11 @@ export default function WarrantyAdmin() {
       setModalOpen(false);
       clearSelection();
       toast.showSuccess("Standard warranty saved successfully");
-      loadProducts({ targetPage: page, search: productSearchQuery });
+      loadProducts({
+        targetPage: page,
+        search: productSearchQuery,
+        status: statusFilter,
+      });
     } catch (err) {
       toast.showError(err.message || "Failed to save warranty");
     }
@@ -206,40 +228,50 @@ export default function WarrantyAdmin() {
 
       {tab === 0 && (
         <LegacyCard sectioned>
-          <TextField
-            label="Add warranty duration (months)"
-            type="number"
-            min={1}
-            value={newDurationMonths}
-            onChange={setNewDurationMonths}
-            placeholder="e.g. 6, 12, 24"
-          />
+          <div className="wa-compact-form-panel">
+            <Text as="h2" variant="headingMd">
+              Add warranty duration
+            </Text>
+            <div className="wa-compact-form-row">
+              <div className="wa-compact-form-row__field">
+                <TextField
+                  label="Add warranty duration (months)"
+                  type="number"
+                  min={1}
+                  value={newDurationMonths}
+                  onChange={setNewDurationMonths}
+                  placeholder="e.g. 6, 12, 24"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="wa-compact-form-row__control">
+                <Button
+                  variant="primary"
+                  onClick={async () => {
+                    if (!newDurationMonths) return;
 
-          <Button
-            variant="primary"
-            onClick={async () => {
-              if (!newDurationMonths) return;
+                    await fetch(`${API_BASE}/durations`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        months: Number(newDurationMonths),
+                      }),
+                    });
 
-              await fetch(`${API_BASE}/durations`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  months: Number(newDurationMonths),
-                }),
-              });
-
-              setNewDurationMonths("");
-              toast.showSuccess("Duration added");
-              loadDurations();
-            }}
-          >
-            Add Duration
-          </Button>
-
-          <Text as="p" variant="bodyMd">
-            <strong>Available Durations:</strong>{" "}
-            {durations.length > 0 ? durations.join(", ") : "None"} months
-          </Text>
+                    setNewDurationMonths("");
+                    toast.showSuccess("Duration added");
+                    loadDurations();
+                  }}
+                >
+                  Add Duration
+                </Button>
+              </div>
+            </div>
+            <Text as="p" tone="subdued">
+              <strong>Available durations:</strong>{" "}
+              {durations.length > 0 ? `${durations.join(", ")} months` : "None"}
+            </Text>
+          </div>
         </LegacyCard>
       )}
 
@@ -256,19 +288,49 @@ export default function WarrantyAdmin() {
                     runProductSearch();
                   }}
                 >
-                  <TextField
-                    label="Search products"
-                    labelHidden
-                    placeholder="Search by product name or SKU"
-                    value={productSearchInput}
-                    onChange={setProductSearchInput}
-                    clearButton
-                    onClearButtonClick={clearProductSearch}
-                    autoComplete="off"
-                    connectedRight={
-                      <Button onClick={runProductSearch}>Search</Button>
-                    }
-                  />
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      flexWrap: "wrap",
+                      alignItems: "flex-start",
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 240 }}>
+                      <TextField
+                        label="Search products"
+                        labelHidden
+                        placeholder="Search by product name or SKU"
+                        value={productSearchInput}
+                        onChange={setProductSearchInput}
+                        clearButton
+                        onClearButtonClick={() => {
+                          setProductSearchInput("");
+                          setProductSearchQuery("");
+                          setPage(1);
+                          setCursorStack([null]);
+                        }}
+                        autoComplete="off"
+                        connectedRight={
+                          <Button onClick={runProductSearch}>Search</Button>
+                        }
+                      />
+                    </div>
+                    <div style={{ minWidth: 180 }}>
+                      <Select
+                        label="Status"
+                        labelHidden
+                        options={STATUS_FILTER_OPTIONS}
+                        value={statusFilter}
+                        onChange={value => {
+                          setPage(1);
+                          setCursorStack([null]);
+                          clearSelection();
+                          setStatusFilter(value);
+                        }}
+                      />
+                    </div>
+                  </div>
                 </form>
               </div>
 
@@ -345,6 +407,7 @@ export default function WarrantyAdmin() {
                 <Text as="p" tone="subdued">
                   {paginationMeta.total} product
                   {paginationMeta.total === 1 ? "" : "s"}
+                  {statusFilter !== "all" ? ` · ${statusFilterLabel}` : ""}
                   {productSearchQuery ? ` matching "${productSearchQuery}"` : ""}
                   {showPagination
                     ? ` · Page ${page} of ${paginationMeta.totalPages}`
@@ -368,6 +431,7 @@ export default function WarrantyAdmin() {
                         loadProducts({
                           jumpLast: true,
                           search: productSearchQuery,
+                          status: statusFilter,
                         })
                       }
                     >

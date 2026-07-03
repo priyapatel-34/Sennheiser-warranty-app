@@ -105,46 +105,43 @@
 
     const template = document.getElementById("external-product-template");
     const clone = template.content.cloneNode(true);
-    
     const wrap = clone.querySelector(".product-block");
-    
     const dateInput = wrap.querySelector(".purchase-date");
     if (dateInput) {
-    dateInput.max = new Date().toISOString().split("T")[0];
+      dateInput.max = new Date().toISOString().split("T")[0];
     }
-    
     wrap.querySelector(".remove").onclick = () => {
-    
-    wrap.remove();
-    
-    const remaining = document.querySelectorAll(".external-products-wrapper");
-    const productsError = document.getElementById("externalProductsError");
-    
-    if (remaining.length === 0 && productsError) {
-    productsError.textContent = "Please register at least one product.";
-    }
-    
+
+      wrap.remove();
+
+      const remaining = document.querySelectorAll(".external-products-wrapper");
+      const productsError = document.getElementById("externalProductsError");
+
+      if (remaining.length === 0 && productsError) {
+        productsError.textContent = "Please register at least one product.";
+      }
+
     };
-    
+
     externalProducts.appendChild(clone);
-    
+
     initProductAutocomplete(wrap);
     initRetailerAutocomplete(wrap);
-    
+
     const serialInput = wrap.querySelector("[data-serial]");
-    
+
     serialInput.addEventListener("input", () => {
-    
-    clearError(serialInput);
-    
-    if (serialInput.value.trim().length >= 10) {
-    validateSerial(serialInput, true);
-    }
-    
+
+      clearError(serialInput);
+
+      if (serialInput.value.trim().length >= 10) {
+        validateSerial(serialInput, true);
+      }
+
     });
-    
-    }
-    
+
+  }
+
 
   addProductBtn?.addEventListener("click", addExternalProduct);
 
@@ -207,20 +204,38 @@
 
   /* ===============================
      RETAILER AUTOCOMPLETE
-  =============================== */  
-  
-  function getRetailerName(r,lang) {
-    return r[`name_${lang}`] || r.name;
+  =============================== */
+
+  function normalizeLangCode(lang) {
+    const code = String(lang || "en").trim().split("-")[0].toLowerCase();
+    return /^[a-z]{2}$/.test(code) ? code : "en";
+  }
+
+  function getRetailerSearchLang() {
+    const raw =
+      (window.Weglot && typeof Weglot.getCurrentLang === "function"
+        ? Weglot.getCurrentLang()
+        : "") ||
+      document.getElementById("storefrontLocale")?.value?.trim() ||
+      window.Shopify?.locale ||
+      document.documentElement.lang ||
+      navigator.language ||
+      "en";
+    return normalizeLangCode(raw);
+  }
+
+  function getRetailerDisplayName(r, lang) {
+    if (normalizeLangCode(lang) === "en") {
+      return r.name_en || "";
+    }
+    return r.name_localized || r.name_ja || r.name_en || "";
   }
 
   function initRetailerAutocomplete(container) {
     const input = container.querySelector("[data-retailer-autocomplete]");
     if (!input) return;
 
-    let lang = "ja";
-    if(window.Weglot){
-      lang = Weglot.getCurrentLang();
-    }
+    const lang = getRetailerSearchLang();
     const list = document.createElement("div");
     list.className = "autocomplete-results";
     input.closest(".form-input").appendChild(list);
@@ -248,8 +263,8 @@
         list.innerHTML = cached
           .map(
             (r) => `
-          <div class="autocomplete-item" data-name="${getRetailerName(r, lang)}" data-name-en="${getRetailerName(r, 'en')}">
-            ${getRetailerName(r, lang)}
+          <div class="autocomplete-item" data-name="${getRetailerDisplayName(r, lang)}" data-name-en="${getRetailerDisplayName(r, 'en')}">
+            ${getRetailerDisplayName(r, lang)}
           </div>
         `,
           )
@@ -442,22 +457,32 @@
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
-      console.log("Response ::", data.success, data.message);
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok || data.success === false) {
-        const serialInput = document.querySelector("input[data-serial]");
-        if (serialInput) {
-          showError(
-            serialInput,
-            data.message || "This product has already been registered.",
-          );
-        }
-        window.WarrantyToast?.showError?.(
+        const errorMessage =
           data.message ||
-            window.WarrantyFlowState?.TOAST?.registrationFailed ||
-            "Registration failed. Please check your details and try again."
-        );
+          data.error ||
+          (res.status >= 500
+            ? "Registration failed. Please try again."
+            : "Registration failed. Please check your details and try again.");
+
+        window.WarrantyToast?.showError?.(errorMessage);
+
+        const serialInput = document.querySelector("input[data-serial]");
+        const productInput = document.querySelector("[data-autocomplete]");
+
+        if (/serial|already been registered/i.test(errorMessage) && serialInput) {
+          showError(serialInput, errorMessage);
+        } else if (
+          /warranty duration|not configured|not set/i.test(errorMessage) &&
+          productInput
+        ) {
+          showError(productInput, errorMessage);
+        } else if (serialInput) {
+          showError(serialInput, errorMessage);
+        }
+
         return;
       }
 
@@ -478,13 +503,15 @@
       // }
 
       // const successBox = document.getElementById("successMessage");
-        // if (successBox) {
-        //   successBox.classList.add("show");
-        // }
-        console.log("outer if sucess msg", data.success);
+      // if (successBox) {
+      //   successBox.classList.add("show");
+      // }
+      console.log("outer if sucess msg", data.success);
 
 
       if (data.success === true) {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+
         const primary = data.registrations?.[0];
         if (primary?.registerId) {
           window.WarrantyFlowState?.savePostRegistration({
@@ -495,6 +522,8 @@
           });
         }
 
+        window.WarrantyToast?.showSuccess("Product registered successfully");
+
         await window.WarrantyFlowState?.handlePostRegistrationNavigation(data, {
           myProductsLink: myProductLink,
           customerEmail: emailInput.value.trim(),
@@ -503,8 +532,7 @@
       }
     } catch {
       window.WarrantyToast?.showError?.(
-        window.WarrantyFlowState?.TOAST?.registrationFailed ||
-          "Something went wrong. Please try again."
+        "Something went wrong. Please try again.",
       );
     }
   });
@@ -524,9 +552,8 @@
       myProductsLink: myProductLink,
     });
     if (initResult?.restored && !initResult?.redirected) {
-      window.WarrantyToast?.showInfo?.(
-        window.WarrantyFlowState?.TOAST?.selectEwPlan ||
-          "Continue selecting your extended warranty plan."
+      window.WarrantyToast?.showInfo(
+        "Continue selecting your extended warranty plan."
       );
     }
   });
@@ -543,9 +570,3 @@
     }
   }
 })();
-
-
-
-      // setTimeout(() => {
-      //   window.location.href = myProductLink;
-      // }, 8000);

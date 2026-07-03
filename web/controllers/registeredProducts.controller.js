@@ -1,7 +1,7 @@
 import { pool } from "../db/mysql.js";
 
 const DEFAULT_PAGE = 1;
-const DEFAULT_LIMIT = 10;
+const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 100;
 const SORT_COLUMNS = {
   created_at: "rp.created_at",
@@ -92,11 +92,16 @@ function buildSearchQuery(shopId, query) {
       OR ew.status IN ('cancelled', 'refunded', 'expired')
     )`);
   } else if (wt === "extended") {
-    conditions.push("ew.status IN ('active', 'pending_payment')");
+    conditions.push(`(
+      ew.status = 'active'
+      OR (ew.status = 'pending_payment' AND ew.shopify_draft_order_id IS NOT NULL)
+    )`);
   } else if (wt === "extended_active") {
     conditions.push("ew.status = 'active'");
   } else if (wt === "extended_pending") {
-    conditions.push("ew.status = 'pending_payment'");
+    conditions.push(
+      "ew.status = 'pending_payment' AND ew.shopify_draft_order_id IS NOT NULL"
+    );
   }
 
   const pt = String(query.purchaseType || query.purchase_type || "")
@@ -116,6 +121,13 @@ function buildSearchQuery(shopId, query) {
       FROM extended_warranty_entitlements e2
       WHERE e2.shop_id = rp.shop_id
         AND e2.registered_product_id = rp.id
+        AND (
+          e2.status = 'active'
+          OR (
+            e2.status = 'pending_payment'
+            AND e2.shopify_draft_order_id IS NOT NULL
+          )
+        )
       ORDER BY FIELD(e2.status, 'active', 'pending_payment'), e2.created_at DESC
       LIMIT 1
     )
@@ -180,6 +192,7 @@ export async function registeredProducts(req, res) {
         rp.created_at,
         rp.updated_at,
         ew.status AS extended_warranty_status,
+        ew.shopify_draft_order_id AS extended_warranty_draft_order_id,
         ew.plan_name AS extended_warranty_plan,
         ew.activation_date AS extended_warranty_start,
         ew.expiry_date AS extended_warranty_end
