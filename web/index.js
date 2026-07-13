@@ -18,6 +18,7 @@ import standardWarranty from "./routes/standardWarranty.routes.js";
 import extendedWarranty from "./routes/extendedWarranty.routes.js";
 import registeredProducts from "./routes/registeredProducts.routes.js";
 import emailSettingsRoutes from "./routes/emailSettings.routes.js";
+import serialNumbersRoutes from "./routes/serialNumbers.routes.js";
 
 import { createStandardWarrantyMetafield } from "./shopify/metafieldDefinitions.js";
 import { registerProductUpdateWebhook } from "./shopify/webhookCreation.js";
@@ -126,6 +127,8 @@ app.use("/app/extended-warranty", shopify.validateAuthenticatedSession(), extend
 app.use("/app/registered-products", shopify.validateAuthenticatedSession(), registeredProducts);
 
 app.use("/app/email-settings", shopify.validateAuthenticatedSession(), emailSettingsRoutes);
+
+app.use("/app/serial-numbers", shopify.validateAuthenticatedSession(), serialNumbersRoutes);
 
 app.use("/tws-warranty/*", authenticateUser);
 

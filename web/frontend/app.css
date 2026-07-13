@@ -194,6 +194,11 @@ body,
   color: #c5282d;
 }
 
+.wa-dashboard-card__icon--serials {
+  background: #eaf2ff;
+  color: #1f5199;
+}
+
 .wa-admin-section-gap {
   margin-top: 16px;
 }

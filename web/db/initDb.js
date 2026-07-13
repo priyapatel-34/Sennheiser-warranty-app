@@ -406,6 +406,20 @@ async function ensureSchemaUpdates() {
     `);
     console.log("✅ Added retailers.retailer_name_ja");
   }
+
+  /* -----------------------------
+     STORE-SPECIFIC SERIAL NUMBER VERIFICATION
+     (additive for existing installs; default OFF so existing
+     stores keep their current registration behaviour unchanged)
+  ------------------------------ */
+  if (!(await columnExists("store_settings", "serial_verification_enabled"))) {
+    await pool.query(`
+      ALTER TABLE store_settings
+      ADD COLUMN serial_verification_enabled TINYINT(1) NOT NULL DEFAULT 0
+      AFTER retailer_required
+    `);
+    console.log("✅ Added store_settings.serial_verification_enabled");
+  }
 }
 
 export async function initDb() {
@@ -549,6 +563,12 @@ export async function initDb() {
 
         retailer_required TINYINT(1) NOT NULL DEFAULT 1,
 
+        -- Store-specific serial number verification toggle.
+        -- Defaults to OFF so existing stores keep registering exactly as
+        -- they do today. Only stores that explicitly enable this use the
+        -- imported_serial_numbers allow-list during registration.
+        serial_verification_enabled TINYINT(1) NOT NULL DEFAULT 0,
+
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
           ON UPDATE CURRENT_TIMESTAMP,
@@ -559,6 +579,35 @@ export async function initDb() {
     `);
 
     console.log("✅ Store settings table ready");
+
+    /* -----------------------------
+       IMPORTED SERIAL NUMBERS
+       (Per-shop allow-list used only when
+       store_settings.serial_verification_enabled = 1)
+    ------------------------------ */
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS imported_serial_numbers (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        shop_id BIGINT UNSIGNED NOT NULL,
+
+        -- Normalized (trimmed + uppercased) so lookups during
+        -- registration are a single indexed equality match.
+        serial_number VARCHAR(255) NOT NULL,
+
+        imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          ON UPDATE CURRENT_TIMESTAMP,
+
+        -- Same serial number can exist independently for different shops,
+        -- but never twice for the same shop.
+        UNIQUE KEY uniq_shop_serial (shop_id, serial_number),
+        INDEX idx_shop_created (shop_id, created_at),
+        FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+      )
+    `);
+
+    console.log("✅ Imported serial numbers table ready");
 
     /* -----------------------------
        EXTENDED WARRANTY DURATIONS

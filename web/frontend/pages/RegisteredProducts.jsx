@@ -161,6 +161,16 @@ export default function RegisteredProductsTable() {
         }
 
         const res = await fetch(`/app/registered-products?${params.toString()}`);
+
+        const contentType = res.headers.get("content-type");
+
+        if (!contentType?.includes("application/json")) {
+          const text = await res.text();
+          console.error("Server returned:", text);
+
+          throw new Error("Server returned HTML instead of JSON.");
+        }
+
         const json = await res.json();
 
         if (!res.ok) {
