@@ -9,7 +9,6 @@ import {
   Tabs,
   TextField,
   Checkbox,
-  LegacyStack,
   Link,
   Pagination,
   Banner,
@@ -310,7 +309,7 @@ export default function Retailers() {
 
       {selectedTab === 0 && (
         <LegacyCard sectioned>
-          <LegacyStack vertical gap="400">
+          <div className="wa-stack-12">
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -388,13 +387,13 @@ export default function Retailers() {
                 </div>
               </div>
             ) : null}
-          </LegacyStack>
+          </div>
         </LegacyCard>
       )}
 
       {selectedTab === 1 && (
         <LegacyCard sectioned>
-          <LegacyStack vertical gap="300">
+          <div className="wa-stack-12">
             <Text variant="headingMd">Warranty Form Settings</Text>
             <Checkbox
               label="Make Retailer field mandatory on warranty registration form"
@@ -405,7 +404,7 @@ export default function Retailers() {
               This setting applies store-wide and affects the customer warranty
               registration form.
             </Text>
-          </LegacyStack>
+          </div>
         </LegacyCard>
       )}
 
@@ -422,7 +421,7 @@ export default function Retailers() {
         secondaryActions={[{ content: "Cancel", onAction: closeImportModal }]}
       >
         <Modal.Section>
-          <LegacyStack vertical gap="300">
+          <div className="wa-stack-12">
             <Banner tone="info">
               Empty fields are shown as "-" in the preview and stored as blank values.
             </Banner>
@@ -441,7 +440,7 @@ export default function Retailers() {
                 />
               </div>
             ) : null}
-          </LegacyStack>
+          </div>
         </Modal.Section>
       </Modal>
 
@@ -476,7 +475,7 @@ export default function Retailers() {
           primaryAction={{ content: "Save", onAction: updateRetailer }}
         >
           <Modal.Section>
-            <LegacyStack vertical gap="300">
+            <div className="wa-stack-12">
               <TextField
                 label="Retailer name"
                 value={editRetailer.retailer_name}
@@ -502,7 +501,7 @@ export default function Retailers() {
                   setEditRetailer({ ...editRetailer, retailer_city: v })
                 }
               />
-            </LegacyStack>
+            </div>
           </Modal.Section>
         </Modal>
       ) : null}

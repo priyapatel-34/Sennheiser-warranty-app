@@ -47,12 +47,60 @@
           <p class="ew-loader-text">${escapeHtml(message || "Loading...")}</p>
         `;
             section.appendChild(loader);
+        } else {
+            const textEl = loader.querySelector(".ew-loader-text");
+            if (textEl) {
+                textEl.textContent = message || "Loading...";
+            }
         }
         loader.classList.remove("hidden");
     }
 
     function hideLoader(section) {
-        section.querySelector(".ew-page-loader")?.classList.add("hidden");
+        section?.querySelector(".ew-page-loader")?.classList.add("hidden");
+    }
+
+    function getOfferSection() {
+        return document.getElementById("ew-offer-section");
+    }
+
+    function getLoaderOverlay() {
+        return document.getElementById("ew-page-loader-overlay");
+    }
+
+    function setOverlayMessage(message) {
+        const overlay = getLoaderOverlay();
+        const textEl = overlay?.querySelector(".ew-loader-text");
+        if (textEl) {
+            textEl.textContent = message || "Loading extended warranty options...";
+        }
+    }
+
+    function showPageLoader(message) {
+        hideFormPanel();
+        document.documentElement.classList.remove("ew-transition-pending");
+
+        const overlay = getLoaderOverlay();
+        if (!overlay) return false;
+
+        setOverlayMessage(message);
+        overlay.hidden = false;
+        return true;
+    }
+
+    function hidePageLoader() {
+        document.documentElement.classList.remove("ew-transition-pending");
+
+        const overlay = getLoaderOverlay();
+        if (overlay) {
+            overlay.hidden = true;
+        }
+
+        const section = getOfferSection();
+        if (section) {
+            hideLoader(section);
+            section.classList.add("hidden");
+        }
     }
 
     function hideFormPanel() {
@@ -62,6 +110,12 @@
     }
 
     function showFormPanel() {
+        document.documentElement.classList.remove("ew-transition-pending");
+        const overlay = getLoaderOverlay();
+        if (overlay) {
+            overlay.hidden = true;
+        }
+
         document.querySelectorAll(FORM_PANEL_SELECTOR).forEach(el => {
             el.classList.remove("hidden");
         });
@@ -172,6 +226,8 @@
         const section = document.getElementById("ew-offer-section");
         if (!section || !offerData?.registration) return false;
 
+        document.documentElement.classList.remove("ew-transition-pending");
+        hidePageLoader();
         hideFormPanel();
         section.classList.remove("hidden");
         document
@@ -362,5 +418,7 @@
         hideOffer: showFormPanel,
         showRegistrationForm: showFormPanel,
         purchasePlan,
+        showPageLoader,
+        hidePageLoader,
     };
 })();

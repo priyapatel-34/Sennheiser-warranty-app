@@ -42,6 +42,7 @@ const STATIC_PATH =
   process.env.NODE_ENV === "production"
     ? join(__dirname, "frontend", "dist")
     : join(__dirname, "frontend");
+const PROJECT_ROOT = join(__dirname, "..");
 const app = express();
 app.set("trust proxy", 1);
 
@@ -160,6 +161,14 @@ app.use("/api/*", shopify.validateAuthenticatedSession());
 app.use(shopify.cspHeaders());
 // Serve only static assets folder
 app.use("/assets", express.static(join(STATIC_PATH, "assets")));
+
+// Google Search Console verification (public, no auth)
+app.get("/googlea6475a09f81eb4bb.html", (_req, res) => {
+  return res
+    .status(200)
+    .set("Content-Type", "text/html")
+    .send(readFileSync(join(PROJECT_ROOT, "googlea6475a09f81eb4bb.html")));
+});
 
 // Final catch-all must be AFTER everything
 app.use("/*", shopify.ensureInstalledOnShop(), async (_req, res) => {

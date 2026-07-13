@@ -230,6 +230,28 @@ async function ensureSchemaUpdates() {
     }
   }
 
+  // if (await columnExists("email_template_settings", "content_sections")) {
+  //   await pool.query(`
+  //     ALTER TABLE email_template_settings DROP COLUMN content_sections
+  //   `);
+  //   console.log("✅ Removed email_template_settings.content_sections");
+  // }
+
+  // try {
+  //   await pool.query(`DROP TABLE IF EXISTS email_branding_settings`);
+  //   console.log("✅ Removed email_branding_settings table (if existed)");
+  // } catch (err) {
+  //   console.warn("⚠️ email_branding_settings drop skipped:", err.message);
+  // }
+
+  // if (await columnExists("extended_warranty_settings", "reminder_coverage_benefits")) {
+  //   await pool.query(`
+  //     ALTER TABLE extended_warranty_settings
+  //     DROP COLUMN reminder_coverage_benefits
+  //   `);
+  //   console.log("✅ Removed extended_warranty_settings.reminder_coverage_benefits");
+  // }
+
   if (!(await columnExists("extended_warranty_durations", "merchandising_badge"))) {
     await pool.query(`
       ALTER TABLE extended_warranty_durations
@@ -243,6 +265,10 @@ async function ensureSchemaUpdates() {
     [
       "warranty_pricing_type",
       "ENUM('amount', 'percentage') NOT NULL DEFAULT 'amount' AFTER extended_warranty_purchase_days",
+    ],
+    [
+      "extended_warranty_offer_enabled",
+      "TINYINT(1) NOT NULL DEFAULT 1 AFTER warranty_pricing_type",
     ],
   ];
 
@@ -347,6 +373,22 @@ async function ensureSchemaUpdates() {
       ADD COLUMN country_code VARCHAR(10) NULL AFTER purchase_type
     `);
     console.log("✅ Added registered_products.country_code");
+  }
+
+  if (
+    !(await columnExists(
+      "registered_products",
+      "extended_warranty_offer_enabled_at_registration"
+    ))
+  ) {
+    await pool.query(`
+      ALTER TABLE registered_products
+      ADD COLUMN extended_warranty_offer_enabled_at_registration TINYINT(1) NULL
+      AFTER consent_marketing
+    `);
+    console.log(
+      "✅ Added registered_products.extended_warranty_offer_enabled_at_registration"
+    );
   }
 
   if (!(await columnExists("extended_warranty_entitlements", "pricing_type"))) {
@@ -582,6 +624,7 @@ export async function initDb() {
         coverage_text TEXT NULL,
         extended_warranty_purchase_days INT NULL,
         warranty_pricing_type ENUM('amount', 'percentage') NOT NULL DEFAULT 'amount',
+        extended_warranty_offer_enabled TINYINT(1) NOT NULL DEFAULT 1,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
           ON UPDATE CURRENT_TIMESTAMP,

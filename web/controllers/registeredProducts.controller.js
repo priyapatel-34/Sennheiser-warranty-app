@@ -1,4 +1,10 @@
+import shopify from "../shopify.js";
 import { pool } from "../db/mysql.js";
+import { getEntitlementsForRegistrations } from "../services/extendedWarranty.service.js";
+import {
+  getLatestRefundForEntitlements,
+  getCustomerFacingRefundStatus,
+} from "../services/extendedWarrantyRefund.service.js";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 25;
@@ -10,6 +16,157 @@ const SORT_COLUMNS = {
   serial_number: "rp.serial_number",
   warranty_end: "rp.warranty_end",
 };
+
+async function fetchShopifyOrderNames(client, orderIds) {
+  const map = new Map();
+  const uniqueIds = [
+    ...new Set(
+      orderIds
+        .map(id => String(id || "").trim())
+        .filter(Boolean)
+    ),
+  ];
+  if (!uniqueIds.length) return map;
+
+  const gids = uniqueIds.map(id => `gid://shopify/Order/${id}`);
+
+  for (let offset = 0; offset < gids.length; offset += 50) {
+    const chunk = gids.slice(offset, offset + 50);
+    try {
+      const result = await client.request(
+        `
+        query ($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on Order {
+              id
+              name
+            }
+          }
+        }
+        `,
+        { variables: { ids: chunk } }
+      );
+
+      for (const node of result.data?.nodes || []) {
+        if (!node?.id) continue;
+        const numericId = node.id.split("/").pop();
+        map.set(numericId, node.name);
+      }
+    } catch (err) {
+      console.warn("⚠️ Batch order name fetch failed:", err.message);
+    }
+  }
+
+  return map;
+}
+
+async function fetchShopifyVariantTitle(client, variantId) {
+  const id = String(variantId || "").trim();
+  if (!id) return null;
+
+  try {
+    const result = await client.request(
+      `
+      query ($id: ID!) {
+        productVariant(id: $id) {
+          title
+        }
+      }
+      `,
+      { variables: { id: `gid://shopify/ProductVariant/${id}` } }
+    );
+    const title = result?.data?.productVariant?.title;
+    if (!title || title === "Default Title") return null;
+    return title;
+  } catch (err) {
+    console.warn("⚠️ Variant title fetch failed:", err.message);
+    return null;
+  }
+}
+
+async function fetchShopifyCustomerPhone(client, customerId) {
+  const id = String(customerId || "").trim();
+  if (!id) return null;
+
+  try {
+    const result = await client.request(
+      `
+      query ($id: ID!) {
+        customer(id: $id) {
+          phone
+        }
+      }
+      `,
+      { variables: { id: `gid://shopify/Customer/${id}` } }
+    );
+    return result?.data?.customer?.phone || null;
+  } catch (err) {
+    console.warn("⚠️ Customer phone fetch failed:", err.message);
+    return null;
+  }
+}
+
+function formatDateOnly(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return value.toISOString().split("T")[0];
+  }
+  const str = String(value);
+  return str.includes("T") ? str.split("T")[0] : str;
+}
+
+function resolveOrderNumber(row, orderNameMap) {
+  if (!row.shopify_order_id) return null;
+  return orderNameMap.get(String(row.shopify_order_id)) || null;
+}
+
+function formatWarrantyTypeLabel(row) {
+  const status = row.extended_warranty_status;
+  if (status === "active") return "Extended (Active)";
+  if (status === "pending_payment" && row.extended_warranty_draft_order_id) {
+    return "Extended (Pending)";
+  }
+  if (status === "refunded") return "Extended (Refunded)";
+  if (status === "cancelled") return "Extended (Cancelled)";
+  if (status === "expired") return "Extended (Expired)";
+  return "Standard";
+}
+
+function formatPaymentStatus(entitlement) {
+  if (!entitlement) return null;
+  switch (entitlement.status) {
+    case "pending_payment":
+      return "Pending Payment";
+    case "active":
+      return "Paid";
+    case "refunded":
+      return "Refunded";
+    case "cancelled":
+      return "Cancelled";
+    case "expired":
+      return "Expired";
+    default:
+      return entitlement.status;
+  }
+}
+
+function formatExtendedWarrantyStatus(entitlement) {
+  if (!entitlement) return null;
+  switch (entitlement.status) {
+    case "active":
+      return "Active";
+    case "pending_payment":
+      return "Pending Payment";
+    case "refunded":
+      return "Refunded";
+    case "cancelled":
+      return "Cancelled";
+    case "expired":
+      return "Expired";
+    default:
+      return entitlement.status;
+  }
+}
 
 async function resolveShopId(session) {
   const [[shopRow]] = await pool.query(
@@ -24,7 +181,7 @@ async function resolveShopId(session) {
   return shopRow?.id ?? null;
 }
 
-function buildSearchQuery(shopId, query) {
+function buildSearchQuery(shopId, query, resolvedOrderIds = []) {
   const {
     q = "",
     customerName = "",
@@ -61,6 +218,9 @@ function buildSearchQuery(shopId, query) {
 
   const global = String(q || "").trim();
   if (global) {
+    const extraOrderClauses = resolvedOrderIds.length
+      ? ` OR rp.shopify_order_id IN (${resolvedOrderIds.map(() => "?").join(",")})`
+      : "";
     conditions.push(`(
       rp.customer_name LIKE ?
       OR rp.customer_email LIKE ?
@@ -68,9 +228,13 @@ function buildSearchQuery(shopId, query) {
       OR rp.product_name LIKE ?
       OR rp.sku LIKE ?
       OR CAST(rp.id AS CHAR) LIKE ?
+      OR rp.shopify_order_id LIKE ?${extraOrderClauses}
     )`);
     const pattern = `%${global}%`;
-    params.push(pattern, pattern, pattern, pattern, pattern, pattern);
+    params.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern);
+    if (resolvedOrderIds.length) {
+      params.push(...resolvedOrderIds);
+    }
   }
 
   addLike("rp.customer_name", customerName);
@@ -157,7 +321,70 @@ export async function registeredProducts(req, res) {
       return res.status(404).json({ error: "Shop not registered" });
     }
 
-    const built = buildSearchQuery(shopId, req.query);
+    // If the search query looks like a Shopify order name (e.g. #1082), resolve
+    // it to a numeric shopify_order_id so we can match the DB field exactly.
+    const resolvedOrderIds = [];
+    const rawQ = String(req.query.q || "").trim();
+    if (/^#\S+$/.test(rawQ)) {
+      try {
+        const lookupClient = new shopify.api.clients.Graphql({ session });
+
+        // Step 1: Shopify orders search API (fast path).
+        try {
+          const apiResult = await lookupClient.request(
+            `query ($q: String!) {
+              orders(first: 5, query: $q) {
+                edges { node { id name } }
+              }
+            }`,
+            { variables: { q: `name:${rawQ}` } }
+          );
+          for (const edge of apiResult?.data?.orders?.edges || []) {
+            if (edge.node.name === rawQ) {
+              const numericId = edge.node.id.split("/").pop();
+              if (numericId && !resolvedOrderIds.includes(numericId)) {
+                resolvedOrderIds.push(numericId);
+              }
+            }
+          }
+        } catch (apiErr) {
+          console.warn("⚠️ orders() search failed, will try fallback:", apiErr.message);
+        }
+
+        // Step 2: Fallback — reverse-map stored shopify_order_ids via nodes query
+        // (the nodes query is the same mechanism that renders order names in the table,
+        //  so it is guaranteed to work when the table already shows names).
+        if (!resolvedOrderIds.length) {
+          const [dbRows] = await pool.query(
+            `SELECT DISTINCT shopify_order_id
+             FROM registered_products
+             WHERE shop_id = ? AND shopify_order_id IS NOT NULL
+             ORDER BY created_at DESC
+             LIMIT 300`,
+            [shopId]
+          );
+          const dbOrderIds = dbRows.map(r => String(r.shopify_order_id));
+          if (dbOrderIds.length) {
+            const nameMap = await fetchShopifyOrderNames(lookupClient, dbOrderIds);
+            for (const [id, name] of nameMap.entries()) {
+              if (name === rawQ && !resolvedOrderIds.includes(id)) {
+                resolvedOrderIds.push(id);
+              }
+            }
+          }
+        }
+
+        console.log(
+          resolvedOrderIds.length
+            ? `✅ Order name "${rawQ}" resolved to shopify_order_id(s): ${resolvedOrderIds.join(", ")}`
+            : `ℹ️ No Shopify order found with name "${rawQ}"`
+        );
+      } catch (err) {
+        console.warn("⚠️ Order name resolution error:", err.message);
+      }
+    }
+
+    const built = buildSearchQuery(shopId, req.query, resolvedOrderIds);
 
     const [[countRow]] = await pool.query(
       `
@@ -204,12 +431,31 @@ export async function registeredProducts(req, res) {
       [...built.params, built.pageSize, built.offset]
     );
 
+    const orderIds = rows
+      .filter(row => row.shopify_order_id)
+      .map(row => row.shopify_order_id);
+
+    let orderNameMap = new Map();
+    if (orderIds.length) {
+      try {
+        const client = new shopify.api.clients.Graphql({ session });
+        orderNameMap = await fetchShopifyOrderNames(client, orderIds);
+      } catch (err) {
+        console.warn("⚠️ Order number enrichment skipped:", err.message);
+      }
+    }
+
+    const data = rows.map(row => ({
+      ...row,
+      order_number: resolveOrderNumber(row, orderNameMap),
+    }));
+
     const total = Number(countRow.total) || 0;
     const totalPages = Math.max(1, Math.ceil(total / built.pageSize));
 
     return res.json({
       success: true,
-      data: rows,
+      data,
       pagination: {
         page: built.pageNum,
         limit: built.pageSize,
@@ -222,6 +468,106 @@ export async function registeredProducts(req, res) {
   } catch (err) {
     console.error("❌ registeredProducts error:", err);
     return res.status(500).json({ error: "Failed to fetch registered products" });
+  }
+}
+
+export async function getRegisteredProductDetail(req, res) {
+  try {
+    const session = res.locals.shopify.session;
+    if (!session?.shop) {
+      return res.status(401).json({ error: "No shop provided" });
+    }
+
+    const shopId = await resolveShopId(session);
+    if (!shopId) {
+      return res.status(404).json({ error: "Shop not registered" });
+    }
+
+    const { id } = req.params;
+    const [rows] = await pool.query(
+      `
+      SELECT
+        rp.*,
+        ew.id AS ew_id,
+        ew.status AS extended_warranty_status,
+        ew.shopify_draft_order_id AS extended_warranty_draft_order_id,
+        ew.shopify_order_id AS extended_warranty_shopify_order_id,
+        ew.plan_name AS extended_warranty_plan,
+        ew.activation_date AS extended_warranty_start,
+        ew.expiry_date AS extended_warranty_end
+      FROM registered_products rp
+      LEFT JOIN extended_warranty_entitlements ew ON ew.id = (
+        SELECT e2.id
+        FROM extended_warranty_entitlements e2
+        WHERE e2.shop_id = rp.shop_id
+          AND e2.registered_product_id = rp.id
+        ORDER BY FIELD(e2.status, 'active', 'pending_payment', 'refunded', 'cancelled', 'expired'), e2.created_at DESC
+        LIMIT 1
+      )
+      WHERE rp.id = ? AND rp.shop_id = ?
+      `,
+      [id, shopId]
+    );
+
+    const row = rows[0];
+    if (!row) {
+      return res.status(404).json({
+        success: false,
+        error: "Registered product not found",
+      });
+    }
+
+    const client = new shopify.api.clients.Graphql({ session });
+
+    let orderNumber = null;
+    if (row.shopify_order_id) {
+      const orderNameMap = await fetchShopifyOrderNames(client, [row.shopify_order_id]);
+      orderNumber = orderNameMap.get(String(row.shopify_order_id)) || null;
+    }
+
+    const variantTitle = await fetchShopifyVariantTitle(client, row.shopify_variant_id);
+    const phoneNumber = await fetchShopifyCustomerPhone(client, row.customer_id);
+
+    const entitlementMap = await getEntitlementsForRegistrations(shopId, [row.id]);
+    const entitlement = entitlementMap.get(row.id) || null;
+
+    let refundRecord = null;
+    if (entitlement?.id) {
+      const refundMap = await getLatestRefundForEntitlements(shopId, [entitlement.id]);
+      refundRecord = refundMap.get(entitlement.id) || null;
+    }
+
+    const purchaseTypeLabel =
+      row.purchase_type === "shopify" ? "Shopify Purchase" : "External Purchase";
+
+    return res.json({
+      success: true,
+      data: {
+        id: row.id,
+        order_number: orderNumber,
+        shopify_order_id: row.shopify_order_id,
+        serial_number: row.serial_number,
+        sku: row.sku,
+        product_name: row.product_name,
+        product_variant: variantTitle,
+        customer_name: row.customer_name,
+        customer_email: row.customer_email,
+        purchase_type: purchaseTypeLabel,
+        warranty_type: formatWarrantyTypeLabel(row),
+        purchase_date: formatDateOnly(row.purchase_date),
+        registration_date: formatDateOnly(row.created_at),
+        warranty_start: formatDateOnly(row.warranty_start),
+        warranty_end: formatDateOnly(row.warranty_end),
+        extended_warranty_start: formatDateOnly(row.extended_warranty_start),
+        extended_warranty_end: formatDateOnly(row.extended_warranty_end),
+        retailer_name: row.retailer_name || null,
+        shopify_customer_id: row.customer_id,
+        refund_status: getCustomerFacingRefundStatus(entitlement, refundRecord),
+      },
+    });
+  } catch (err) {
+    console.error("❌ getRegisteredProductDetail error:", err);
+    return res.status(500).json({ error: "Failed to fetch registered product details" });
   }
 }
 

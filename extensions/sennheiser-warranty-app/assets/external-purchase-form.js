@@ -421,6 +421,9 @@
 
     if (!validateExternalFlow()) return;
 
+    const submitBtn = e.submitter || e.target.querySelector('[type="submit"]');
+    const myProductLink = document.getElementById("my_products_link").value;
+
     const payload = {
       flow: "external",
       consent_privacy: consent1.checked,
@@ -435,8 +438,8 @@
       products: [],
     };
 
-    const myProductLink = document.getElementById("my_products_link").value;
-    //console.log(myProductLink);
+    if (submitBtn) submitBtn.disabled = true;
+    window.ExtendedWarrantyOffer?.showPageLoader?.("Registering your product...");
 
     document.querySelectorAll(".external-products-wrapper").forEach((block) => {
       payload.products.push({
@@ -483,6 +486,9 @@
           showError(serialInput, errorMessage);
         }
 
+        window.ExtendedWarrantyOffer?.hidePageLoader?.();
+        window.ExtendedWarrantyOffer?.showRegistrationForm?.();
+        if (submitBtn) submitBtn.disabled = false;
         return;
       }
 
@@ -513,7 +519,7 @@
         window.scrollTo({ top: 0, behavior: "smooth" });
 
         const primary = data.registrations?.[0];
-        if (primary?.registerId) {
+        if (primary?.registerId && window.WarrantyFlowState?.isExtendedWarrantyOfferEnabledInResponse?.(data)) {
           window.WarrantyFlowState?.savePostRegistration({
             registerId: primary.registerId,
             customerEmail: emailInput.value.trim(),
@@ -524,6 +530,14 @@
 
         window.WarrantyToast?.showSuccess("Product registered successfully");
 
+        if (window.WarrantyFlowState?.isExtendedWarrantyOfferEnabledInResponse?.(data)) {
+          window.ExtendedWarrantyOffer?.showPageLoader?.(
+            "Loading extended warranty options..."
+          );
+        } else {
+          window.ExtendedWarrantyOffer?.hidePageLoader?.();
+        }
+
         await window.WarrantyFlowState?.handlePostRegistrationNavigation(data, {
           myProductsLink: myProductLink,
           customerEmail: emailInput.value.trim(),
@@ -531,6 +545,9 @@
         });
       }
     } catch {
+      window.ExtendedWarrantyOffer?.hidePageLoader?.();
+      window.ExtendedWarrantyOffer?.showRegistrationForm?.();
+      if (submitBtn) submitBtn.disabled = false;
       window.WarrantyToast?.showError?.(
         "Something went wrong. Please try again.",
       );

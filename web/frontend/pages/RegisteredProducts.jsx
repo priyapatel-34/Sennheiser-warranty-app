@@ -11,10 +11,15 @@ import {
   Pagination,
   EmptyState,
   Select,
+  Card,
+  LegacyStack,
+  Grid,
+  Spinner,
 } from "@shopify/polaris";
 import { useEffect, useState } from "react";
 import LoadingPanel from "../components/LoadingPanel.jsx";
 import { useToast } from "../hooks/useToast.js";
+import { formatDate } from "../utils/formatDate.js";
 
 const PAGE_SIZE = 25;
 
@@ -29,6 +34,15 @@ const PURCHASE_TYPE_OPTIONS = [
   { label: "Shopify Purchase", value: "shopify" },
   { label: "External Purchase", value: "external" },
 ];
+
+const sectionLabelStyle = {
+  fontSize: 11,
+  fontWeight: 600,
+  color: "#6d7175",
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+  marginBottom: 4,
+};
 
 function TruncatedProductName({ name }) {
   if (!name) return "—";
@@ -47,6 +61,16 @@ function TruncatedProductName({ name }) {
         {name}
       </Text>
     </span>
+  );
+}
+
+function DetailField({ label, value, isDate = false }) {
+  const display = isDate ? formatDate(value) : (value || "—");
+  return (
+    <div>
+      <div style={sectionLabelStyle}>{label}</div>
+      <Text as="p">{display}</Text>
+    </div>
   );
 }
 
@@ -80,6 +104,10 @@ function warrantyTone(item) {
   return "info";
 }
 
+function formatOrderNo(item) {
+  return item.order_number || "—";
+}
+
 export default function RegisteredProductsTable() {
   const toast = useToast();
   const [products, setProducts] = useState([]);
@@ -102,6 +130,10 @@ export default function RegisteredProductsTable() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [productDetail, setProductDetail] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -185,7 +217,8 @@ export default function RegisteredProductsTable() {
     setPage(1);
   };
 
-  const handleDeleteClick = product => {
+  const handleDeleteClick = (product, event) => {
+    event.stopPropagation();
     setSelectedProduct(product);
     setDeleteModalOpen(true);
   };
@@ -208,12 +241,48 @@ export default function RegisteredProductsTable() {
       toast.showSuccess("Registered product deleted");
       setDeleteModalOpen(false);
       setSelectedProduct(null);
+      if (detailOpen && productDetail?.id === selectedProduct.id) {
+        setDetailOpen(false);
+        setProductDetail(null);
+      }
       setRefreshKey(k => k + 1);
     } catch (err) {
       toast.showError(err.message || "Failed to delete product");
     } finally {
       setDeleteLoading(false);
     }
+  };
+
+  const openRegistrationDetails = async product => {
+    setDetailOpen(true);
+    setDetailLoading(true);
+    setProductDetail(null);
+
+    try {
+      const res = await fetch(`/app/registered-products/${product.id}`);
+      const json = await res.json();
+
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Failed to load product details");
+      }
+
+      setProductDetail(json.data);
+    } catch (err) {
+      toast.showError(err.message || "Failed to load product details");
+      setDetailOpen(false);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const handleViewClick = (product, event) => {
+    event.stopPropagation();
+    openRegistrationDetails(product);
+  };
+
+  const closeDetailModal = () => {
+    setDetailOpen(false);
+    setProductDetail(null);
   };
 
   const showPagination =
@@ -225,8 +294,10 @@ export default function RegisteredProductsTable() {
         <Layout>
           <Layout.Section>
             <LegacyCard sectioned>
-              <Text as="p" tone="subdued">
-                Search by customer name, email, serial number, product name, SKU, or registration ID.
+              <Text as="p" variant="bodySm" tone="subdued">
+                Search by name, email, serial no., SKU, product name, or warranty record ID.
+                {" "}To search by order number, use the <strong>#</strong> prefix — e.g.{" "}
+                <strong>#1082</strong>.
               </Text>
               <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <div style={{ flex: 1, minWidth: 240 }}>
@@ -300,22 +371,23 @@ export default function RegisteredProductsTable() {
                   </p>
                 </EmptyState>
               ) : (
-                <div style={{ overflowX: "auto" }}>
+                <div className="wa-registered-products-table" style={{ overflowX: "auto" }}>
                   <IndexTable
                     resourceName={{ singular: "product", plural: "products" }}
                     itemCount={products.length}
                     selectable={false}
                     headings={[
-                      { title: "ID" },
-                      { title: "Product" },
-                      { title: "Serial No" },
-                      { title: "SKU" },
+                      { title: "Warranty Record ID" },
                       { title: "Customer" },
+                      { title: "Product" },
+                      { title: "Serial Number" },
+                      { title: "Purchase Type" },
+                      { title: "Order Number" },
+                      { title: "SKU" },
                       { title: "Email" },
                       { title: "Warranty Type" },
-                      { title: "Purchase Type" },
                       { title: "Warranty End" },
-                      { title: "EW End" },
+                      { title: "Extended Warranty End" },
                       { title: "Actions" },
                     ]}
                   >
@@ -324,20 +396,14 @@ export default function RegisteredProductsTable() {
                         id={String(item.id)}
                         key={item.id}
                         position={index}
+                        onClick={() => openRegistrationDetails(item)}
                       >
                         <IndexTable.Cell>{item.id}</IndexTable.Cell>
+                        <IndexTable.Cell>{item.customer_name || "—"}</IndexTable.Cell>
                         <IndexTable.Cell>
                           <TruncatedProductName name={item.product_name} />
                         </IndexTable.Cell>
                         <IndexTable.Cell>{item.serial_number}</IndexTable.Cell>
-                        <IndexTable.Cell>{item.sku || "—"}</IndexTable.Cell>
-                        <IndexTable.Cell>{item.customer_name || "—"}</IndexTable.Cell>
-                        <IndexTable.Cell>{item.customer_email}</IndexTable.Cell>
-                        <IndexTable.Cell>
-                          <Badge tone={warrantyTone(item)}>
-                            {formatWarrantyType(item)}
-                          </Badge>
-                        </IndexTable.Cell>
                         <IndexTable.Cell>
                           <Badge tone={item.purchase_type === "shopify" ? "success" : "info"}>
                             {item.purchase_type === "shopify"
@@ -345,33 +411,42 @@ export default function RegisteredProductsTable() {
                               : "External Purchase"}
                           </Badge>
                         </IndexTable.Cell>
-                        <IndexTable.Cell>{item.warranty_end || "—"}</IndexTable.Cell>
+                        <IndexTable.Cell>{formatOrderNo(item)}</IndexTable.Cell>
+                        <IndexTable.Cell>{item.sku || "—"}</IndexTable.Cell>
+                        <IndexTable.Cell>{item.customer_email}</IndexTable.Cell>
                         <IndexTable.Cell>
-                          {item.extended_warranty_end || "—"}
+                          <Badge tone={warrantyTone(item)}>
+                            {formatWarrantyType(item)}
+                          </Badge>
                         </IndexTable.Cell>
+                        <IndexTable.Cell>{formatDate(item.warranty_end)}</IndexTable.Cell>
+                        <IndexTable.Cell>{formatDate(item.extended_warranty_end)}</IndexTable.Cell>
                         <IndexTable.Cell>
-                          <Button
-                            tone="critical"
-                            size="micro"
-                            onClick={() => handleDeleteClick(item)}
+                          <div
+                            className="wa-row-actions"
+                            style={{ display: "flex", gap: 8 }}
+                            onClick={e => e.stopPropagation()}
                           >
-                            Delete
-                          </Button>
+                            <Button
+                              size="micro"
+                              onClick={e => handleViewClick(item, e)}
+                            >
+                              View
+                            </Button>
+                            <Button
+                              tone="critical"
+                              size="micro"
+                              onClick={e => handleDeleteClick(item, e)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
                         </IndexTable.Cell>
                       </IndexTable.Row>
                     ))}
                   </IndexTable>
 
-                  <div
-                    style={{
-                      padding: 16,
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                      gap: 12,
-                    }}
-                  >
+                  <div className="wa-pagination-bar" style={{ padding: 16 }}>
                     <Text as="p" tone="subdued">
                       {paginationMeta.total} result
                       {paginationMeta.total === 1 ? "" : "s"}
@@ -392,6 +467,106 @@ export default function RegisteredProductsTable() {
           </Layout.Section>
         </Layout>
       </Page>
+
+      <Modal
+        open={detailOpen}
+        onClose={closeDetailModal}
+        title={
+          productDetail?.product_name
+            ? `Warranty Record #${productDetail.id} — ${productDetail.product_name}`
+            : "Warranty Record Details"
+        }
+        large
+        secondaryActions={[
+          { content: "Close", onAction: closeDetailModal },
+        ]}
+      >
+        <Modal.Section>
+          {detailLoading ? (
+            <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
+              <Spinner accessibilityLabel="Loading registration details" size="large" />
+            </div>
+          ) : productDetail ? (
+            <LegacyStack vertical spacing="loose">
+              <Card title="Registration Information" sectioned>
+                <Grid>
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Warranty Record ID" value={String(productDetail.id)} />
+                  </Grid.Cell>
+                  {productDetail.purchase_type !== "External Purchase" && (
+                    <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                      <DetailField label="Order Number" value={productDetail.order_number} />
+                    </Grid.Cell>
+                  )}
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Serial Number" value={productDetail.serial_number} />
+                  </Grid.Cell>
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="SKU" value={productDetail.sku} />
+                  </Grid.Cell>
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Product Name" value={productDetail.product_name} />
+                  </Grid.Cell>
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Product Variant" value={productDetail.product_variant} />
+                  </Grid.Cell>
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Purchase Type" value={productDetail.purchase_type} />
+                  </Grid.Cell>
+                  {productDetail.purchase_type === "External Purchase" && (
+                    <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                      <DetailField label="Retailer Name" value={productDetail.retailer_name} />
+                    </Grid.Cell>
+                  )}
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Warranty Type" value={productDetail.warranty_type} />
+                  </Grid.Cell>
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Purchase Date" value={productDetail.purchase_date} isDate />
+                  </Grid.Cell>
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Registration Date" value={productDetail.registration_date} isDate />
+                  </Grid.Cell>
+                </Grid>
+              </Card>
+
+              <Card title="Customer Information" sectioned>
+                <Grid>
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Customer Name" value={productDetail.customer_name} />
+                  </Grid.Cell>
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Email" value={productDetail.customer_email} />
+                  </Grid.Cell>
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Shopify Customer ID" value={productDetail.shopify_customer_id} />
+                  </Grid.Cell>
+                </Grid>
+              </Card>
+
+              <Card title="Warranty Information" sectioned>
+                <Grid>
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Standard Warranty Start" value={productDetail.warranty_start} isDate />
+                  </Grid.Cell>
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Standard Warranty End" value={productDetail.warranty_end} isDate />
+                  </Grid.Cell>
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Extended Warranty Start" value={productDetail.extended_warranty_start} isDate />
+                  </Grid.Cell>
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Extended Warranty End" value={productDetail.extended_warranty_end} isDate />
+                  </Grid.Cell>
+                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
+                    <DetailField label="Refund Status" value={productDetail.refund_status} />
+                  </Grid.Cell>
+                </Grid>
+              </Card>
+            </LegacyStack>
+          ) : null}
+        </Modal.Section>
+      </Modal>
 
       <Modal
         open={deleteModalOpen}

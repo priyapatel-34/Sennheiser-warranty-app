@@ -198,6 +198,57 @@ body,
   margin-top: 16px;
 }
 
+/* Generic compact vertical/horizontal stack utilities.
+   Prefer these over LegacyStack's loose default spacing, which reads as
+   excessive whitespace once nested inside a sectioned LegacyCard. */
+
+.wa-stack-8,
+.wa-stack-12,
+.wa-stack-16 {
+  display: flex;
+  flex-direction: column;
+}
+
+.wa-stack-8 {
+  gap: 8px;
+}
+
+.wa-stack-12 {
+  gap: 12px;
+}
+
+.wa-stack-16 {
+  gap: 16px;
+}
+
+.wa-row-8,
+.wa-row-12 {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.wa-row-8 {
+  gap: 8px;
+}
+
+.wa-row-12 {
+  gap: 12px;
+}
+
+/* Tighten default Polaris chrome that otherwise stacks up into large gaps
+   when a page has a Tabs strip followed by a sectioned card (Retailers,
+   Standard/Extended Warranty, Email Settings all follow this pattern). */
+
+.wa-admin-content .Polaris-Tabs {
+  margin-bottom: 0;
+}
+
+.wa-admin-content .Polaris-LegacyCard + .Polaris-LegacyCard,
+.wa-admin-content .wa-admin-section-gap + .Polaris-LegacyCard {
+  margin-top: 12px;
+}
+
 /* Compact admin forms */
 
 .wa-compact-form-panel {
@@ -297,6 +348,7 @@ body,
   overflow: auto;
   max-height: 70vh;
   background: #fff;
+  padding: 4px;
 }
 
 .wa-dashboard-card__link {
@@ -383,6 +435,25 @@ body,
     transform: none;
     box-shadow: none;
   }
+
+  .Polaris-LegacyCard--sectioned .Polaris-LegacyCard__Section {
+    padding: 12px;
+  }
+}
+
+/* Registered Products — clickable table rows */
+.wa-registered-products-table tbody tr {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.wa-registered-products-table tbody tr:hover,
+.wa-registered-products-table tbody tr:active {
+  background-color: #f6f6f7;
+}
+
+.wa-registered-products-table .wa-row-actions {
+  cursor: default;
 }
 
 @media (max-width: 480px) {

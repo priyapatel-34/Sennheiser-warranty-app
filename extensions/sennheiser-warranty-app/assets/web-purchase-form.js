@@ -243,6 +243,10 @@
     const isValid = validateShopifyFlow();
     if (!isValid) return;
 
+    const submitBtn = e.submitter || e.target.querySelector('[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+    window.ExtendedWarrantyOffer?.showPageLoader?.("Registering your product...");
+
     /* 🟢 ONLY AFTER VALIDATION PASSES */
     const customerId = document.getElementById("customerId")?.value || null;
 
@@ -308,6 +312,9 @@
             window.WarrantyFlowState?.TOAST?.registrationFailed ||
             "Registration failed. Please check your details and try again."
         );
+        window.ExtendedWarrantyOffer?.hidePageLoader?.();
+        window.ExtendedWarrantyOffer?.showRegistrationForm?.();
+        if (submitBtn) submitBtn.disabled = false;
         return;
       }
       //if (!res.ok) throw new Error();
@@ -315,13 +322,24 @@
 
       if (data.success === true) {
         const primary = data.registrations?.[0];
-        if (primary?.registerId) {
+        if (
+          primary?.registerId &&
+          window.WarrantyFlowState?.isExtendedWarrantyOfferEnabledInResponse?.(data)
+        ) {
           window.WarrantyFlowState?.savePostRegistration({
             registerId: primary.registerId,
             customerEmail: emailInput?.value?.trim() || "",
             customerName: nameInput?.value?.trim() || "",
             myProductsLink: myProductLink,
           });
+        }
+
+        if (window.WarrantyFlowState?.isExtendedWarrantyOfferEnabledInResponse?.(data)) {
+          window.ExtendedWarrantyOffer?.showPageLoader?.(
+            "Loading extended warranty options..."
+          );
+        } else {
+          window.ExtendedWarrantyOffer?.hidePageLoader?.();
         }
 
         await window.WarrantyFlowState?.handlePostRegistrationNavigation(data, {
@@ -332,6 +350,9 @@
       }
 
     } catch {
+      window.ExtendedWarrantyOffer?.hidePageLoader?.();
+      window.ExtendedWarrantyOffer?.showRegistrationForm?.();
+      if (submitBtn) submitBtn.disabled = false;
       window.WarrantyToast?.showError?.(
         window.WarrantyFlowState?.TOAST?.registrationFailed ||
         "Something went wrong. Please try again."

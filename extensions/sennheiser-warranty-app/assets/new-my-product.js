@@ -228,10 +228,11 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
     }
 
     window.mpProductsSwiper = new Swiper(".mp-slider", {
-      slidesPerView: 1,
+      slidesPerView: 3,
       spaceBetween: 16,
       watchOverflow: true,
       breakpoints: {
+        0: { slidesPerView: 1, spaceBetween: 20 },
         576: { slidesPerView: 2, spaceBetween: 16 },
         768: { slidesPerView: 2, spaceBetween: 20 },
         991: { slidesPerView: 3, spaceBetween: 20 },
@@ -395,6 +396,15 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
         .join("");
 
       initMpSlider();
+      let resizeTimer;
+      window.addEventListener('resize', function () {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(function () {
+          if (window.mpProductsSwiper) {
+            window.mpProductsSwiper.update();
+          }
+        }, 150);
+      });
     }
   } catch (err) {
     hideProductsLoader();

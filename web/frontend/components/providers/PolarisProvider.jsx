@@ -1,12 +1,13 @@
 import { useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { AppProvider } from "@shopify/polaris";
 import "@shopify/polaris/build/esm/styles.css";
 import { getPolarisTranslations } from "../../utils/i18nUtils";
 
-function AppBridgeLink({ url, children, external, ...rest }) {
-  const handleClick = useCallback(() => window.open(url), [url]);
+const IS_EXTERNAL_LINK_REGEX = /^(?:[a-z][a-z\d+.-]*:|\/\/)/;
 
-  const IS_EXTERNAL_LINK_REGEX = /^(?:[a-z][a-z\d+.-]*:|\/\/)/;
+function AppBridgeLink({ url, children, external, ...rest }) {
+  const navigate = useNavigate();
 
   if (external || IS_EXTERNAL_LINK_REGEX.test(url)) {
     return (
@@ -16,8 +17,30 @@ function AppBridgeLink({ url, children, external, ...rest }) {
     );
   }
 
+  // Internal links must use in-app (SPA) routing rather than opening a new
+  // tab/window. Opening a new tab navigates to the current origin, which is
+  // the app's own host (e.g. a local dev tunnel URL) - that host may be
+  // stale or unreachable outside of the embedded admin iframe.
+  const handleClick = useCallback(
+    (event) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.shiftKey
+      ) {
+        return;
+      }
+      event.preventDefault();
+      navigate(url);
+    },
+    [navigate, url]
+  );
+
   return (
-    <a {...rest} onClick={handleClick}>
+    <a {...rest} href={url} onClick={handleClick}>
       {children}
     </a>
   );

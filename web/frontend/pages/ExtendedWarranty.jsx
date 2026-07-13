@@ -12,6 +12,7 @@ import {
     EmptyState,
     useIndexResourceState,
     Select,
+    Checkbox,
 } from "@shopify/polaris";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "../hooks/useToast.js";
@@ -125,6 +126,7 @@ export default function ExtendedWarrantyAdmin() {
         coverageText: "",
         extendedWarrantyPurchaseDays: "",
         warrantyPricingType: "amount",
+        extendedWarrantyOfferEnabled: true,
         expiryReminderConfigs: [],
     });
     const [warrantyPricingType, setWarrantyPricingType] = useState("amount");
@@ -231,7 +233,9 @@ export default function ExtendedWarrantyAdmin() {
     const loadSettings = async () => {
         setSettingsLoading(true);
         try {
-            const r = await fetch(`${API_BASE}/settings`);
+            const r = await fetch(`${API_BASE}/settings`, {
+                credentials: "include",
+            });
             if (!r.ok) throw new Error();
             const data = await r.json();
             const s = data.settings || {};
@@ -243,6 +247,10 @@ export default function ExtendedWarrantyAdmin() {
                         ? ""
                         : String(s.extendedWarrantyPurchaseDays),
                 warrantyPricingType: s.warrantyPricingType || "amount",
+                extendedWarrantyOfferEnabled:
+                    s.extendedWarrantyOfferEnabled === undefined
+                        ? true
+                        : Boolean(s.extendedWarrantyOfferEnabled),
                 expiryReminderConfigs: (s.expiryReminderConfigs || []).map((entry) => ({
                     reminderDays: (entry.reminderDays || []).map(String),
                 })),
@@ -530,6 +538,7 @@ export default function ExtendedWarrantyAdmin() {
 
             const r = await fetch(`${API_BASE}/settings`, {
                 method: "POST",
+                credentials: "include",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     termsUrl: settings.termsUrl,
@@ -539,14 +548,36 @@ export default function ExtendedWarrantyAdmin() {
                             ? null
                             : Number(settings.extendedWarrantyPurchaseDays),
                     warrantyPricingType: settings.warrantyPricingType,
+                    extendedWarrantyOfferEnabled: Boolean(
+                        settings.extendedWarrantyOfferEnabled
+                    ),
                     expiryReminderConfigs,
                 }),
             });
             const data = await r.json().catch(() => ({}));
             if (!r.ok) throw new Error(data.error || "Failed to save settings");
+            if (data.settings) {
+                setSettings({
+                    termsUrl: data.settings.termsUrl || "",
+                    coverageText: data.settings.coverageText || "",
+                    extendedWarrantyPurchaseDays:
+                        data.settings.extendedWarrantyPurchaseDays == null
+                            ? ""
+                            : String(data.settings.extendedWarrantyPurchaseDays),
+                    warrantyPricingType:
+                        data.settings.warrantyPricingType || "amount",
+                    extendedWarrantyOfferEnabled: Boolean(
+                        data.settings.extendedWarrantyOfferEnabled
+                    ),
+                    expiryReminderConfigs: (
+                        data.settings.expiryReminderConfigs || []
+                    ).map((entry) => ({
+                        reminderDays: (entry.reminderDays || []).map(String),
+                    })),
+                });
+                setWarrantyPricingType(data.settings.warrantyPricingType || "amount");
+            }
             toast.showSuccess("Settings saved");
-            setWarrantyPricingType(settings.warrantyPricingType || "amount");
-            loadSettings();
         } catch (err) {
             toast.showError(err.message || "Failed to save settings");
         } finally {
@@ -926,6 +957,31 @@ export default function ExtendedWarrantyAdmin() {
                         <LoadingPanel label="Loading settings..." />
                     ) : (
                         <div style={{ padding: "4px 20px 20px" }}>
+                            <div style={{ ...styles.settingsSection, paddingTop: 16 }}>
+                                <div style={styles.stack(4)}>
+                                    <Text as="h2" variant="headingMd">
+                                        Extended Warranty Offer
+                                    </Text>
+                                    <Text as="p" tone="subdued">
+                                        Show the Extended Warranty offer screen to customers right
+                                        after they complete standard warranty registration.
+                                    </Text>
+                                </div>
+                                <div style={{ marginTop: 16 }}>
+                                    <Checkbox
+                                        label="Enable Extended Warranty Offer"
+                                        checked={settings.extendedWarrantyOfferEnabled}
+                                        onChange={(checked) =>
+                                            setSettings((p) => ({
+                                                ...p,
+                                                extendedWarrantyOfferEnabled: checked,
+                                            }))
+                                        }
+                                        helpText="When disabled, customers are taken straight to My Products after registering standard warranty."
+                                    />
+                                </div>
+                            </div>
+
                             <div style={{ ...styles.settingsSection, paddingTop: 16 }}>
                                 <div style={styles.stack(4)}>
                                     <Text as="h2" variant="headingMd">

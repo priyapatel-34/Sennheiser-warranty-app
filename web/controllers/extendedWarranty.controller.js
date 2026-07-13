@@ -6,6 +6,7 @@ import {
     saveExpiryReminderConfigs,
     getExtendedWarrantySettings,
     normalizeTermsUrl,
+    parseExtendedWarrantyOfferEnabled,
 } from "../services/extendedWarranty.service.js";
 import {
     DEFAULT_WARRANTY_PRICING_TYPE,
@@ -990,6 +991,7 @@ function mapSettingsRow(row, expiryReminderConfigs = []) {
             coverageText: "",
             extendedWarrantyPurchaseDays: null,
             warrantyPricingType: DEFAULT_WARRANTY_PRICING_TYPE,
+            extendedWarrantyOfferEnabled: true,
             expiryReminderConfigs: [],
         };
     }
@@ -999,6 +1001,10 @@ function mapSettingsRow(row, expiryReminderConfigs = []) {
         coverageText: row.coverage_text || "",
         extendedWarrantyPurchaseDays: row.extended_warranty_purchase_days ?? null,
         warrantyPricingType: normalizeWarrantyPricingType(row.warranty_pricing_type),
+        extendedWarrantyOfferEnabled: parseExtendedWarrantyOfferEnabled(
+            row?.extended_warranty_offer_enabled,
+            true
+        ),
         expiryReminderConfigs,
     };
 }
@@ -1050,6 +1056,10 @@ export async function saveEWSettings(req, res) {
             warrantyPricingType = DEFAULT_WARRANTY_PRICING_TYPE,
             expiryReminderConfigs = [],
         } = req.body;
+        const extendedWarrantyOfferEnabled = parseExtendedWarrantyOfferEnabled(
+            req.body.extendedWarrantyOfferEnabled,
+            true
+        );
 
         const purchaseDays =
             extendedWarrantyPurchaseDays == null || extendedWarrantyPurchaseDays === ""
@@ -1083,13 +1093,15 @@ export async function saveEWSettings(req, res) {
         terms_url,
         coverage_text,
         extended_warranty_purchase_days,
-        warranty_pricing_type
-      ) VALUES (?, ?, ?, ?, ?)
+        warranty_pricing_type,
+        extended_warranty_offer_enabled
+      ) VALUES (?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         terms_url = VALUES(terms_url),
         coverage_text = VALUES(coverage_text),
         extended_warranty_purchase_days = VALUES(extended_warranty_purchase_days),
         warranty_pricing_type = VALUES(warranty_pricing_type),
+        extended_warranty_offer_enabled = VALUES(extended_warranty_offer_enabled),
         updated_at = CURRENT_TIMESTAMP
       `,
             [
@@ -1098,6 +1110,7 @@ export async function saveEWSettings(req, res) {
                 coverageText || null,
                 purchaseDays,
                 normalizedPricingType,
+                extendedWarrantyOfferEnabled ? 1 : 0,
             ]
         );
 
@@ -1107,7 +1120,16 @@ export async function saveEWSettings(req, res) {
             return res.status(400).json({ error: configErr.message });
         }
 
-        return res.json({ success: true });
+        const [[savedRow]] = await pool.query(
+            `SELECT * FROM extended_warranty_settings WHERE shop_id = ?`,
+            [shopId]
+        );
+        const expiryReminderConfigsSaved = await buildExpiryReminderAdminConfigs(shopId);
+
+        return res.json({
+            success: true,
+            settings: mapSettingsRow(savedRow, expiryReminderConfigsSaved),
+        });
     } catch (err) {
         console.error("❌ saveEWSettings error:", err);
         return res.status(500).json({ error: "Failed to save settings" });

@@ -219,7 +219,7 @@ export default function WarrantyAdmin() {
       />
 
       {error && (
-        <div style={{ padding: "0 0 12px" }}>
+        <div className="wa-admin-section-gap">
           <Text as="p" tone="critical">
             {error}
           </Text>
@@ -394,16 +394,7 @@ export default function WarrantyAdmin() {
                 ))}
               </IndexTable>
 
-              <div
-                style={{
-                  padding: 16,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  gap: 12,
-                }}
-              >
+              <div className="wa-pagination-bar" style={{ padding: 16 }}>
                 <Text as="p" tone="subdued">
                   {paginationMeta.total} product
                   {paginationMeta.total === 1 ? "" : "s"}
@@ -414,7 +405,7 @@ export default function WarrantyAdmin() {
                     : ""}
                 </Text>
                 {showPagination ? (
-                  <div gap="200" blockAlign="center">
+                  <div className="wa-pagination-bar__controls">
                     <Button disabled={page <= 1} onClick={() => setPage(1)}>
                       First
                     </Button>

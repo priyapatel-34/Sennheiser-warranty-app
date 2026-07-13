@@ -1,12 +1,15 @@
 import shopify from "./shopify.js";
 import { DeliveryMethod } from "@shopify/shopify-api";
+import { pool } from "./db/mysql.js";
 import {
   resolveShopId,
   activateEntitlementFromPayment,
   cancelEntitlementFromRefund,
   getNumericIdFromGid,
   getActiveEntitlement,
+  findPendingEntitlementsByPaidOrder,
 } from "./services/extendedWarranty.service.js";
+import { syncExtendedWarrantyOrderTags } from "./services/shopifyOrderTags.service.js";
 
 function extractEwAttributesFromLineItem(lineItem) {
   const attrs = lineItem.customAttributes || lineItem.properties || [];
@@ -39,16 +42,6 @@ function collectActivationTargets(orderPayload, graphqlLineItems = []) {
       props._ew_register_id ? Number(props._ew_register_id) : null,
       props._ew_plan_id ? Number(props._ew_plan_id) : null
     );
-  }
-
-  const tags = String(orderPayload.tags || "")
-    .split(",")
-    .map(tag => tag.trim())
-    .filter(Boolean);
-
-  for (const tag of tags) {
-    const match = tag.match(/^ew-register-(\d+)$/i);
-    if (match) addTarget(Number(match[1]));
   }
 
   for (const edge of graphqlLineItems) {
@@ -134,6 +127,55 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
     order.lineItems?.edges || []
   );
 
+  console.log("[EW Webhook] Activation targets from line items", {
+    orderId,
+    orderName: order.name,
+    targetCount: targets.size,
+    targets: [...targets.entries()],
+  });
+
+  if (targets.size === 0) {
+    const draftMatches = await findPendingEntitlementsByPaidOrder(
+      shopId,
+      orderId,
+      session
+    );
+
+    console.log("[EW Webhook] Draft-order fallback matches", {
+      orderId,
+      orderName: order.name,
+      matchCount: draftMatches.length,
+      matches: draftMatches.map(match => ({
+        registerId: match.registerId,
+        planId: match.planId,
+        productOrderId: match.productOrderId,
+      })),
+    });
+
+    for (const match of draftMatches) {
+      try {
+        await activateEntitlementFromPayment({
+          shopId,
+          registerId: match.registerId,
+          planId: match.planId,
+          shopifyOrderId: String(orderId),
+          shopifyOrderName: order.name,
+          customerEmail,
+          customerName,
+          shopDisplayName: shopName,
+          session,
+        });
+        console.log(
+          `[EW Webhook] Activated via draft-order fallback: register=${match.registerId}, order=${orderId}`
+        );
+      } catch (err) {
+        console.error("[EW Webhook] Draft-order fallback activation failed:", err.message);
+      }
+    }
+
+    return;
+  }
+
   for (const [registerId, planIdFromPayload] of targets) {
     let planId = planIdFromPayload;
 
@@ -164,10 +206,30 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
         session,
       });
       console.log(
-        `✅ Extended warranty activated: register=${registerId}, plan=${planId}, order=${orderId}`
+        `[EW Webhook] Extended warranty activated: register=${registerId}, plan=${planId}, order=${orderId}`
       );
     } catch (err) {
-      console.error("❌ EW activation failed:", err.message);
+      console.error("[EW Webhook] EW activation failed:", err.message);
+
+      const active = await getActiveEntitlement(shopId, registerId);
+      if (active?.status === "active") {
+        const [[registered]] = await pool.query(
+          `SELECT shopify_order_id FROM registered_products WHERE shop_id = ? AND id = ?`,
+          [shopId, registerId]
+        );
+
+        const tagResults = await syncExtendedWarrantyOrderTags({
+          shop: session.shop,
+          productOrderId: registered?.shopify_order_id,
+          purchaseOrderId: active.shopify_order_id || String(orderId),
+          session,
+          registerId,
+        });
+        console.log("[EW Webhook] Tag sync retry for active entitlement", {
+          registerId,
+          tagResults,
+        });
+      }
     }
   }
 }
