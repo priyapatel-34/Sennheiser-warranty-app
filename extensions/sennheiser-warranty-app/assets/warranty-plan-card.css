@@ -1,0 +1,111 @@
+/* Shared "Plan Card" styling for the Extended Warranty PDP + Cart upsell.
+   Namespaced with `wpc-` so it never collides with existing app CSS
+   (e.g. the post-registration offer screen's `.ew-*` classes). */
+
+.wpc-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.wpc-card {
+  position: relative;
+  display: block;
+  border: 1px solid #d6d6d6;
+  border-radius: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  background: #fff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.wpc-card:hover {
+  border-color: #9b9b9b;
+}
+
+.wpc-card--selected {
+  border-color: #111;
+  box-shadow: 0 0 0 1px #111;
+}
+
+.wpc-card--none {
+  display: flex;
+  align-items: center;
+  color: #555;
+}
+
+.wpc-radio {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  accent-color: #111;
+}
+
+.wpc-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 20px;
+}
+
+.wpc-badge {
+  align-self: flex-start;
+  background: #111;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-bottom: 2px;
+}
+
+.wpc-card-top {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wpc-plan-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: #111;
+}
+
+.wpc-plan-price {
+  font-size: 13px;
+  color: #333;
+}
+
+.wpc-coverage {
+  font-size: 12px;
+  color: #6b6b6b;
+  line-height: 1.4;
+}
+
+.wpc-terms {
+  font-size: 11px;
+  color: #8a8a8a;
+  margin: 6px 0 0;
+}
+
+.wpc-terms a {
+  color: #555;
+  text-decoration: underline;
+}
+
+.wpc-loading,
+.wpc-error {
+  font-size: 13px;
+  color: #6b6b6b;
+  padding: 8px 0;
+}
+
+.wpc-error {
+  color: #b00020;
+}

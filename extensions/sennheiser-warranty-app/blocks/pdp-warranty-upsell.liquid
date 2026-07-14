@@ -1,0 +1,32 @@
+{% comment %}
+  Extended Warranty — Product Detail Page upsell.
+
+  Pure UI: detects the current product/variant, calls the app's own dynamic
+  plans API, and (only if the merchant explicitly selects a plan) adds the
+  warranty variant to the cart alongside the product via the native AJAX
+  Cart API. If the API returns no eligible plans, or fails, this block
+  hides itself completely and the page's own Add to cart button/form keeps
+  working exactly as it did before this block existed.
+{% endcomment %}
+{% if product %}
+  <div
+    class="wpc-pdp-warranty"
+    data-shop="{{ shop.permanent_domain }}"
+    data-product-id="{{ product.id }}"
+    data-variant-id="{{ product.selected_or_first_available_variant.id }}"
+    hidden
+  ></div>
+
+  {{ 'warranty-plan-card.css' | asset_url | stylesheet_tag }}
+  {{ 'pdp-warranty.css' | asset_url | stylesheet_tag }}
+  {{ 'warranty-plan-card.js' | asset_url | script_tag }}
+  {{ 'pdp-warranty.js' | asset_url | script_tag }}
+{% endif %}
+
+{% schema %}
+{
+  "name": "Warranty Protection",
+  "target": "section",
+  "settings": []
+}
+{% endschema %}
