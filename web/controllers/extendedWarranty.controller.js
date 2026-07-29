@@ -109,12 +109,21 @@ const PRODUCTS_WITH_VARIANTS_QUERY = `
   }
 `;
 
-function buildShopifyProductSearchQuery(searchTerm) {
-    const statusFilter = "(status:active OR status:draft)";
+function buildShopifyProductSearchQuery(searchTerm, statusFilter = "") {
+    const status = String(statusFilter || "").toLowerCase().trim();
+    let statusQuery;
+    if (status === "active") {
+        statusQuery = "status:active";
+    } else if (status === "draft") {
+        statusQuery = "status:draft";
+    } else {
+        statusQuery = "(status:active OR status:draft)";
+    }
+
     const term = String(searchTerm || "").trim();
-    if (!term) return statusFilter;
+    if (!term) return statusQuery;
     const sanitized = term.replace(/["\\]/g, " ").trim();
-    return `(title:*${sanitized}* OR sku:*${sanitized}*) AND ${statusFilter}`;
+    return `(title:*${sanitized}* OR sku:*${sanitized}*) AND ${statusQuery}`;
 }
 
 function productMatchesSearchTerm(productNode, searchTerm) {
@@ -363,11 +372,12 @@ export async function getWarrantyProducts(req, res) {
         const jumpLast = req.query.last === "1";
         const cursor = jumpLast ? null : req.query.cursor || null;
         const searchTerm = req.query.q || req.query.search || "";
+        const statusFilter = req.query.status || "";
         const pageSize = Math.min(
             50,
             Math.max(1, parseInt(req.query.limit, 10) || 25)
         );
-        const productQuery = buildShopifyProductSearchQuery(searchTerm);
+        const productQuery = buildShopifyProductSearchQuery(searchTerm, statusFilter);
         const admin = new shopify.api.clients.Graphql({ session });
 
         let response;

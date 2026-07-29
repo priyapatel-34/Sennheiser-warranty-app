@@ -48,14 +48,6 @@ const DASHBOARD_SECTIONS = [
     description:
       "Manage customer email notifications, templates, and preview messages.",
   },
-  {
-    path: "/serialNumbers",
-    title: "Serial Numbers Settings",
-    shortLabel: "SN",
-    iconClass: "wa-dashboard-card__icon--serials",
-    description:
-      "Optionally require an imported serial number to complete registration.",
-  },
 ];
 
 export default function HomePage() {

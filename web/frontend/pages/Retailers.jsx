@@ -9,7 +9,6 @@ import {
   Tabs,
   TextField,
   Checkbox,
-  Link,
   Pagination,
   Banner,
   EmptyState,
@@ -26,6 +25,9 @@ function displayCell(value) {
   return String(value).trim();
 }
 
+const EMPTY_ADD_FORM = { name: "", localized_name: "", country: "" };
+const EMPTY_ADD_ERRORS = { name: "", country: "" };
+
 export default function Retailers() {
   const toast = useToast();
   const [selectedTab, setSelectedTab] = useState(0);
@@ -41,13 +43,27 @@ export default function Retailers() {
     hasPreviousPage: false,
   });
   const [loading, setLoading] = useState(false);
+
+  // Import modal state
   const [openImport, setOpenImport] = useState(false);
   const [preview, setPreview] = useState([]);
   const [importing, setImporting] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [deleting, setDeleting] = useState(false);
+
+  // Add retailer modal state
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState(EMPTY_ADD_FORM);
+  const [addErrors, setAddErrors] = useState(EMPTY_ADD_ERRORS);
+  const [adding, setAdding] = useState(false);
+
+  // Edit modal state
   const [editRetailer, setEditRetailer] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [editErrors, setEditErrors] = useState(EMPTY_ADD_ERRORS);
+
+  // Delete modal state
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
   const [retailerRequired, setRetailerRequired] = useState(false);
   const toastRef = useRef(toast);
   toastRef.current = toast;
@@ -112,9 +128,7 @@ export default function Retailers() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTab, page, searchQuery, pageSize]);
 
-  const resetImportState = () => {
-    setPreview([]);
-  };
+  const resetImportState = () => setPreview([]);
 
   const openImportModal = () => {
     resetImportState();
@@ -126,24 +140,11 @@ export default function Retailers() {
     resetImportState();
   };
 
-  const runSearch = () => {
-    setPage(1);
-    setSearchQuery(searchInput.trim());
-  };
-
-  const clearSearch = () => {
-    setSearchInput("");
-    setSearchQuery("");
-    setPage(1);
-  };
-
-  const showPagination = !loading && paginationMeta.total > 0;
-
   function downloadSample() {
     const ws = XLSX.utils.json_to_sheet([
       {
         "Retailer Name": "Amazon",
-        City: "Mumbai",
+        Country: "Japan",
         "Localized Name": "アマゾン",
       },
     ]);
@@ -163,7 +164,7 @@ export default function Retailers() {
         data.map((r) => [
           displayCell(r["Retailer Name"]),
           displayCell(r["Localized Name"] ?? r["Retailer JA"]),
-          displayCell(r.City),
+          displayCell(r.Country),
         ])
       );
     };
@@ -184,7 +185,7 @@ export default function Retailers() {
             .map((r) => ({
               name: r[0] === "-" ? "" : r[0],
               localized_name: r[1] === "-" ? "" : r[1],
-              city: r[2] === "-" ? "" : r[2],
+              country: r[2] === "-" ? "" : r[2],
             })),
         }),
       });
@@ -201,6 +202,74 @@ export default function Retailers() {
       setImporting(false);
     }
   }
+
+  // ── Manual Add ──────────────────────────────────────────────────────────────
+
+  const openAddModal = () => {
+    setAddForm(EMPTY_ADD_FORM);
+    setAddErrors(EMPTY_ADD_ERRORS);
+    setAddOpen(true);
+  };
+
+  const closeAddModal = () => {
+    setAddOpen(false);
+    setAddErrors(EMPTY_ADD_ERRORS);
+  };
+
+  function validateAddForm() {
+    const errors = { name: "", country: "" };
+    if (!addForm.name.trim()) errors.name = "Retailer name is required";
+    if (!addForm.country.trim()) errors.country = "Country is required";
+    setAddErrors(errors);
+    return !errors.name && !errors.country;
+  }
+
+  async function saveNewRetailer() {
+    if (!validateAddForm()) return;
+    setAdding(true);
+    try {
+      const response = await fetch("/app/retailers/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          retailers: [
+            {
+              name: addForm.name.trim(),
+              country: addForm.country.trim(),
+              localized_name: addForm.localized_name.trim(),
+            },
+          ],
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to add retailer");
+
+      toast.showSuccess("Retailer added");
+      closeAddModal();
+      loadRetailers({ targetPage: 1, search: searchQuery, limit: pageSize });
+      setPage(1);
+    } catch (err) {
+      toast.showError(err.message || "Failed to add retailer");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  // ── Search ──────────────────────────────────────────────────────────────────
+
+  const runSearch = () => {
+    setPage(1);
+    setSearchQuery(searchInput.trim());
+  };
+
+  const clearSearch = () => {
+    setSearchInput("");
+    setSearchQuery("");
+    setPage(1);
+  };
+
+  // ── Delete ──────────────────────────────────────────────────────────────────
 
   async function confirmDelete() {
     if (!deleteTarget?.id) return;
@@ -228,7 +297,18 @@ export default function Retailers() {
     }
   }
 
+  // ── Edit ────────────────────────────────────────────────────────────────────
+
+  function validateEditForm() {
+    const errors = { name: "", country: "" };
+    if (!editRetailer?.retailer_name?.trim()) errors.name = "Retailer name is required";
+    if (!editRetailer?.retailer_country?.trim()) errors.country = "Country is required";
+    setEditErrors(errors);
+    return !errors.name && !errors.country;
+  }
+
   async function updateRetailer() {
+    if (!validateEditForm()) return;
     try {
       const response = await fetch(`/app/retailers/${editRetailer.id}`, {
         method: "PUT",
@@ -237,7 +317,7 @@ export default function Retailers() {
         body: JSON.stringify({
           name: editRetailer.retailer_name,
           localized_name: editRetailer.retailer_name_localized,
-          city: editRetailer.retailer_city,
+          country: editRetailer.retailer_country,
         }),
       });
       const data = await response.json();
@@ -251,6 +331,8 @@ export default function Retailers() {
     }
   }
 
+  // ── Settings ─────────────────────────────────────────────────────────────────
+
   async function handleRequiredToggle(value) {
     setRetailerRequired(value);
     await fetch("/app/settings/", {
@@ -261,10 +343,12 @@ export default function Retailers() {
     });
   }
 
+  // ── Table rows ───────────────────────────────────────────────────────────────
+
   const tableRows = rows.map((r) => [
     displayCell(r.retailer_name),
     displayCell(r.retailer_name_localized),
-    displayCell(r.retailer_city),
+    displayCell(r.retailer_country),
     <div className="wa-table-actions" key={`actions-${r.id}`}>
       <Button
         size="slim"
@@ -273,8 +357,9 @@ export default function Retailers() {
             id: r.id,
             retailer_name: r.retailer_name || "",
             retailer_name_localized: r.retailer_name_localized || "",
-            retailer_city: r.retailer_city || "",
+            retailer_country: r.retailer_country || "",
           });
+          setEditErrors(EMPTY_ADD_ERRORS);
           setEditOpen(true);
         }}
       >
@@ -290,13 +375,18 @@ export default function Retailers() {
     </div>,
   ]);
 
+  const showPagination = !loading && paginationMeta.total > 0;
+
   return (
     <Page
       title="Retailers"
       primaryAction={{
-        content: "Import",
-        onAction: openImportModal,
+        content: "Add retailer",
+        onAction: openAddModal,
       }}
+      secondaryActions={[
+        { content: "Import", onAction: openImportModal },
+      ]}
     >
       <Tabs
         tabs={[
@@ -310,31 +400,31 @@ export default function Retailers() {
       {selectedTab === 0 && (
         <LegacyCard sectioned>
           <div className="wa-stack-12">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                runSearch();
-              }}
-              className="wa-compact-form-row"
-            >
-              <div className="wa-compact-form-row__field">
-                <TextField
-                  label="Search retailers"
-                  labelHidden
-                  placeholder="Search by name or city"
-                  value={searchInput}
-                  onChange={setSearchInput}
-                  clearButton
-                  onClearButtonClick={clearSearch}
-                  autoComplete="off"
-                  connectedRight={<Button onClick={runSearch}>Search</Button>}
-                />
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 260px", minWidth: 220 }}>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    runSearch();
+                  }}
+                >
+                  <TextField
+                    label="Search retailers"
+                    labelHidden
+                    placeholder="Search by name, country or city"
+                    value={searchInput}
+                    onChange={setSearchInput}
+                    clearButton
+                    onClearButtonClick={clearSearch}
+                    autoComplete="off"
+                    connectedRight={
+                      <Button onClick={runSearch}>Search</Button>
+                    }
+                  />
+                </form>
               </div>
-            </form>
-
-            <Link removeUnderline onClick={downloadSample}>
-              Download sample Excel
-            </Link>
+              <Button onClick={downloadSample}>Download sample</Button>
+            </div>
 
             {loading ? (
               <LoadingPanel label="Loading retailers..." />
@@ -343,17 +433,25 @@ export default function Retailers() {
                 heading="No retailers found"
                 image=""
                 action={{
+                  content: "Add retailer",
+                  onAction: openAddModal,
+                }}
+                secondaryAction={{
                   content: "Import retailers",
                   onAction: openImportModal,
                 }}
               >
-                <p>Import retailers or adjust your search filters.</p>
+                <p>
+                  {searchQuery
+                    ? "Try adjusting your search or add a new retailer."
+                    : "Add a retailer manually or import a list from Excel."}
+                </p>
               </EmptyState>
             ) : (
               <div className="wa-table-scroll">
                 <DataTable
                   columnContentTypes={["text", "text", "text", "text"]}
-                  headings={["Retailer name", "Localized name", "City", "Actions"]}
+                  headings={["Retailer name", "Localized name", "Country", "Actions"]}
                   rows={tableRows}
                 />
               </div>
@@ -408,6 +506,54 @@ export default function Retailers() {
         </LegacyCard>
       )}
 
+      {/* ── Add Retailer Modal ── */}
+      <Modal
+        open={addOpen}
+        onClose={closeAddModal}
+        title="Add retailer"
+        primaryAction={{
+          content: "Save",
+          onAction: saveNewRetailer,
+          loading: adding,
+        }}
+        secondaryActions={[{ content: "Cancel", onAction: closeAddModal }]}
+      >
+        <Modal.Section>
+          <div className="wa-stack-12">
+            <TextField
+              label="Retailer name"
+              value={addForm.name}
+              onChange={(v) => {
+                setAddForm((p) => ({ ...p, name: v }));
+                if (addErrors.name) setAddErrors((p) => ({ ...p, name: "" }));
+              }}
+              autoComplete="off"
+              error={addErrors.name}
+              requiredIndicator
+            />
+            <TextField
+              label="Country"
+              value={addForm.country}
+              onChange={(v) => {
+                setAddForm((p) => ({ ...p, country: v }));
+                if (addErrors.country) setAddErrors((p) => ({ ...p, country: "" }));
+              }}
+              autoComplete="off"
+              error={addErrors.country}
+              requiredIndicator
+            />
+            <TextField
+              label="Localized name"
+              value={addForm.localized_name}
+              onChange={(v) => setAddForm((p) => ({ ...p, localized_name: v }))}
+              autoComplete="off"
+              helpText="Optional translated or alternate name for this store's language."
+            />
+          </div>
+        </Modal.Section>
+      </Modal>
+
+      {/* ── Import Modal ── */}
       <Modal
         open={openImport}
         onClose={closeImportModal}
@@ -423,19 +569,20 @@ export default function Retailers() {
         <Modal.Section>
           <div className="wa-stack-12">
             <Banner tone="info">
-              Empty fields are shown as "-" in the preview and stored as blank values.
+              Required columns: <strong>Retailer Name</strong>, <strong>Country</strong>.
+              Optional: Localized Name. Empty fields are stored as blank values.
             </Banner>
             <DropZone accept=".csv,.xlsx" onDrop={handleDrop}>
               <DropZone.FileUpload />
             </DropZone>
-            <Link removeUnderline onClick={downloadSample}>
+            <Button plain onClick={downloadSample}>
               Download sample Excel
-            </Link>
+            </Button>
             {preview.length > 0 ? (
               <div className="wa-table-scroll">
                 <DataTable
                   columnContentTypes={["text", "text", "text"]}
-                  headings={["Retailer name", "Localized name", "City"]}
+                  headings={["Retailer name", "Localized name", "Country"]}
                   rows={preview}
                 />
               </div>
@@ -444,6 +591,7 @@ export default function Retailers() {
         </Modal.Section>
       </Modal>
 
+      {/* ── Delete Confirmation Modal ── */}
       <Modal
         open={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
@@ -467,21 +615,38 @@ export default function Retailers() {
         </Modal.Section>
       </Modal>
 
+      {/* ── Edit Modal ── */}
       {editRetailer ? (
         <Modal
           open={editOpen}
           onClose={() => setEditOpen(false)}
           title="Edit retailer"
           primaryAction={{ content: "Save", onAction: updateRetailer }}
+          secondaryActions={[{ content: "Cancel", onAction: () => setEditOpen(false) }]}
         >
           <Modal.Section>
             <div className="wa-stack-12">
               <TextField
                 label="Retailer name"
                 value={editRetailer.retailer_name}
-                onChange={(v) =>
-                  setEditRetailer({ ...editRetailer, retailer_name: v })
-                }
+                onChange={(v) => {
+                  setEditRetailer({ ...editRetailer, retailer_name: v });
+                  if (editErrors.name) setEditErrors((p) => ({ ...p, name: "" }));
+                }}
+                error={editErrors.name}
+                requiredIndicator
+                autoComplete="off"
+              />
+              <TextField
+                label="Country"
+                value={editRetailer.retailer_country || ""}
+                onChange={(v) => {
+                  setEditRetailer({ ...editRetailer, retailer_country: v });
+                  if (editErrors.country) setEditErrors((p) => ({ ...p, country: "" }));
+                }}
+                error={editErrors.country}
+                requiredIndicator
+                autoComplete="off"
               />
               <TextField
                 label="Localized name"
@@ -493,13 +658,7 @@ export default function Retailers() {
                   })
                 }
                 helpText="Optional translated or alternate name for this store's language."
-              />
-              <TextField
-                label="City"
-                value={editRetailer.retailer_city || ""}
-                onChange={(v) =>
-                  setEditRetailer({ ...editRetailer, retailer_city: v })
-                }
+                autoComplete="off"
               />
             </div>
           </Modal.Section>

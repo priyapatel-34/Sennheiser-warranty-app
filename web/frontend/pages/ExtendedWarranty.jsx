@@ -111,6 +111,7 @@ export default function ExtendedWarrantyAdmin() {
     const [currency, setCurrency] = useState(null);
     const [productSearchInput, setProductSearchInput] = useState("");
     const [productSearchQuery, setProductSearchQuery] = useState("");
+    const [productStatusFilter, setProductStatusFilter] = useState("");
     const [productsLoading, setProductsLoading] = useState(false);
     const [productsLoaded, setProductsLoaded] = useState(false);
     const [page, setPage] = useState(1);
@@ -147,9 +148,14 @@ export default function ExtendedWarrantyAdmin() {
         resourceIDResolver: (p) => p.id,
     });
 
+    // Ref to suppress the extra useEffect run triggered by resetProductsTabState
+    // state updates when first entering the products tab.
+    const suppressNextProductsLoadRef = useRef(false);
+
     const resetProductsTabState = useCallback(() => {
         setProductSearchInput("");
         setProductSearchQuery("");
+        setProductStatusFilter("");
         setPage(1);
         setCursorStack([null]);
         setProductsLoaded(false);
@@ -178,6 +184,7 @@ export default function ExtendedWarrantyAdmin() {
     const loadProducts = async ({
         targetPage = page,
         search = productSearchQuery,
+        status = productStatusFilter,
         jumpLast = false,
     } = {}) => {
         setProductsLoading(true);
@@ -193,6 +200,7 @@ export default function ExtendedWarrantyAdmin() {
                 if (cursor) params.set("cursor", cursor);
             }
             if (search) params.set("q", search);
+            if (status) params.set("status", status);
 
             const r = await fetch(`${API_BASE}/products?${params.toString()}`);
             if (!r.ok) throw new Error();
@@ -279,20 +287,22 @@ export default function ExtendedWarrantyAdmin() {
         prevTabRef.current = tab;
 
         if (enteringProductsTab) {
+            // Suppress the follow-up effect run caused by resetProductsTabState
+            // clearing page/search/status state (prevents duplicate load).
+            suppressNextProductsLoadRef.current = true;
             resetProductsTabState();
-            loadProducts({ targetPage: 1, search: "" });
-        } else {
-            loadProducts({ targetPage: page, search: productSearchQuery });
+            loadProducts({ targetPage: 1, search: "", status: "" });
+            return;
         }
 
-        fetch(`${API_BASE}/settings`)
-            .then((r) => (r.ok ? r.json() : null))
-            .then((data) => {
-                const pricingType = data?.settings?.warrantyPricingType;
-                if (pricingType) setWarrantyPricingType(pricingType);
-            })
-            .catch(() => { });
-    }, [tab, page, productSearchQuery, resetProductsTabState]);
+        if (suppressNextProductsLoadRef.current) {
+            suppressNextProductsLoadRef.current = false;
+            return;
+        }
+
+        loadProducts({ targetPage: page, search: productSearchQuery, status: productStatusFilter });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tab, page, productSearchQuery, productStatusFilter, resetProductsTabState]);
 
     const runProductSearch = () => {
         setPage(1);
@@ -307,11 +317,17 @@ export default function ExtendedWarrantyAdmin() {
         setCursorStack([null]);
     };
 
+    const handleStatusFilterChange = (value) => {
+        setProductStatusFilter(value);
+        setPage(1);
+        setCursorStack([null]);
+    };
+
     const goToFirstPage = () => setPage(1);
     const goToPreviousPage = () => setPage((p) => Math.max(1, p - 1));
     const goToNextPage = () => setPage((p) => p + 1);
     const goToLastPage = () =>
-        loadProducts({ jumpLast: true, search: productSearchQuery });
+        loadProducts({ jumpLast: true, search: productSearchQuery, status: productStatusFilter });
 
     const addDuration = async () => {
         const duration = Number(newDuration);
@@ -696,7 +712,6 @@ export default function ExtendedWarrantyAdmin() {
                                     <p>Add +1 Year, +2 Year, or custom multiples of 12 months.</p>
                                 </EmptyState>
                             ) : (
-                                <div className="wa-table-scroll">
                                 <IndexTable
                                     resourceName={{ singular: "duration", plural: "durations" }}
                                     itemCount={durations.length}
@@ -739,7 +754,6 @@ export default function ExtendedWarrantyAdmin() {
                                         </IndexTable.Row>
                                     ))}
                                 </IndexTable>
-                                </div>
                             )}
                         </>
                     )}
@@ -782,24 +796,41 @@ export default function ExtendedWarrantyAdmin() {
                                     borderBottom: "1px solid #e1e3e5",
                                 }}
                             >
-                                <TextField
-                                    label="Search products"
-                                    labelHidden
-                                    value={productSearchInput}
-                                    onChange={setProductSearchInput}
-                                    placeholder="Search by product name or SKU…"
-                                    autoComplete="off"
-                                    clearButton
-                                    onClearButtonClick={clearProductSearch}
-                                    onKeyDown={(e) => {
-                                        if (e.key === "Enter") runProductSearch();
-                                    }}
-                                    connectedRight={
-                                        <Button variant="primary" onClick={runProductSearch}>
-                                            Search
-                                        </Button>
-                                    }
-                                />
+                                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+                                    <div style={{ flex: "1 1 260px", minWidth: 220 }}>
+                                        <TextField
+                                            label="Search products"
+                                            labelHidden
+                                            value={productSearchInput}
+                                            onChange={setProductSearchInput}
+                                            placeholder="Search by product name or SKU…"
+                                            autoComplete="off"
+                                            clearButton
+                                            onClearButtonClick={clearProductSearch}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter") runProductSearch();
+                                            }}
+                                            connectedRight={
+                                                <Button variant="primary" onClick={runProductSearch}>
+                                                    Search
+                                                </Button>
+                                            }
+                                        />
+                                    </div>
+                                    <div style={{ minWidth: 148 }}>
+                                        <Select
+                                            label="Status"
+                                            labelHidden
+                                            options={[
+                                                { label: "All statuses", value: "" },
+                                                { label: "Active", value: "active" },
+                                                { label: "Draft", value: "draft" },
+                                            ]}
+                                            value={productStatusFilter}
+                                            onChange={handleStatusFilterChange}
+                                        />
+                                    </div>
+                                </div>
                             </div>
 
                             {productsLoading ? (

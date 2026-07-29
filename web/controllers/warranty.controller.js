@@ -24,10 +24,6 @@ import {
   WARRANTY_TAG_TYPES,
 } from "../services/shopifyOrderTags.service.js";
 import { retailerSearchColumn } from "../services/retailerLocale.utils.js";
-import {
-  isSerialVerificationEnabled,
-  isSerialNumberImported,
-} from "../services/serialVerification.service.js";
 
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
@@ -2908,14 +2904,6 @@ export async function registerProducts(req, res) {
       }
     `);
 
-    /* ===============================
-       STORE-SPECIFIC SERIAL NUMBER VERIFICATION
-       Only stores that explicitly enable this setting are affected.
-       Stores that never enabled it keep the exact behaviour they had
-       before this feature existed.
-    =============================== */
-    const serialVerificationEnabled = await isSerialVerificationEnabled(shopId);
-
     const conn = await pool.getConnection();
     await conn.beginTransaction();
 
@@ -2932,15 +2920,6 @@ export async function registerProducts(req, res) {
 
         if (!/^[a-zA-Z0-9]{1,20}$/.test(serial)) {
           throw new Error("Invalid serial number");
-        }
-
-        if (serialVerificationEnabled) {
-          const isImportedSerial = await isSerialNumberImported(shopId, serial, conn);
-          if (!isImportedSerial) {
-            throw new Error(
-              "Invalid serial number. Please enter a valid serial number provided with your product."
-            );
-          }
         }
 
         const shopifyLineItemId = normalizeShopifyLineItemId(p.shopify_line_item_id);

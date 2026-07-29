@@ -302,21 +302,66 @@ export async function registerOrderWebhooks(admin) {
   const callbackUrl = `${appUrl.replace(/\/$/, "")}/api/webhooks`;
   const topics = ["ORDERS_PAID", "ORDERS_CREATE", "REFUNDS_CREATE"];
 
-  for (const topic of topics) {
-    await admin.request(
-      `
-      mutation webhookSubscriptionCreate($topic: WebhookSubscriptionTopic!, $callbackUrl: URL!) {
-        webhookSubscriptionCreate(
-          topic: $topic
-          webhookSubscription: { format: JSON, callbackUrl: $callbackUrl }
-        ) {
-          userErrors { field message }
-          webhookSubscription { id }
-        }
+  // Fetch all existing webhook subscriptions for these topics in one query so
+  // we can skip topics that are already registered.  Previously this loop used
+  // sequential awaits which added ~1-2 s per topic (3-6 s total) on every auth.
+  const SUBSCRIPTION_MUTATION = `
+    mutation webhookSubscriptionCreate($topic: WebhookSubscriptionTopic!, $callbackUrl: URL!) {
+      webhookSubscriptionCreate(
+        topic: $topic
+        webhookSubscription: { format: JSON, callbackUrl: $callbackUrl }
+      ) {
+        userErrors { field message }
+        webhookSubscription { id }
       }
-      `,
-      { variables: { topic, callbackUrl } }
+    }
+  `;
+
+  // Query existing subscriptions for all three topics at once.
+  const existingResponse = await admin.request(`
+    query {
+      ordersPayedSubs: webhookSubscriptions(first: 5, topics: ORDERS_PAID) {
+        edges { node { endpoint { ... on WebhookHttpEndpoint { callbackUrl } } } }
+      }
+      ordersCreateSubs: webhookSubscriptions(first: 5, topics: ORDERS_CREATE) {
+        edges { node { endpoint { ... on WebhookHttpEndpoint { callbackUrl } } } }
+      }
+      refundsCreateSubs: webhookSubscriptions(first: 5, topics: REFUNDS_CREATE) {
+        edges { node { endpoint { ... on WebhookHttpEndpoint { callbackUrl } } } }
+      }
+    }
+  `);
+
+  const existingByTopic = {
+    ORDERS_PAID:    existingResponse.data?.ordersPayedSubs?.edges  || [],
+    ORDERS_CREATE:  existingResponse.data?.ordersCreateSubs?.edges || [],
+    REFUNDS_CREATE: existingResponse.data?.refundsCreateSubs?.edges || [],
+  };
+
+  const isAlreadyRegistered = (topic) =>
+    existingByTopic[topic].some(
+      (e) => e.node?.endpoint?.callbackUrl === callbackUrl
     );
-    console.log(`✅ ${topic} webhook registered → ${callbackUrl}`);
+
+  // Register only missing topics, all in parallel.
+  const pending = topics.filter((t) => !isAlreadyRegistered(t));
+
+  if (pending.length === 0) {
+    console.log("✅ All order webhooks already registered — skipping");
+    return;
   }
+
+  await Promise.all(
+    pending.map(async (topic) => {
+      const result = await admin.request(SUBSCRIPTION_MUTATION, {
+        variables: { topic, callbackUrl },
+      });
+      const errors = result.data?.webhookSubscriptionCreate?.userErrors || [];
+      if (errors.length) {
+        console.error(`❌ ${topic} webhook registration errors:`, errors);
+      } else {
+        console.log(`✅ ${topic} webhook registered → ${callbackUrl}`);
+      }
+    })
+  );
 }

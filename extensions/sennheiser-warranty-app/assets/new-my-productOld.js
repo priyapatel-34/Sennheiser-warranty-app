@@ -92,34 +92,30 @@ function getWarrantyStatus(warrantyEnd) {
       
       <div class="product-wrapper">
         <div class="mp-card-img">
-          ${
-            p.image
-              ? `<img src="${p.image}" alt="${p.title}">`
-              : `<div class="no-image"></div>`
+          ${p.image
+            ? `<img src="${p.image}" alt="${p.title}">`
+            : `<div class="no-image"></div>`
           }
         </div>
         <h3>${p.title}</h3>
-        ${
-          p.is_registered  
+        ${p.is_registered
             ? ""
-            : `<h2 class="gray-text">Purchased on: ${formatDate(p.purchase_date)}</h2>`
-        }
+            : `<h2 class="warranty-gray-text">Purchased on: ${formatDate(p.purchase_date)}</h2>`
+          }
       </div>
 
       <div class="mp-card-body">
-        ${
-          p.is_registered
+        ${p.is_registered
             ? `
               <div class="expiry">
-                <span class="gray-text">Serial No.: ${
-                  p.serial_number || "-"
-                }</span>
+                <span class="warranty-gray-text">Serial No.: ${p.serial_number || "-"
+            }</span>
 
                 ${(() => {
-                  const status = getWarrantyStatus(p.warranty_end);
-                  if (!status) return "";
+              const status = getWarrantyStatus(p.warranty_end);
+              if (!status) return "";
 
-                  return `
+              return `
       <div class="mp-warranty-badge mp-${status.type}">
         <img
       class="mp-warranty-icon"
@@ -129,11 +125,11 @@ function getWarrantyStatus(warrantyEnd) {
         ${status.label}
       </div>
     `;
-                })()}
+            })()}
 
-                <span class=gray-text>Warranty Expiry: ${formatDate(
-                  p.warranty_end,
-                )}</span>
+                <span class=warranty-gray-text>Warranty Expiry: ${formatDate(
+              p.warranty_end,
+            )}</span>
               </div>
 
               <button
@@ -152,7 +148,7 @@ function getWarrantyStatus(warrantyEnd) {
                 ${web_register_label}
               </div>
             `
-        }
+          }
       </div>
     </div>
     </div>
@@ -291,7 +287,7 @@ function getWarrantyStatus(warrantyEnd) {
   document.addEventListener("click", (e) => {
     const backBtn = e.target.closest("#mp-detail-back-btn");
     if (!backBtn) return;
-  
+
     showMyProductsView();
   });
 
@@ -334,9 +330,8 @@ function getWarrantyStatus(warrantyEnd) {
       ).innerText = `Purchase date: ${formatDate(product.purchase_date)}`;
 
       // Serial Number
-      document.getElementById("mp-detail-serial").innerText = `Serial No: ${
-        product.serial_number || "-"
-      }`;
+      document.getElementById("mp-detail-serial").innerText = `Serial No: ${product.serial_number || "-"
+        }`;
 
       // Warranty Expiry
       document.getElementById("mp-detail-warranty").innerText =

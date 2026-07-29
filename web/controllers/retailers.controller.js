@@ -39,7 +39,7 @@ export async function getRetailers(req, res) {
         searchTerm
           ? `AND (
               retailer_name LIKE ?
-              OR retailer_city LIKE ?
+              OR retailer_country LIKE ?
               OR retailer_name_ja LIKE ?
             )`
           : ""
@@ -59,11 +59,11 @@ export async function getRetailers(req, res) {
       SELECT
         id,
         retailer_name,
-        retailer_city,
+        retailer_country,
         retailer_name_ja
       FROM retailers
       WHERE ${whereClause}
-      ORDER BY retailer_name ASC
+      ORDER BY created_at DESC
       LIMIT ? OFFSET ?
       `,
       [shopId, ...searchParams, pageSize, offset]
@@ -74,7 +74,7 @@ export async function getRetailers(req, res) {
         id: r.id,
         retailer_name: r.retailer_name,
         retailer_name_localized: r.retailer_name_ja,
-        retailer_city: r.retailer_city,
+        retailer_country: r.retailer_country,
       })),
       pagination: {
         total,
@@ -131,10 +131,10 @@ export async function importRetailers(req, res) {
     await pool.query(
       `
       INSERT INTO retailers
-        (shop_id, retailer_name, retailer_city, retailer_name_ja)
+        (shop_id, retailer_name, retailer_country, retailer_name_ja)
       VALUES ?
       ON DUPLICATE KEY UPDATE
-        retailer_city = VALUES(retailer_city),
+        retailer_country = VALUES(retailer_country),
         retailer_name_ja = VALUES(retailer_name_ja),
         is_active = 1,
         updated_at = CURRENT_TIMESTAMP
@@ -168,7 +168,9 @@ export async function updateRetailer(req, res) {
     const name = String(req.body?.name || req.body?.retailer_name || "").trim();
     if (!name) return res.status(400).json({ error: "Retailer name is required" });
 
-    const city = String(req.body?.city || req.body?.retailer_city || "").trim() || null;
+    const country = String(req.body?.country || req.body?.retailer_country || "").trim();
+    if (!country) return res.status(400).json({ error: "Country is required" });
+
     const localizedName =
       String(
         req.body?.localized_name ||
@@ -181,10 +183,10 @@ export async function updateRetailer(req, res) {
     const [result] = await pool.query(
       `
       UPDATE retailers
-      SET retailer_name = ?, retailer_city = ?, retailer_name_ja = ?, updated_at = CURRENT_TIMESTAMP
+      SET retailer_name = ?, retailer_country = ?, retailer_name_ja = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND shop_id = ? AND is_active = 1
       `,
-      [name, city, localizedName, retailerId, shopId]
+      [name, country, localizedName, retailerId, shopId]
     );
 
     if (!result.affectedRows) {

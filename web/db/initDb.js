@@ -1,35 +1,41 @@
 import { pool } from "./mysql.js";
 
-async function columnExists(table, column) {
-  const [rows] = await pool.query(
-    `
-    SELECT COUNT(*) AS cnt
+// ── Schema cache ─────────────────────────────────────────────────────────────
+// Loaded once at the start of ensureSchemaUpdates() — replaces 30+ individual
+// information_schema round-trips with two bulk queries (~1-2 s → ~100 ms).
+
+let _columnCache = null;   // Set<"table.column">
+let _indexCache  = null;   // Set<"table.indexName">
+
+async function loadSchemaCache() {
+  const [colRows] = await pool.query(`
+    SELECT TABLE_NAME, COLUMN_NAME
     FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = ?
-      AND COLUMN_NAME = ?
-    `,
-    [table, column]
-  );
-  return rows[0].cnt > 0;
-}
+  `);
+  _columnCache = new Set(colRows.map((r) => `${r.TABLE_NAME}.${r.COLUMN_NAME}`));
 
-async function indexExists(table, indexName) {
-  const [[row]] = await pool.query(
-    `
-    SELECT COUNT(*) AS cnt
+  const [idxRows] = await pool.query(`
+    SELECT TABLE_NAME, INDEX_NAME
     FROM information_schema.STATISTICS
     WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = ?
-      AND INDEX_NAME = ?
-    `,
-    [table, indexName]
-  );
-  return row.cnt > 0;
+  `);
+  _indexCache = new Set(idxRows.map((r) => `${r.TABLE_NAME}.${r.INDEX_NAME}`));
+}
+
+function columnExists(table, column) {
+  return Promise.resolve(_columnCache.has(`${table}.${column}`));
+}
+
+function indexExists(table, indexName) {
+  return Promise.resolve(_indexCache.has(`${table}.${indexName}`));
 }
 
 /** Additive schema updates for existing installs (no migration framework). */
 async function ensureSchemaUpdates() {
+  // Pre-load all column/index metadata in two queries instead of 30+ individual
+  // information_schema round-trips.  This is the main source of slow cold starts.
+  await loadSchemaCache();
   if (!(await columnExists("registered_products", "shopify_variant_id"))) {
     await pool.query(`
       ALTER TABLE registered_products
@@ -78,17 +84,7 @@ async function ensureSchemaUpdates() {
   ];
 
   for (const [table, indexName, columns] of searchIndexes) {
-    const [[exists]] = await pool.query(
-      `
-      SELECT COUNT(*) AS cnt
-      FROM information_schema.STATISTICS
-      WHERE TABLE_SCHEMA = DATABASE()
-        AND TABLE_NAME = ?
-        AND INDEX_NAME = ?
-      `,
-      [table, indexName]
-    );
-    if (!exists.cnt) {
+    if (!(await indexExists(table, indexName))) {
       await pool.query(`CREATE INDEX ${indexName} ON ${table} (${columns})`);
     }
   }
@@ -215,17 +211,7 @@ async function ensureSchemaUpdates() {
   ];
 
   for (const [table, indexName, columns] of refundIndexes) {
-    const [[exists]] = await pool.query(
-      `
-      SELECT COUNT(*) AS cnt
-      FROM information_schema.STATISTICS
-      WHERE TABLE_SCHEMA = DATABASE()
-        AND TABLE_NAME = ?
-        AND INDEX_NAME = ?
-      `,
-      [table, indexName]
-    );
-    if (!exists.cnt) {
+    if (!(await indexExists(table, indexName))) {
       await pool.query(`CREATE INDEX ${indexName} ON ${table} (${columns})`);
     }
   }
@@ -406,20 +392,6 @@ async function ensureSchemaUpdates() {
     `);
     console.log("✅ Added retailers.retailer_name_ja");
   }
-
-  /* -----------------------------
-     STORE-SPECIFIC SERIAL NUMBER VERIFICATION
-     (additive for existing installs; default OFF so existing
-     stores keep their current registration behaviour unchanged)
-  ------------------------------ */
-  if (!(await columnExists("store_settings", "serial_verification_enabled"))) {
-    await pool.query(`
-      ALTER TABLE store_settings
-      ADD COLUMN serial_verification_enabled TINYINT(1) NOT NULL DEFAULT 0
-      AFTER retailer_required
-    `);
-    console.log("✅ Added store_settings.serial_verification_enabled");
-  }
 }
 
 export async function initDb() {
@@ -563,12 +535,6 @@ export async function initDb() {
 
         retailer_required TINYINT(1) NOT NULL DEFAULT 1,
 
-        -- Store-specific serial number verification toggle.
-        -- Defaults to OFF so existing stores keep registering exactly as
-        -- they do today. Only stores that explicitly enable this use the
-        -- imported_serial_numbers allow-list during registration.
-        serial_verification_enabled TINYINT(1) NOT NULL DEFAULT 0,
-
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
           ON UPDATE CURRENT_TIMESTAMP,
@@ -579,35 +545,6 @@ export async function initDb() {
     `);
 
     console.log("✅ Store settings table ready");
-
-    /* -----------------------------
-       IMPORTED SERIAL NUMBERS
-       (Per-shop allow-list used only when
-       store_settings.serial_verification_enabled = 1)
-    ------------------------------ */
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS imported_serial_numbers (
-        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        shop_id BIGINT UNSIGNED NOT NULL,
-
-        -- Normalized (trimmed + uppercased) so lookups during
-        -- registration are a single indexed equality match.
-        serial_number VARCHAR(255) NOT NULL,
-
-        imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-          ON UPDATE CURRENT_TIMESTAMP,
-
-        -- Same serial number can exist independently for different shops,
-        -- but never twice for the same shop.
-        UNIQUE KEY uniq_shop_serial (shop_id, serial_number),
-        INDEX idx_shop_created (shop_id, created_at),
-        FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
-      )
-    `);
-
-    console.log("✅ Imported serial numbers table ready");
 
     /* -----------------------------
        EXTENDED WARRANTY DURATIONS

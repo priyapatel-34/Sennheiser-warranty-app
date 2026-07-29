@@ -24,9 +24,11 @@ import { formatDate } from "../utils/formatDate.js";
 const PAGE_SIZE = 25;
 
 const WARRANTY_TYPE_OPTIONS = [
-  { label: "All warranty types", value: "all" },
-  { label: "Standard Warranty", value: "standard" },
-  { label: "Extended Warranty", value: "extended" },
+  { label: "All statuses", value: "all" },
+  { label: "Standard warranty", value: "standard" },
+  { label: "Extended warranty", value: "extended" },
+  { label: "Active warranty", value: "extended_active" },
+  { label: "Pending payment", value: "extended_pending" },
 ];
 
 const PURCHASE_TYPE_OPTIONS = [
@@ -44,22 +46,24 @@ const sectionLabelStyle = {
   marginBottom: 4,
 };
 
-function TruncatedProductName({ name }) {
-  if (!name) return "—";
+function TruncatedText({ value, maxWidth = "180px", bold = false }) {
+  if (!value) return "—";
   return (
     <span
-      title={name}
+      title={value}
       style={{
         display: "block",
-        maxWidth: "220px",
+        maxWidth,
         overflow: "hidden",
         textOverflow: "ellipsis",
         whiteSpace: "nowrap",
       }}
     >
-      <Text as="span" fontWeight="semibold">
-        {name}
-      </Text>
+      {bold ? (
+        <Text as="span" fontWeight="semibold">{value}</Text>
+      ) : (
+        value
+      )}
     </span>
   );
 }
@@ -161,16 +165,6 @@ export default function RegisteredProductsTable() {
         }
 
         const res = await fetch(`/app/registered-products?${params.toString()}`);
-
-        const contentType = res.headers.get("content-type");
-
-        if (!contentType?.includes("application/json")) {
-          const text = await res.text();
-          console.error("Server returned:", text);
-
-          throw new Error("Server returned HTML instead of JSON.");
-        }
-
         const json = await res.json();
 
         if (!res.ok) {
@@ -330,15 +324,15 @@ export default function RegisteredProductsTable() {
                     }
                   />
                 </div>
-                <div style={{ minWidth: 180 }}>
+                <div style={{ minWidth: 190 }}>
                   <Select
-                    label="Warranty type"
+                    label="Warranty status"
                     labelHidden
                     options={WARRANTY_TYPE_OPTIONS}
                     value={warrantyTypeFilter}
-                    onChange={v => {
-                      setPage(1);
+                    onChange={(v) => {
                       setWarrantyTypeFilter(v);
+                      setPage(1);
                     }}
                   />
                 </div>
@@ -348,9 +342,9 @@ export default function RegisteredProductsTable() {
                     labelHidden
                     options={PURCHASE_TYPE_OPTIONS}
                     value={purchaseTypeFilter}
-                    onChange={v => {
-                      setPage(1);
+                    onChange={(v) => {
                       setPurchaseTypeFilter(v);
+                      setPage(1);
                     }}
                   />
                 </div>
@@ -409,9 +403,11 @@ export default function RegisteredProductsTable() {
                         onClick={() => openRegistrationDetails(item)}
                       >
                         <IndexTable.Cell>{item.id}</IndexTable.Cell>
-                        <IndexTable.Cell>{item.customer_name || "—"}</IndexTable.Cell>
                         <IndexTable.Cell>
-                          <TruncatedProductName name={item.product_name} />
+                          <TruncatedText value={item.customer_name} maxWidth="160px" />
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>
+                          <TruncatedText value={item.product_name} maxWidth="220px" bold />
                         </IndexTable.Cell>
                         <IndexTable.Cell>{item.serial_number}</IndexTable.Cell>
                         <IndexTable.Cell>

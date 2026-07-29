@@ -9,7 +9,6 @@ export const APP_NAV_ITEMS = [
   { path: "/retailers", label: "Retailers", shortLabel: "Retailers" },
   { path: "/registeredProducts", label: "Registered Products", shortLabel: "Products" },
   { path: "/emailSettings", label: "Email Settings", shortLabel: "Email" },
-  { path: "/serialNumbers", label: "Serial Numbers Settings", shortLabel: "Serials" },
 ];
 
 function useIsNarrowView(breakpoint = 768) {
