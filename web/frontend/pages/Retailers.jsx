@@ -306,7 +306,7 @@ export default function Retailers() {
   function validateEditForm() {
     const errors = { name: "", city: "" };
     if (!editRetailer?.retailer_name?.trim()) errors.name = "Retailer name is required";
-    if (!editRetailer?.retailer_city?.trim()) errors.city = "City is required";
+    if (!editRetailer?.retailer_city?.trim()) errors.country = "Country is required";
     setEditErrors(errors);
     return !errors.name && !errors.city;
   }

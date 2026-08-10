@@ -68,6 +68,35 @@
         return document.getElementById("ew-page-loader-overlay");
     }
 
+    function ensureOfferDom() {
+        let section = getOfferSection();
+        if (!section) {
+            section = document.createElement("div");
+            section.id = "ew-offer-section";
+            section.className = "ew-offer-section hidden";
+            const host = document.querySelector(".register-warranty-form-section") || document.body;
+            host.appendChild(section);
+        }
+
+        let overlay = getLoaderOverlay();
+        if (!overlay) {
+            overlay = document.createElement("div");
+            overlay.id = "ew-page-loader-overlay";
+            overlay.className = "ew-page-loader-overlay";
+            overlay.hidden = true;
+            overlay.innerHTML = `
+                <div class="ew-page-loader">
+                    <div class="ew-loader-spinner"></div>
+                    <p class="ew-loader-text">Loading extended warranty options...</p>
+                </div>
+            `;
+            const host = document.querySelector(".register-warranty-form-section") || document.body;
+            host.appendChild(overlay);
+        }
+
+        return { section, overlay };
+    }
+
     function setOverlayMessage(message) {
         const overlay = getLoaderOverlay();
         const textEl = overlay?.querySelector(".ew-loader-text");
@@ -80,7 +109,7 @@
         hideFormPanel();
         document.documentElement.classList.remove("ew-transition-pending");
 
-        const overlay = getLoaderOverlay();
+        const { overlay } = ensureOfferDom();
         if (!overlay) return false;
 
         setOverlayMessage(message);
@@ -91,12 +120,11 @@
     function hidePageLoader() {
         document.documentElement.classList.remove("ew-transition-pending");
 
-        const overlay = getLoaderOverlay();
+        const { section, overlay } = ensureOfferDom();
         if (overlay) {
             overlay.hidden = true;
         }
 
-        const section = getOfferSection();
         if (section) {
             hideLoader(section);
             section.classList.add("hidden");
@@ -223,7 +251,7 @@
             onSkip,
         } = options;
 
-        const section = document.getElementById("ew-offer-section");
+        const { section } = ensureOfferDom();
         if (!section || !offerData?.registration) return false;
 
         document.documentElement.classList.remove("ew-transition-pending");

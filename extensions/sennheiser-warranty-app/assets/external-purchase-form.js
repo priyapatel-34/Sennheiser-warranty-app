@@ -495,7 +495,8 @@
         serial_number: block.querySelector("[data-serial]").value.trim(),
       });
     });
-
+//The storefront form collects product, serial number, retailer, and purchase date, then posts to /apps/warranty/register. 
+// It handles validation, duplicate serials, and consent checkboxes, showing errors and disabling the submit button during submission.
     try {
       const res = await fetch("/apps/warranty/register", {
         method: "POST",

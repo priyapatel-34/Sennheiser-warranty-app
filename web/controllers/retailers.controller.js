@@ -174,8 +174,8 @@ export async function updateRetailer(req, res) {
     const name = String(req.body?.name || req.body?.retailer_name || "").trim();
     if (!name) return res.status(400).json({ error: "Retailer name is required" });
 
-    const city = String(req.body?.city || req.body?.retailer_city || "").trim();
-    if (!city) return res.status(400).json({ error: "City is required" });
+    const country = String(req.body?.city || req.body?.retailer_city || "").trim();
+    if (!country) return res.status(400).json({ error: "Country is required" });
 
     const localizedName =
       String(

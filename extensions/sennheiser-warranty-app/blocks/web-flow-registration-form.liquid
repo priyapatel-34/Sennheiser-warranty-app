@@ -43,6 +43,15 @@
   
     {% render 'ew-offer-transition' %}
 
+    <div id="ew-page-loader-overlay" class="ew-page-loader-overlay" hidden>
+      <div class="ew-page-loader">
+        <div class="ew-loader-spinner"></div>
+        <p class="ew-loader-text">Loading extended warranty options...</p>
+      </div>
+    </div>
+
+    <div id="ew-offer-section" class="ew-offer-section hidden"></div>
+
     <div class="tws-bg ew-registration-form-panel">
       <div class="tws-wrap">
       <div id="successMessage" class="tws-success-message">
