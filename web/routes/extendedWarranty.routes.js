@@ -28,6 +28,10 @@ import {
 
 const router = express.Router();
 
+/**
+ * Admin routes for configuring extended-warranty durations, plan mappings, and
+ * refund settings.
+ */
 router.get("/durations", getEWDurations);
 router.post("/durations", addEWDuration);
 router.delete("/durations/:id", deleteEWDuration);

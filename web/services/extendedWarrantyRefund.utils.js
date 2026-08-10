@@ -1,11 +1,19 @@
 const MS_PER_DAY = 86400000;
 
+/**
+ * Normalizes a date-like value to midnight so refund calculations compare
+ * whole days instead of partial timestamps.
+ */
 function toDateOnly(value) {
   const date = value instanceof Date ? new Date(value) : new Date(value);
   date.setHours(0, 0, 0, 0);
   return date;
 }
 
+/**
+ * Computes the non-negative number of whole days between two dates for
+ * coverage and refund math.
+ */
 function daysBetween(start, end) {
   if (!start || !end) return 0;
   return Math.max(0, Math.round((toDateOnly(end) - toDateOnly(start)) / MS_PER_DAY));

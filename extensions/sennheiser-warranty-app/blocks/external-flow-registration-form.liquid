@@ -180,14 +180,14 @@
   
   <div class="tooltip">
   <span class="wg-translatable">
-  Please search for an authorized retailer.
+  Please select an authorized retailer.
   </span>
   </div>
   
   </div>
   </div>
   
-  <input data-retailer-autocomplete>
+  <input data-retailer-autocomplete autocomplete="off" placeholder="Select Retailer">
   <div class="field-error"></div>
   
   </div>
@@ -203,9 +203,20 @@
   </span>
   
   <div class="tooltip">
-  <span class="wg-translatable">
-  The serial number can be found on the product packaging.
-  </span>
+  {% if block.settings.serial_number_help_url != blank %}
+    <a
+      href="{{ block.settings.serial_number_help_url }}"
+      target="_blank"
+      rel="noopener noreferrer"
+      class="wg-translatable"
+    >
+      The serial number can be found on the product packaging.
+    </a>
+  {% else %}
+    <span class="wg-translatable">
+      The serial number can be found on the product packaging.
+    </span>
+  {% endif %}
   </div>
   
   </div>
@@ -277,6 +288,12 @@
         "id": "my_products_link",
         "label": "My Products page Link",
         "info": "My products page link"
+      },
+      {
+        "type": "url",
+        "id": "serial_number_help_url",
+        "label": "Serial Number Help URL",
+        "info": "URL explaining where customers can find the serial number"
       }
     ]
   }

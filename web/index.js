@@ -55,6 +55,10 @@ app.get(
   // IMPORTANT: must accept `next` and call it — redirectToShopifyOrAppRoot()
   // is a separate middleware below. Returning the function without calling it
   // sends no HTTP response and causes a 524 timeout.
+  /**
+   * Finalizes the Shopify OAuth callback, persists the latest shop session,
+   * and runs install-time setup only on first install or reinstall.
+   */
   async (req, res, next) => {
     const session = res.locals.shopify.session;
 
@@ -151,6 +155,10 @@ app.use("/app/email-settings",     shopify.validateAuthenticatedSession(), email
 // ── App-proxy routes (storefront) ─────────────────────────────────────────
 app.use("/tws-warranty/*", authenticateUser);
 
+/**
+ * Validates Shopify app-proxy requests before storefront warranty routes are
+ * allowed to read session data or continue through the public flow.
+ */
 async function authenticateUser(req, res, next) {
   const { shop } = req.query;
   if (!shop) {
@@ -179,6 +187,10 @@ app.use(shopify.cspHeaders());
 app.use("/assets", express.static(join(STATIC_PATH, "assets")));
 
 // Google Search Console verification (public, no auth)
+/**
+ * Serves the Google Search Console verification file from the project root so
+ * the domain challenge remains publicly reachable without authentication.
+ */
 app.get("/googlea6475a09f81eb4bb.html", (_req, res) => {
   return res
     .status(200)
@@ -187,6 +199,10 @@ app.get("/googlea6475a09f81eb4bb.html", (_req, res) => {
 });
 
 // ── SPA catch-all (must be last) ──────────────────────────────────────────
+/**
+ * Returns the compiled frontend shell for any unmatched app route so React can
+ * handle client-side navigation inside the embedded Shopify app.
+ */
 app.use("/*", shopify.ensureInstalledOnShop(), async (_req, res) => {
   return res
     .status(200)
@@ -198,6 +214,10 @@ app.use("/*", shopify.ensureInstalledOnShop(), async (_req, res) => {
     );
 });
 
+/**
+ * Starts the Express server after database initialization and scheduled jobs
+ * have been set up so requests only reach a ready runtime.
+ */
 app.listen(PORT, () => {
   console.log(`✅ Server listening on port ${PORT}`);
 });

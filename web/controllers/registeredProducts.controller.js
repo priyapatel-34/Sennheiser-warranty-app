@@ -17,6 +17,10 @@ const SORT_COLUMNS = {
   warranty_end: "rp.warranty_end",
 };
 
+/**
+ * Resolves Shopify order names in bulk so the registered-products table can
+ * display merchant-friendly order numbers instead of raw numeric ids.
+ */
 async function fetchShopifyOrderNames(client, orderIds) {
   const map = new Map();
   const uniqueIds = [
@@ -60,6 +64,9 @@ async function fetchShopifyOrderNames(client, orderIds) {
   return map;
 }
 
+/**
+ * Looks up the Shopify variant title for a registered product detail view.
+ */
 async function fetchShopifyVariantTitle(client, variantId) {
   const id = String(variantId || "").trim();
   if (!id) return null;
@@ -84,6 +91,9 @@ async function fetchShopifyVariantTitle(client, variantId) {
   }
 }
 
+/**
+ * Retrieves the customer's phone number from Shopify for the detail drawer.
+ */
 async function fetchShopifyCustomerPhone(client, customerId) {
   const id = String(customerId || "").trim();
   if (!id) return null;
@@ -106,6 +116,9 @@ async function fetchShopifyCustomerPhone(client, customerId) {
   }
 }
 
+/**
+ * Formats a date into a stable YYYY-MM-DD string for API responses.
+ */
 function formatDateOnly(value) {
   if (!value) return null;
   if (value instanceof Date) {
@@ -115,11 +128,17 @@ function formatDateOnly(value) {
   return str.includes("T") ? str.split("T")[0] : str;
 }
 
+/**
+ * Resolves the customer-facing order number from a stored Shopify order id.
+ */
 function resolveOrderNumber(row, orderNameMap) {
   if (!row.shopify_order_id) return null;
   return orderNameMap.get(String(row.shopify_order_id)) || null;
 }
 
+/**
+ * Derives the warranty type label shown in the registered-products table.
+ */
 function formatWarrantyTypeLabel(row) {
   const status = row.extended_warranty_status;
   if (status === "active") return "Extended (Active)";
@@ -132,6 +151,9 @@ function formatWarrantyTypeLabel(row) {
   return "Standard";
 }
 
+/**
+ * Converts entitlement status into the admin-facing payment label.
+ */
 function formatPaymentStatus(entitlement) {
   if (!entitlement) return null;
   switch (entitlement.status) {
@@ -150,6 +172,9 @@ function formatPaymentStatus(entitlement) {
   }
 }
 
+/**
+ * Converts entitlement status into the admin-facing extended-warranty label.
+ */
 function formatExtendedWarrantyStatus(entitlement) {
   if (!entitlement) return null;
   switch (entitlement.status) {
@@ -168,6 +193,10 @@ function formatExtendedWarrantyStatus(entitlement) {
   }
 }
 
+/**
+ * Resolves the installed shop id for the active session so queries remain
+ * scoped to the merchant who is currently authenticated.
+ */
 async function resolveShopId(session) {
   const [[shopRow]] = await pool.query(
     `
@@ -181,6 +210,10 @@ async function resolveShopId(session) {
   return shopRow?.id ?? null;
 }
 
+/**
+ * Builds the SQL fragments used by the registered-products search endpoint so
+ * filters, sorting, and pagination stay consistent across requests.
+ */
 function buildSearchQuery(shopId, query, resolvedOrderIds = []) {
   const {
     q = "",

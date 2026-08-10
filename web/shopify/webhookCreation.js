@@ -1,10 +1,7 @@
 /**
- * Registers the PRODUCTS_UPDATE webhook if a subscription for that topic
- * pointing to this app's URL does not already exist.
- *
- * Running webhookSubscriptionCreate unconditionally on every auth callback
- * accumulates duplicate subscriptions; Shopify does not deduplicate them.
- * This guard prevents that.
+ * Registers the PRODUCTS_UPDATE webhook for the app when it is not already
+ * present. This keeps Shopify product changes flowing into the app without
+ * creating duplicate subscriptions on every auth callback.
  */
 export async function registerProductUpdateWebhook(admin) {
   const appUrl = (process.env.SHOPIFY_APP_URL || process.env.HOST || "").replace(/\/$/, "");

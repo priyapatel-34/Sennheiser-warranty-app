@@ -11,14 +11,26 @@ const TOOLBAR_ACTIONS = [
   { label: "Link", command: "createLink", title: "Insert link" },
 ];
 
+/**
+ * Provides a minimal rich-text editor for merchant-authored email body content
+ * so template customizations can be edited without leaving the admin app.
+ */
 export default function EmailRichTextEditor({ value, onChange, label }) {
   const editorRef = useRef(null);
 
+  /**
+   * Pushes the current editable HTML back into React state whenever the editor
+   * content changes.
+   */
   const syncValue = useCallback(() => {
     if (!editorRef.current) return;
     onChange(editorRef.current.innerHTML);
   }, [onChange]);
 
+  /**
+   * Runs the selected formatting command against the contenteditable surface and
+   * then syncs the updated HTML back into the parent form state.
+   */
   const runCommand = (command, valueArg) => {
     editorRef.current?.focus();
     if (command === "createLink") {

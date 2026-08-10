@@ -112,6 +112,10 @@ function formatOrderNo(item) {
   return item.order_number || "—";
 }
 
+/**
+ * Renders the registered-products table and detail modal used to review each
+ * customer's warranty registration history.
+ */
 export default function RegisteredProductsTable() {
   const toast = useToast();
   const [products, setProducts] = useState([]);

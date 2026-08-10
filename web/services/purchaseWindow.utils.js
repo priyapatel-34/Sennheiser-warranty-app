@@ -6,6 +6,12 @@ const EXTENSION_OFFER_EXPIRY_LABEL_MAX_DAYS = 10;
  * Registration timestamp for purchase-window math.
  * Must NOT use warranty_start or purchase_date — those are not registration time.
  */
+/**
+ * Normalizes registration timestamps for purchase-window calculations.
+ * The registration date is the anchor for extended-warranty eligibility, so
+ * this parser intentionally accepts a few storage formats and rejects invalid
+ * dates early.
+ */
 function parseDateValue(raw) {
   if (raw == null || raw === "") return null;
   if (raw instanceof Date) {
@@ -30,6 +36,10 @@ export function resolveRegistrationTimestamp(registered) {
   return parseDateValue(raw);
 }
 
+/**
+ * Converts a Date into a UTC day index so eligibility checks remain stable
+ * across time zones and daylight-saving boundaries.
+ */
 function utcDayIndex(date) {
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
 }
@@ -114,6 +124,10 @@ export function computePurchaseWindowState({
   return result;
 }
 
+/**
+ * Placeholder logger for purchase-window diagnostics when callers opt into
+ * contextual logging.
+ */
 function logPurchaseWindow(context, payload) {
   if (!context) return;
 }

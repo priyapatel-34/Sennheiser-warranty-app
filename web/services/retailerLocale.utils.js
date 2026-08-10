@@ -10,6 +10,10 @@ export function usesLocalizedRetailerSearch(lang) {
 }
 
 export function retailerSearchColumn(lang) {
+  /**
+   * Chooses the retailer name column that matches the shopper's locale so the
+   * storefront can search the correct localized retailer label.
+   */
   return usesLocalizedRetailerSearch(lang)
     ? "retailer_name_ja"
     : "retailer_name";

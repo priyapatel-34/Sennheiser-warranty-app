@@ -25,12 +25,20 @@ const INTERNAL_ORDER_TAG_PATTERNS = [
   /^extended-warranty-plan$/i,
 ];
 
+/**
+ * Detects tags that belong to the app's internal bookkeeping so they can be
+ * removed before writing customer-facing order tags back to Shopify.
+ */
 function isInternalOrderTag(tag) {
   const normalized = String(tag || "").trim();
   if (!normalized) return false;
   return INTERNAL_ORDER_TAG_PATTERNS.some(pattern => pattern.test(normalized));
 }
 
+/**
+ * Normalizes Shopify order ids from either numeric ids or gid strings so the
+ * tag sync logic can compare and persist a single canonical representation.
+ */
 export function normalizeOrderId(orderId) {
   if (orderId == null) return null;
   const str = String(orderId).trim();
@@ -41,22 +49,36 @@ export function normalizeOrderId(orderId) {
   return str;
 }
 
+/**
+ * Compares two order identifiers after normalizing them to the same format.
+ */
 function orderIdsMatch(left, right) {
   const a = normalizeOrderId(left);
   const b = normalizeOrderId(right);
   return Boolean(a && b && a === b);
 }
 
+/**
+ * Loads the stored Shopify session for a shop so tag updates can use the Admin
+ * API with the correct credentials.
+ */
 async function getShopSession(shop) {
   const sessions = await shopify.config.sessionStorage.findSessionsByShop(shop);
   return sessions?.[0] || null;
 }
 
+/**
+ * Builds a Shopify GraphQL gid for an order id when the Admin API expects one.
+ */
 function toOrderGid(orderId) {
   const numeric = normalizeOrderId(orderId);
   return numeric ? `gid://shopify/Order/${numeric}` : null;
 }
 
+/**
+ * Converts a Shopify tag field into a clean string array regardless of whether
+ * the source data arrives as a CSV string or a native list.
+ */
 function parseTags(tags) {
   if (Array.isArray(tags)) {
     return tags.map(tag => String(tag).trim()).filter(Boolean);
@@ -67,10 +89,17 @@ function parseTags(tags) {
     .filter(Boolean);
 }
 
+/**
+ * Removes app-internal tags before the tag set is written back to Shopify.
+ */
 function sanitizeOrderTags(tags) {
   return parseTags(tags).filter(tag => !isInternalOrderTag(tag));
 }
 
+/**
+ * Maps the warranty state to the set of customer-facing tags that should be on
+ * the corresponding Shopify order.
+ */
 function getRequiredTags(warrantyType) {
   switch (warrantyType) {
     case WARRANTY_TAG_TYPES.EXTENDED_PRODUCT:
@@ -83,6 +112,10 @@ function getRequiredTags(warrantyType) {
   }
 }
 
+/**
+ * Merges required warranty tags into the current tag set without duplicating
+ * any existing customer-facing values.
+ */
 function mergeTags(existingTags, requiredTags) {
   const merged = [...existingTags];
   for (const tag of requiredTags) {
@@ -93,10 +126,16 @@ function mergeTags(existingTags, requiredTags) {
   return merged;
 }
 
+/**
+ * Checks whether the current Shopify order already has every required tag.
+ */
 function tagsAreComplete(currentTags, requiredTags) {
   return requiredTags.every(tag => currentTags.includes(tag));
 }
 
+/**
+ * Extracts readable error text from a Shopify GraphQL response for logging.
+ */
 function getGraphqlErrors(result) {
   if (!result?.errors?.length) return null;
   return result.errors.map(error => error.message).join(", ");

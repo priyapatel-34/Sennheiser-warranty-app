@@ -8,6 +8,9 @@ import {
 
 const router = express.Router();
 
+/**
+ * Admin routes for retailer CRUD and CSV/import-style batch management.
+ */
 router.get("/", getRetailers);
 router.post("/import", importRetailers);
 router.put("/:id", updateRetailer);

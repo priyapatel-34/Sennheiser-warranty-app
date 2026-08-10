@@ -1,5 +1,8 @@
 import { Spinner, Text } from "@shopify/polaris";
 
+/**
+ * Renders a lightweight loading placeholder while a page waits for data.
+ */
 export default function LoadingPanel({ label = "Loading..." }) {
   return (
     <div

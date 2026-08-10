@@ -44,6 +44,7 @@
     if (!response.ok) return console.error("Failed to load order data");
 
     const data = await response.json();
+    const serialNumberHelpUrl = document.getElementById("serial_number_help_url")?.value || "";
 
     orderNumber.value = data.order_id.split("/").pop();
     orderDate.value = data.purchase_date;
@@ -63,7 +64,13 @@
                 <img src="${infoIconUrl}">
               </span>
               <div class="tooltip">
-                 <span>The serial number can be found on the product packaging, on the product itself, or inside the charging case (if applicable).</span>
+                ${
+                  serialNumberHelpUrl
+                    ? `<a href="${serialNumberHelpUrl}" target="_blank" rel="noopener noreferrer">
+                        The serial number can be found on the product packaging.
+                      </a>`
+                    : `<span>The serial number can be found on the product packaging.</span>`
+                }
               </div>
             </div>
           </div>

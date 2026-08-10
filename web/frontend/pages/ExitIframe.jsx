@@ -3,6 +3,10 @@ import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Banner, Layout, Page } from "@shopify/polaris";
 
+/**
+ * Handles Shopify's /exitiframe redirect route and safely escapes the iframe
+ * only when the requested target is another Shopify-owned origin.
+ */
 export default function ExitIframe() {
   const app = useAppBridge();
   const { search } = useLocation();

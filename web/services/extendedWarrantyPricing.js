@@ -12,12 +12,20 @@ export const DEFAULT_WARRANTY_PRICING_TYPE = WARRANTY_PRICING_TYPE.AMOUNT;
 
 export const MAX_WARRANTY_PERCENTAGE = 100;
 
+/**
+ * Normalizes a saved pricing type so downstream pricing logic only has to
+ * handle the supported amount or percentage modes.
+ */
 export function normalizeWarrantyPricingType(value) {
     return value === WARRANTY_PRICING_TYPE.PERCENTAGE
         ? WARRANTY_PRICING_TYPE.PERCENTAGE
         : WARRANTY_PRICING_TYPE.AMOUNT;
 }
 
+/**
+ * Converts a stored price value into a finite number or null when the source
+ * value is empty or invalid.
+ */
 export function parseProductPrice(value) {
     if (value == null || value === "") return null;
     const num = Number(value);
@@ -51,6 +59,10 @@ export function resolvePercentageBasePrice({
     return null;
 }
 
+/**
+ * Normalizes variant pricing inputs from either a raw number or a structured
+ * object so percentage calculations can consume a single shape.
+ */
 export function normalizeVariantPricing(input) {
     if (input == null) return null;
     if (typeof input === "number") {
@@ -65,6 +77,10 @@ export function normalizeVariantPricing(input) {
     };
 }
 
+/**
+ * Validates the admin-entered warranty price before it is stored or used to
+ * calculate the customer-facing warranty offer.
+ */
 export function validateConfiguredPlanPrice(price, pricingType) {
     const num = Number(price);
     const type = normalizeWarrantyPricingType(pricingType);
@@ -155,12 +171,19 @@ export function resolvePlanPrice({
     };
 }
 
+/**
+ * Formats a configured percentage for display in the admin UI and previews.
+ */
 export function formatPercentage(value) {
     const num = Number(value);
     if (!Number.isFinite(num)) return "";
     return `${num}%`;
 }
 
+/**
+ * Formats a configured warranty price for display in the appropriate currency
+ * or percentage representation depending on the selected pricing mode.
+ */
 export function formatConfiguredPlanPrice({
     configuredPrice,
     pricingType,

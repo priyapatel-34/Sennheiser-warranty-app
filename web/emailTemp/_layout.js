@@ -1,3 +1,7 @@
+/**
+ * Wraps template body HTML in the shared email chrome so every transactional
+ * email keeps the same outer structure and sign-off.
+ */
 export function renderEmailLayout({
   heading,
   bodyHtml,
@@ -18,6 +22,9 @@ export function renderEmailLayout({
   `;
 }
 
+/**
+ * Renders the button-style CTA used throughout the email templates.
+ */
 export function emailButton({ href, label }) {
   return `
     <a href="${href}" style="display:inline-block; background:#000; color:#fff; padding:12px 24px; text-decoration:none; border-radius:4px; font-weight:bold;">

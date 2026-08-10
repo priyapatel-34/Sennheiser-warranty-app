@@ -82,6 +82,10 @@ const styles = {
     },
 };
 
+/**
+ * Counts how many warranty plan mappings are already configured for a product
+ * so the admin grid can show completion state at a glance.
+ */
 function countConfiguredPlans(product) {
     if (typeof product?.configuredPlanCount === "number") {
         return product.configuredPlanCount;
@@ -98,6 +102,10 @@ function countConfiguredPlans(product) {
     return activeDurations.size;
 }
 
+/**
+ * Renders the extended-warranty admin screen where merchants manage durations,
+ * plan mappings, pricing rules, and reminder settings.
+ */
 export default function ExtendedWarrantyAdmin() {
     const toast = useToast();
     const [tab, setTab] = useState(0);
@@ -152,6 +160,10 @@ export default function ExtendedWarrantyAdmin() {
     // state updates when first entering the products tab.
     const suppressNextProductsLoadRef = useRef(false);
 
+    /**
+     * Clears the product search and pagination state when the admin needs to
+     * refresh the extended-warranty product list.
+     */
     const resetProductsTabState = useCallback(() => {
         setProductSearchInput("");
         setProductSearchQuery("");
@@ -166,6 +178,9 @@ export default function ExtendedWarrantyAdmin() {
         clearSelection();
     }, [clearSelection]);
 
+    /**
+     * Loads the configured extended-warranty duration rows for the current shop.
+     */
     const loadDurations = async () => {
         setDurationsLoading(true);
         try {
@@ -238,6 +253,9 @@ export default function ExtendedWarrantyAdmin() {
         }
     };
 
+    /**
+     * Loads the shop-level extended-warranty settings and reminder-day config.
+     */
     const loadSettings = async () => {
         setSettingsLoading(true);
         try {
@@ -304,12 +322,18 @@ export default function ExtendedWarrantyAdmin() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [tab, page, productSearchQuery, productStatusFilter, resetProductsTabState]);
 
+    /**
+     * Commits the current search text into the active query so the list refreshes.
+     */
     const runProductSearch = () => {
         setPage(1);
         setCursorStack([null]);
         setProductSearchQuery(productSearchInput.trim());
     };
 
+    /**
+     * Resets the product search filters back to the default browse state.
+     */
     const clearProductSearch = () => {
         setProductSearchInput("");
         setProductSearchQuery("");
@@ -317,6 +341,9 @@ export default function ExtendedWarrantyAdmin() {
         setCursorStack([null]);
     };
 
+    /**
+     * Updates the product status filter and returns the list to the first page.
+     */
     const handleStatusFilterChange = (value) => {
         setProductStatusFilter(value);
         setPage(1);

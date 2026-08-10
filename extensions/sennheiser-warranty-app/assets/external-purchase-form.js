@@ -236,44 +236,76 @@
     if (!input) return;
 
     const lang = getRetailerSearchLang();
+
     const list = document.createElement("div");
     list.className = "autocomplete-results";
     input.closest(".form-input").appendChild(list);
 
-    let timer = null;
-    let cached = [];
+    let retailers = [];
 
-    input.addEventListener("input", () => {
-      input.dataset.valid = "";
-      clearTimeout(timer);
+    async function loadRetailers() {
+      if (retailers.length) return;
 
-      const q = input.value.trim();
-      if (q.length < 2) {
-        list.innerHTML = "";
-        list.style.display = "none";
-        return;
-      }
-
-      timer = setTimeout(async () => {
+      try {
         const res = await fetch(
-          `/apps/warranty/retailers?q=${encodeURIComponent(q)}&lang=${lang}`,
+          `/apps/warranty/retailers?lang=${lang}`
         );
-        cached = await res.json();
 
-        list.innerHTML = cached
-          .map(
-            (r) => `
-          <div class="autocomplete-item" data-name="${getRetailerDisplayName(r, lang)}" data-name-en="${getRetailerDisplayName(r, 'en')}">
+        retailers = await res.json();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function renderRetailers(items) {
+      list.innerHTML = items
+        .map(
+          (r) => `
+          <div
+            class="autocomplete-item"
+            data-name="${getRetailerDisplayName(r, lang)}"
+            data-name-en="${getRetailerDisplayName(r, 'en')}">
             ${getRetailerDisplayName(r, lang)}
           </div>
-        `,
-          )
-          .join("");
+        `
+        )
+        .join("");
 
-        list.style.display = cached.length ? "block" : "none";
-      }, 300);
+      list.style.display = items.length ? "block" : "none";
+    }
+
+    // Show all retailers on focus
+    input.addEventListener("focus", async () => {
+      input.dataset.valid = "";
+
+      await loadRetailers();
+
+      renderRetailers(retailers);
     });
 
+    // Reopen dropdown when clicking the input again
+    input.addEventListener("click", () => {
+      if (retailers.length) {
+        renderRetailers(retailers);
+      }
+    });
+
+    // Filter retailers while typing
+    input.addEventListener("input", () => {
+      input.dataset.valid = "";
+
+      const q = input.value.trim().toLowerCase();
+
+      const filtered = retailers.filter((r) =>
+        getRetailerDisplayName(r, lang)
+          .toLowerCase()
+          .includes(q)
+      );
+
+      renderRetailers(filtered);
+    });
+
+    // Select retailer
     list.addEventListener("click", (e) => {
       const item = e.target.closest(".autocomplete-item");
       if (!item) return;
@@ -281,9 +313,21 @@
       input.value = item.dataset.name;
       input.dataset.nameEn = item.dataset.nameEn;
       input.dataset.valid = "true";
+
       clearError(input);
+
       list.innerHTML = "";
       list.style.display = "none";
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener("click", (e) => {
+      const isInput = e.target === input;
+      const isList = list.contains(e.target);
+
+      if (!isInput && !isList) {
+        list.style.display = "none";
+      }
     });
   }
 
@@ -442,12 +486,11 @@
     window.ExtendedWarrantyOffer?.showPageLoader?.("Registering your product...");
 
     document.querySelectorAll(".external-products-wrapper").forEach((block) => {
+      const retailer = block.querySelector("[data-retailer-autocomplete]");
       payload.products.push({
-        product_id: block.querySelector("[data-autocomplete]").dataset
-          .productId,
+        product_id: block.querySelector("[data-autocomplete]").dataset.productId,
         product_name: block.querySelector("[data-autocomplete]").value,
-        retailer_name: block.querySelector("[data-retailer-autocomplete]")
-          .dataset.nameEn,
+        retailer_name: retailer.dataset.nameEn || "",
         purchase_date: block.querySelector("input[type=date]").value,
         serial_number: block.querySelector("[data-serial]").value.trim(),
       });

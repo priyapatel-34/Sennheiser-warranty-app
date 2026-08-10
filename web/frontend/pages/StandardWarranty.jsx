@@ -25,6 +25,10 @@ const STATUS_FILTER_OPTIONS = [
   { label: "Draft", value: "draft" },
 ];
 
+/**
+ * Renders the standard-warranty admin page where merchants configure warranty
+ * durations and assign them to products in bulk or one at a time.
+ */
 export default function WarrantyAdmin() {
   const toast = useToast();
   const [tab, setTab] = useState(0);
@@ -51,6 +55,9 @@ export default function WarrantyAdmin() {
   const [modalProductIds, setModalProductIds] = useState([]);
   const [selectedDuration, setSelectedDuration] = useState("");
 
+  /**
+   * Fetches the configured duration list for the active shop.
+   */
   const loadDurations = async () => {
     try {
       const r = await fetch(`${API_BASE}/durations`);
@@ -61,6 +68,10 @@ export default function WarrantyAdmin() {
     }
   };
 
+  /**
+   * Loads products for the warranty assignment table using the current search,
+   * status filter, and pagination state.
+   */
   const loadProducts = async ({
     targetPage = page,
     search = productSearchQuery,
@@ -145,12 +156,18 @@ export default function WarrantyAdmin() {
   }));
   durationOptions.unshift({ label: "N/A", value: "0" });
 
+  /**
+   * Applies the current search box contents as the active product filter.
+   */
   const runProductSearch = () => {
     setPage(1);
     setCursorStack([null]);
     setProductSearchQuery(productSearchInput.trim());
   };
 
+  /**
+   * Resets the product list back to the default unfiltered state.
+   */
   const clearProductSearch = () => {
     setProductSearchInput("");
     setProductSearchQuery("");
@@ -163,18 +180,29 @@ export default function WarrantyAdmin() {
     STATUS_FILTER_OPTIONS.find(option => option.value === statusFilter)?.label ||
     "All statuses";
 
+  /**
+   * Opens the warranty duration modal for one selected product.
+   */
   const openSingleModal = product => {
     setModalProductIds([product.id]);
     setSelectedDuration(product.duration ? String(product.duration) : "");
     setModalOpen(true);
   };
 
+  /**
+   * Opens the bulk-edit modal so the same warranty duration can be assigned to
+   * every currently selected product.
+   */
   const openBulkModal = () => {
     setModalProductIds(selectedResources);
     setSelectedDuration("");
     setModalOpen(true);
   };
 
+  /**
+   * Persists the selected warranty duration to the backend for one or many
+   * products.
+   */
   const saveWarranty = async () => {
     try {
       const r = await fetch(`${API_BASE}/bulk`, {

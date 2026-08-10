@@ -11,6 +11,11 @@ import {
 } from "./services/extendedWarranty.service.js";
 import { syncExtendedWarrantyOrderTags } from "./services/shopifyOrderTags.service.js";
 
+/**
+ * Extracts extended-warranty registration metadata from a Shopify line item.
+ * This allows webhook handlers to reconnect a paid order back to the pending
+ * registration and plan record that was created earlier in the flow.
+ */
 function extractEwAttributesFromLineItem(lineItem) {
   const attrs = lineItem.customAttributes || lineItem.properties || [];
   const map = {};
@@ -24,9 +29,15 @@ function extractEwAttributesFromLineItem(lineItem) {
   };
 }
 
+/**
+ * Collects all registration and plan identifiers referenced by an order so the
+ * activation flow can process both REST payloads and GraphQL line items.
+ */
 function collectActivationTargets(orderPayload, graphqlLineItems = []) {
   const targets = new Map();
 
+  // Preserve the latest plan id we see for a registration id because either
+  // webhook payload shape may arrive first depending on Shopify delivery timing.
   const addTarget = (registerId, planId = null) => {
     if (!registerId || !Number.isFinite(registerId)) return;
     const existing = targets.get(registerId);
@@ -53,6 +64,10 @@ function collectActivationTargets(orderPayload, graphqlLineItems = []) {
   return targets;
 }
 
+/**
+ * Normalizes Shopify payment states so the webhook only activates warranties
+ * once the source order has actually been paid.
+ */
 function isOrderPaid(orderPayload) {
   const status = String(
     orderPayload.financial_status || orderPayload.displayFinancialStatus || ""
@@ -60,6 +75,11 @@ function isOrderPaid(orderPayload) {
   return status === "paid" || status === "partially_paid";
 }
 
+/**
+ * Activates extended-warranty entitlements from a paid Shopify order payload.
+ * Called by the order-created and order-paid webhooks, with a GraphQL lookup to
+ * ensure line-item metadata is available before updating entitlement records.
+ */
 async function processExtendedWarrantyOrder(session, orderPayload) {
   if (!isOrderPaid(orderPayload)) {
     return;
@@ -234,6 +254,10 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
   }
 }
 
+/**
+ * Resolves the stored Shopify session for a webhook shop domain and delegates
+ * the order payload to the entitlement activation pipeline.
+ */
 async function handleOrderWebhook(topic, shop, body) {
   const payload = JSON.parse(body);
   const sessions = await shopify.config.sessionStorage.findSessionsByShop(shop);
@@ -292,6 +316,10 @@ export const OrderWebhookHandlers = {
   },
 };
 
+/**
+ * Registers the order and refund webhooks needed to keep warranty entitlements
+ * synchronized with Shopify order activity.
+ */
 export async function registerOrderWebhooks(admin) {
   const appUrl = process.env.SHOPIFY_APP_URL || process.env.HOST;
   if (!appUrl) {

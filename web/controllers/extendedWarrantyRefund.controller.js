@@ -11,6 +11,10 @@ import {
 } from "../services/extendedWarrantyRefund.service.js";
 import { pool } from "../db/mysql.js";
 
+/**
+ * Resolves the installed shop id for refund operations so all refund records
+ * stay scoped to the authenticated merchant.
+ */
 async function resolveShopId(session) {
     const [[shopRow]] = await pool.query(
         `SELECT id FROM shops WHERE shop_domain = ? AND is_installed = TRUE`,
@@ -19,10 +23,17 @@ async function resolveShopId(session) {
     return shopRow?.id ?? null;
 }
 
+/**
+ * Derives the actor label used in audit history for refund actions.
+ */
 function getActor(req, res) {
     return res.locals?.shopify?.session?.shop || "admin";
 }
 
+/**
+ * Lists refund requests for the current shop so the admin can review the
+ * refund queue and filter by status or search text.
+ */
 export async function listEWRefundRequests(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -49,6 +60,9 @@ export async function listEWRefundRequests(req, res) {
     }
 }
 
+/**
+ * Loads a single refund request with its audit trail for the detail drawer.
+ */
 export async function getEWRefundRequest(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -73,6 +87,10 @@ export async function getEWRefundRequest(req, res) {
     }
 }
 
+/**
+ * Approves a refund request and triggers the downstream approval email and
+ * audit logging flow.
+ */
 export async function approveEWRefundRequest(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -100,6 +118,9 @@ export async function approveEWRefundRequest(req, res) {
     }
 }
 
+/**
+ * Rejects a refund request and records the merchant's rejection reason.
+ */
 export async function rejectEWRefundRequest(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -127,6 +148,10 @@ export async function rejectEWRefundRequest(req, res) {
     }
 }
 
+/**
+ * Marks an approved refund request as completed after the merchant has issued
+ * the actual refund externally.
+ */
 export async function completeEWRefundRequest(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -154,6 +179,9 @@ export async function completeEWRefundRequest(req, res) {
     }
 }
 
+/**
+ * Cancels a refund request when the merchant decides to stop the review.
+ */
 export async function cancelEWRefundRequest(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -181,6 +209,10 @@ export async function cancelEWRefundRequest(req, res) {
     }
 }
 
+/**
+ * Creates a refund request manually for an entitlement without waiting for an
+ * automatic product-return or Shopify refund trigger.
+ */
 export async function createEWManualRefundRequest(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -213,6 +245,9 @@ export async function createEWManualRefundRequest(req, res) {
     }
 }
 
+/**
+ * Streams refund requests as CSV for finance or operations review.
+ */
 export async function exportEWRefundRequests(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -245,6 +280,10 @@ export async function exportEWRefundRequests(req, res) {
     }
 }
 
+/**
+ * Loads refund configuration for the current shop so the admin can edit the
+ * refund policy in the UI.
+ */
 export async function getEWRefundSettings(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -280,6 +319,9 @@ export async function getEWRefundSettings(req, res) {
     }
 }
 
+/**
+ * Persists refund configuration changes for the current shop.
+ */
 export async function saveEWRefundSettings(req, res) {
     try {
         const session = res.locals.shopify.session;

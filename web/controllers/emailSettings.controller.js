@@ -5,6 +5,10 @@ import {
   previewEmailTemplate,
 } from "../services/emailSettings.service.js";
 
+/**
+ * Resolves the installed shop record for the authenticated session so email
+ * settings can be loaded against the correct merchant account.
+ */
 async function resolveShopId(session) {
   const [[shopRow]] = await pool.query(
     `SELECT id FROM shops WHERE shop_domain = ? AND is_installed = TRUE`,
@@ -13,6 +17,9 @@ async function resolveShopId(session) {
   return shopRow?.id || null;
 }
 
+/**
+ * Returns the current email notification settings for the authenticated shop.
+ */
 export async function getEmailSettings(req, res) {
   try {
     const session = res.locals.shopify?.session;
@@ -29,6 +36,9 @@ export async function getEmailSettings(req, res) {
   }
 }
 
+/**
+ * Persists the current email notification settings for the authenticated shop.
+ */
 export async function saveEmailSettings(req, res) {
   try {
     const session = res.locals.shopify?.session;
@@ -45,6 +55,10 @@ export async function saveEmailSettings(req, res) {
   }
 }
 
+/**
+ * Generates a preview of a template using sample storefront data without
+ * sending an actual email.
+ */
 export async function previewEmailSettings(req, res) {
   try {
     const session = res.locals.shopify?.session;

@@ -30,6 +30,10 @@ export default function Routes({ pages }) {
   );
 }
 
+/**
+ * Converts Vite file-system page modules into React Router route definitions
+ * while normalizing index routes and dynamic segments.
+ */
 function useRoutes(pages) {
   const routes = Object.keys(pages)
     .map((key) => {

@@ -1,5 +1,9 @@
 import { pool } from "../db/mysql.js";
 
+/**
+ * Resolves the installed shop id for the current authenticated session so all
+ * retailer changes stay scoped to the correct merchant.
+ */
 async function resolveShopId(session) {
   const [[shopRow]] = await pool.query(
     `SELECT id FROM shops WHERE shop_domain = ? AND is_installed = TRUE`,
@@ -8,9 +12,10 @@ async function resolveShopId(session) {
   return shopRow?.id || null;
 }
 
-/* ---------------------------
-   GET RETAILERS (ADMIN LOAD)
----------------------------- */
+/**
+ * Loads the active retailer list for the admin UI with optional search and
+ * pagination so merchants can manage their retailer directory.
+ */
 export async function getRetailers(req, res) {
   try {
     const session = res.locals.shopify.session;
@@ -39,7 +44,7 @@ export async function getRetailers(req, res) {
         searchTerm
           ? `AND (
               retailer_name LIKE ?
-              OR retailer_country LIKE ?
+              OR retailer_city LIKE ?
               OR retailer_name_ja LIKE ?
             )`
           : ""
@@ -59,7 +64,7 @@ export async function getRetailers(req, res) {
       SELECT
         id,
         retailer_name,
-        retailer_country,
+        retailer_city,
         retailer_name_ja
       FROM retailers
       WHERE ${whereClause}
@@ -74,7 +79,7 @@ export async function getRetailers(req, res) {
         id: r.id,
         retailer_name: r.retailer_name,
         retailer_name_localized: r.retailer_name_ja,
-        retailer_country: r.retailer_country,
+        retailer_city: r.retailer_city,
       })),
       pagination: {
         total,
@@ -91,9 +96,10 @@ export async function getRetailers(req, res) {
   }
 }
 
-/* ---------------------------
-   IMPORT RETAILERS (EXCEL)
----------------------------- */
+/**
+ * Imports a batch of retailer rows from the admin UI and reactivates existing
+ * matches instead of creating duplicates.
+ */
 export async function importRetailers(req, res) {
   try {
     const session = res.locals.shopify.session;
@@ -131,10 +137,10 @@ export async function importRetailers(req, res) {
     await pool.query(
       `
       INSERT INTO retailers
-        (shop_id, retailer_name, retailer_country, retailer_name_ja)
+        (shop_id, retailer_name, retailer_city, retailer_name_ja)
       VALUES ?
       ON DUPLICATE KEY UPDATE
-        retailer_country = VALUES(retailer_country),
+        retailer_city = VALUES(retailer_city),
         retailer_name_ja = VALUES(retailer_name_ja),
         is_active = 1,
         updated_at = CURRENT_TIMESTAMP
@@ -149,9 +155,9 @@ export async function importRetailers(req, res) {
   }
 }
 
-/* ---------------------------
-   UPDATE RETAILER
----------------------------- */
+/**
+ * Updates a single retailer record for the current shop.
+ */
 export async function updateRetailer(req, res) {
   try {
     const session = res.locals.shopify.session;
@@ -168,8 +174,8 @@ export async function updateRetailer(req, res) {
     const name = String(req.body?.name || req.body?.retailer_name || "").trim();
     if (!name) return res.status(400).json({ error: "Retailer name is required" });
 
-    const country = String(req.body?.country || req.body?.retailer_country || "").trim();
-    if (!country) return res.status(400).json({ error: "Country is required" });
+    const city = String(req.body?.city || req.body?.retailer_city || "").trim();
+    if (!city) return res.status(400).json({ error: "City is required" });
 
     const localizedName =
       String(
@@ -183,10 +189,10 @@ export async function updateRetailer(req, res) {
     const [result] = await pool.query(
       `
       UPDATE retailers
-      SET retailer_name = ?, retailer_country = ?, retailer_name_ja = ?, updated_at = CURRENT_TIMESTAMP
+      SET retailer_name = ?, retailer_city = ?, retailer_name_ja = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND shop_id = ? AND is_active = 1
       `,
-      [name, country, localizedName, retailerId, shopId]
+      [name, city, localizedName, retailerId, shopId]
     );
 
     if (!result.affectedRows) {
@@ -200,9 +206,10 @@ export async function updateRetailer(req, res) {
   }
 }
 
-/* ---------------------------
-   DELETE RETAILER (SOFT)
----------------------------- */
+/**
+ * Soft-deletes a retailer so it no longer appears in the admin list while
+ * preserving historical references in older registrations.
+ */
 export async function deleteRetailer(req, res) {
   try {
     const session = res.locals.shopify.session;

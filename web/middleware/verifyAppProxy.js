@@ -1,5 +1,10 @@
 import crypto from "crypto";
 
+/**
+ * Verifies Shopify's app-proxy HMAC signature for storefront requests.
+ * This is used before any storefront warranty route is allowed to trust the
+ * incoming query parameters or session lookup.
+ */
 export function verifyAppProxy(req) {
   const { signature, ...params } = req.query;
 

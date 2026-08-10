@@ -63,7 +63,8 @@
             <!-- CUSTOMER INFO -->
             <input type="hidden" id="customerId" value="{{ customer.id }}">
             <input type="hidden" id="info-icon" value="{{ 'info-icon.svg' | asset_url }}">
-                      <input type="hidden" id="my_products_link" value="{{ block.settings.my_products_link }}">
+            <input type="hidden" id="my_products_link" value="{{ block.settings.my_products_link }}">
+            <input type="hidden" id="serial_number_help_url" value="{{ block.settings.serial_number_help_url }}">
     
             <div class="form-control form-input">
               <label>Name</label>
@@ -165,6 +166,12 @@
         "id": "my_products_link",
         "label": "My Products page Link",
         "info": "My products page link"
+      },
+      {
+        "type": "url",
+        "id": "serial_number_help_url",
+        "label": "Serial Number Help URL",
+        "info": "URL explaining where customers can find the serial number"
       }
     ]
   }

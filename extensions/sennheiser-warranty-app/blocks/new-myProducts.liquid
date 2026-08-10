@@ -119,16 +119,18 @@
     <div class="mp-detail-bottom">
       <div class="right-block">
         <div class="mp-detail-actions">
-           <a href="/" class="btn bordered-btn">
-             Get Support
-          </a>
-          <a href="/" class="btn bordered-btn">
-            Find Spare Parts & Accessories
-          </a>
-          <a href="/" class="mp-link"> 
-          <img
-            src="{{ 'manual-icon.svg' | asset_url }}"
-            alt="Manual & Tips Icon" />Manual & Tips</a>
+            <a href="{{ block.settings.support_link }}"
+              class="btn bordered-btn"
+              target="_blank"
+              rel="noopener">
+              Get Support
+            </a>
+            <a href="{{ block.settings.spare_parts_link }}"
+              class="btn bordered-btn"
+              target="_blank"
+              rel="noopener">
+              Find Spare Parts & Accessories
+            </a>
             <button class="btn bordered-btn" id="mp-detail-back-btn">
               Back
             </button>
@@ -200,11 +202,11 @@
       "default": "My Products"
     },
     {
-  "type": "text",
-  "id": "products_detail_title",
-  "label": "Product detail heading",
-  "default": "Product Details"
-},
+      "type": "text",
+      "id": "products_detail_title",
+      "label": "Product detail heading",
+      "default": "Product Details"
+    },
     {
       "type": "url",
       "id": "web_register_link",
@@ -226,6 +228,16 @@
       "id": "external_register_label",
       "label": "Register button label (external purchase flow)",
       "default": "+ Register new product"
+    },
+    {
+      "type": "url",
+      "id": "support_link",
+      "label": "Get Support Link"
+    },
+    {
+      "type": "url",
+      "id": "spare_parts_link",
+      "label": "Find Spare Parts & Accessories Link"
     }
   ]
 }

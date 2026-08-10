@@ -1,5 +1,9 @@
 import { sendEmailService } from "../services/email.service.js";
 
+/**
+ * Proxies a raw email send request through the shared email service for admin
+ * testing and manual delivery flows.
+ */
 export const sendEmail = async (req, res) => {
   try {
     const result = await sendEmailService(req.body);

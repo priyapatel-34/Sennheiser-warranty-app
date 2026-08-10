@@ -18,6 +18,10 @@ import {
 
 const router = express.Router();
 
+/**
+ * Storefront app-proxy route map for product registration, warranty lookup,
+ * retailer settings, and the extended-warranty purchase flow.
+ */
 router.get("/my-products", getMyProducts);
 
 router.post("/product-detail", getProductDetail);

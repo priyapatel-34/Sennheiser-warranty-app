@@ -1,3 +1,7 @@
+/**
+ * Ensures the standard warranty duration metafield definition exists in the
+ * merchant's Shopify admin so product data can store warranty duration values.
+ */
 export async function createStandardWarrantyMetafield(admin) {
     // 🔍 STEP 1: check if definition exists
     const check = await admin.request(`
@@ -60,6 +64,10 @@ export async function createStandardWarrantyMetafield(admin) {
     }
 }  
 
+/**
+ * Removes the standard warranty duration metafield definition when the app no
+ * longer needs to persist warranty duration metadata on products.
+ */
 export async function deleteStandardWarrantyMetafield(admin) {
     // 1️⃣ Find definition ID
     const response = await admin.request(`
@@ -96,4 +104,3 @@ export async function deleteStandardWarrantyMetafield(admin) {
       }
     `);
 }
-  

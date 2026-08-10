@@ -3,6 +3,9 @@ import { getSWDurations , addSWuration , getAllProducts, bulkUpdateWarranty } fr
 
 const router = express.Router();
 
+/**
+ * Admin routes for standard-warranty duration setup and bulk product mapping.
+ */
 router.get("/durations", getSWDurations);
 router.post("/durations", addSWuration);
 

@@ -50,6 +50,10 @@ const DASHBOARD_SECTIONS = [
   },
 ];
 
+/**
+ * Renders the dashboard landing page that links merchants into the main admin
+ * sections for warranties, retailers, registrations, and email settings.
+ */
 export default function HomePage() {
   return (
     <div className="wa-dashboard-page">

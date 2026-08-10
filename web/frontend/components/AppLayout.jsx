@@ -11,6 +11,10 @@ export const APP_NAV_ITEMS = [
   { path: "/emailSettings", label: "Email Settings", shortLabel: "Email" },
 ];
 
+/**
+ * Tracks whether the admin shell should render its compact mobile navigation
+ * instead of the full desktop nav.
+ */
 function useIsNarrowView(breakpoint = 768) {
   const query = `(max-width: ${breakpoint}px)`;
   const [narrow, setNarrow] = useState(() => {
@@ -28,12 +32,19 @@ function useIsNarrowView(breakpoint = 768) {
   return narrow;
 }
 
+/**
+ * Determines whether a nav item should be highlighted for the current route.
+ */
 function isNavItemActive(pathname, path) {
   const normalized = pathname.replace(/\/$/, "") || "/";
   if (path === "/") return normalized === "/";
   return normalized === path || normalized.startsWith(`${path}/`);
 }
 
+/**
+ * Renders the shared admin shell, including responsive navigation and the main
+ * content container used by all internal app pages.
+ */
 export default function AppLayout({ children }) {
   const location = useLocation();
   const navigate = useNavigate();

@@ -4,6 +4,10 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "react-query";
 
+/**
+ * Renders the demo product population card used on the landing page to exercise
+ * the Products API and show a simple loading/refetch cycle.
+ */
 export function ProductsCard() {
   const shopify = useAppBridge();
   const { t } = useTranslation();
@@ -23,11 +27,19 @@ export function ProductsCard() {
     refetchOnWindowFocus: false,
   });
 
+  /**
+   * Keeps the Shopify loading indicator and local component state aligned while
+   * the populate flow is running.
+   */
   const setPopulating = (flag) => {
     shopify.loading(flag);
     setIsPopulating(flag);
   };
 
+  /**
+   * Creates demo products through the backend API and refreshes the displayed
+   * count once the request succeeds.
+   */
   const handlePopulate = async () => {
     setPopulating(true);
     const response = await fetch("/api/products", { method: "POST" });

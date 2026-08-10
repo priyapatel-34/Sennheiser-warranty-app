@@ -25,9 +25,13 @@ function displayCell(value) {
   return String(value).trim();
 }
 
-const EMPTY_ADD_FORM = { name: "", localized_name: "", country: "" };
-const EMPTY_ADD_ERRORS = { name: "", country: "" };
+const EMPTY_ADD_FORM = { name: "", localized_name: "", city: "" };
+const EMPTY_ADD_ERRORS = { name: "", city: "" };
 
+/**
+ * Renders the retailer management page where merchants import, edit, and
+ * deactivate their approved retailer list.
+ */
 export default function Retailers() {
   const toast = useToast();
   const [selectedTab, setSelectedTab] = useState(0);
@@ -144,7 +148,7 @@ export default function Retailers() {
     const ws = XLSX.utils.json_to_sheet([
       {
         "Retailer Name": "Amazon",
-        Country: "Japan",
+        "Country": "India",
         "Localized Name": "アマゾン",
       },
     ]);
@@ -185,7 +189,7 @@ export default function Retailers() {
             .map((r) => ({
               name: r[0] === "-" ? "" : r[0],
               localized_name: r[1] === "-" ? "" : r[1],
-              country: r[2] === "-" ? "" : r[2],
+              city: r[2] === "-" ? "" : r[2],
             })),
         }),
       });
@@ -217,11 +221,11 @@ export default function Retailers() {
   };
 
   function validateAddForm() {
-    const errors = { name: "", country: "" };
+    const errors = { name: "", city: "" };
     if (!addForm.name.trim()) errors.name = "Retailer name is required";
-    if (!addForm.country.trim()) errors.country = "Country is required";
+    if (!addForm.city.trim()) errors.city = "Country is required";
     setAddErrors(errors);
-    return !errors.name && !errors.country;
+    return !errors.name && !errors.city;
   }
 
   async function saveNewRetailer() {
@@ -236,8 +240,8 @@ export default function Retailers() {
           retailers: [
             {
               name: addForm.name.trim(),
-              country: addForm.country.trim(),
               localized_name: addForm.localized_name.trim(),
+              city: addForm.city.trim(),
             },
           ],
         }),
@@ -300,11 +304,11 @@ export default function Retailers() {
   // ── Edit ────────────────────────────────────────────────────────────────────
 
   function validateEditForm() {
-    const errors = { name: "", country: "" };
+    const errors = { name: "", city: "" };
     if (!editRetailer?.retailer_name?.trim()) errors.name = "Retailer name is required";
-    if (!editRetailer?.retailer_country?.trim()) errors.country = "Country is required";
+    if (!editRetailer?.retailer_city?.trim()) errors.city = "City is required";
     setEditErrors(errors);
-    return !errors.name && !errors.country;
+    return !errors.name && !errors.city;
   }
 
   async function updateRetailer() {
@@ -317,7 +321,7 @@ export default function Retailers() {
         body: JSON.stringify({
           name: editRetailer.retailer_name,
           localized_name: editRetailer.retailer_name_localized,
-          country: editRetailer.retailer_country,
+          city: editRetailer.retailer_city,
         }),
       });
       const data = await response.json();
@@ -348,7 +352,7 @@ export default function Retailers() {
   const tableRows = rows.map((r) => [
     displayCell(r.retailer_name),
     displayCell(r.retailer_name_localized),
-    displayCell(r.retailer_country),
+    displayCell(r.retailer_city),
     <div className="wa-table-actions" key={`actions-${r.id}`}>
       <Button
         size="slim"
@@ -357,7 +361,7 @@ export default function Retailers() {
             id: r.id,
             retailer_name: r.retailer_name || "",
             retailer_name_localized: r.retailer_name_localized || "",
-            retailer_country: r.retailer_country || "",
+            retailer_city: r.retailer_city || "",
           });
           setEditErrors(EMPTY_ADD_ERRORS);
           setEditOpen(true);
@@ -411,7 +415,7 @@ export default function Retailers() {
                   <TextField
                     label="Search retailers"
                     labelHidden
-                    placeholder="Search by name, country or city"
+                    placeholder="Search by name or city"
                     value={searchInput}
                     onChange={setSearchInput}
                     clearButton
@@ -532,22 +536,22 @@ export default function Retailers() {
               requiredIndicator
             />
             <TextField
-              label="Country"
-              value={addForm.country}
-              onChange={(v) => {
-                setAddForm((p) => ({ ...p, country: v }));
-                if (addErrors.country) setAddErrors((p) => ({ ...p, country: "" }));
-              }}
-              autoComplete="off"
-              error={addErrors.country}
-              requiredIndicator
-            />
-            <TextField
               label="Localized name"
               value={addForm.localized_name}
               onChange={(v) => setAddForm((p) => ({ ...p, localized_name: v }))}
               autoComplete="off"
               helpText="Optional translated or alternate name for this store's language."
+            />
+            <TextField
+              label="Country"
+              value={addForm.city}
+              onChange={(v) => {
+                setAddForm((p) => ({ ...p, city: v }));
+                if (addErrors.city) setAddErrors((p) => ({ ...p, city: "" }));
+              }}
+              autoComplete="off"
+              error={addErrors.city}
+              requiredIndicator
             />
           </div>
         </Modal.Section>
@@ -639,12 +643,12 @@ export default function Retailers() {
               />
               <TextField
                 label="Country"
-                value={editRetailer.retailer_country || ""}
+                value={editRetailer.retailer_city || ""}
                 onChange={(v) => {
-                  setEditRetailer({ ...editRetailer, retailer_country: v });
-                  if (editErrors.country) setEditErrors((p) => ({ ...p, country: "" }));
+                  setEditRetailer({ ...editRetailer, retailer_city: v });
+                  if (editErrors.city) setEditErrors((p) => ({ ...p, city: "" }));
                 }}
-                error={editErrors.country}
+                error={editErrors.city}
                 requiredIndicator
                 autoComplete="off"
               />

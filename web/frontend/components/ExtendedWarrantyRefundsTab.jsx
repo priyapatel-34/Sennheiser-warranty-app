@@ -28,6 +28,10 @@ import {
     { label: "Disputed", value: "disputed" },
   ];
   
+  /**
+   * Maps a refund status to the Polaris badge tone used in list and detail
+   * views.
+   */
   function statusTone(status) {
     switch (status) {
       case "pending_review": return "attention";
@@ -39,12 +43,19 @@ import {
     }
   }
   
+  /**
+   * Converts a status enum into a human-readable label for the admin UI.
+   */
   function formatStatusLabel(status) {
     return String(status || "")
       .replace(/_/g, " ")
       .replace(/\b\w/g, (c) => c.toUpperCase());
   }
   
+  /**
+   * Formats refund amounts in a currency-safe way for the summary and detail
+   * panels.
+   */
   function formatMoney(amount, currency) {
     try {
       return new Intl.NumberFormat(undefined, {
@@ -90,6 +101,9 @@ import {
   };
   
   /* ── small reusable detail field ──────────────────────────── */
+  /**
+   * Renders a compact labeled value block in the refund detail modal.
+   */
   function DetailField({ label, children }) {
     return (
       <div style={{ minWidth: 130 }}>
@@ -100,6 +114,9 @@ import {
   }
   
   /* ── breakdown line ───────────────────────────────────────── */
+  /**
+   * Displays one calculation line in the refund breakdown panel.
+   */
   function BreakdownRow({ label, value, bold }) {
     return (
       <div
@@ -119,6 +136,10 @@ import {
     );
   }
   
+  /**
+   * Renders the refund-review tab where admins inspect, approve, reject, and
+   * configure extended-warranty refund requests.
+   */
   export default function ExtendedWarrantyRefundsTab() {
     const toast = useToast();
     const [refunds, setRefunds] = useState([]);

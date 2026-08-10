@@ -13,6 +13,10 @@ export default {
   CUSTOMERS_DATA_REQUEST: {
     deliveryMethod: DeliveryMethod.Http,
     callbackUrl: "/api/webhooks",
+    /**
+     * Receives customer data request payloads from Shopify so the app can
+     * comply with privacy obligations without mutating storefront state.
+     */
     callback: async (topic, shop, body, webhookId) => {
       const payload = JSON.parse(body);
       // Payload has the following shape:
@@ -45,6 +49,10 @@ export default {
   CUSTOMERS_REDACT: {
     deliveryMethod: DeliveryMethod.Http,
     callbackUrl: "/api/webhooks",
+    /**
+     * Receives customer redaction requests from Shopify when customer data must
+     * be removed or anonymized for privacy compliance.
+     */
     callback: async (topic, shop, body, webhookId) => {
       const payload = JSON.parse(body);
       // Payload has the following shape:
@@ -74,6 +82,10 @@ export default {
   SHOP_REDACT: {
     deliveryMethod: DeliveryMethod.Http,
     callbackUrl: "/api/webhooks",
+    /**
+     * Receives shop-level redaction requests after uninstall so the app can
+     * complete any required data removal workflow for the merchant.
+     */
     callback: async (topic, shop, body, webhookId) => {
       const payload = JSON.parse(body);
       // Payload has the following shape:

@@ -1,5 +1,9 @@
 import { pool } from "../db/mysql.js";
 
+/**
+ * Saves the merchant's retailer-required toggle for the current shop.
+ * Called from the admin settings screen when the store configuration is saved.
+ */
 export async function saveStoreSettings(req, res) {
   const session = res.locals.shopify.session;
 
@@ -33,7 +37,10 @@ export async function saveStoreSettings(req, res) {
   res.json({ success: true });
 }
 
-
+/**
+ * Loads the retailer-required setting for the current shop so the admin UI can
+ * render the store's current configuration.
+ */
 export async function getStoreSettings(req, res) {
   const session = res.locals.shopify.session;
 

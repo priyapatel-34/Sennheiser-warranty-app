@@ -6,8 +6,8 @@ import {
 } from "react-query";
 
 /**
- * Sets up the QueryClientProvider from react-query.
- * @desc See: https://react-query.tanstack.com/reference/QueryClientProvider#_top
+ * Sets up the shared React Query client so the admin app can cache API results
+ * and coordinate data fetching across pages.
  */
 export function QueryProvider({ children }) {
   const client = new QueryClient({

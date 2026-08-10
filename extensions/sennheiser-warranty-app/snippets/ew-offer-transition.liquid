@@ -1,0 +1,45 @@
+<style>
+  .ew-page-loader-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+    background: #000000;
+  }
+
+  html.ew-transition-pending .ew-page-loader-overlay {
+    display: flex !important;
+  }
+
+  html.ew-transition-pending .ew-registration-form-panel {
+    visibility: hidden !important;
+  }
+</style>
+<script>
+  (function () {
+    try {
+      var keys = ["warranty_post_registration_state", "ew_checkout_pending"];
+      for (var i = 0; i < keys.length; i++) {
+        var raw = sessionStorage.getItem(keys[i]);
+        if (!raw) continue;
+        var data = JSON.parse(raw);
+        if (data && data.registerId) {
+          document.documentElement.classList.add("ew-transition-pending");
+          break;
+        }
+      }
+    } catch (e) {}
+  })();
+</script>
+<div id="ew-page-loader-overlay" class="ew-page-loader-overlay" hidden aria-live="polite">
+  <div class="ew-page-loader">
+    <div class="ew-loader-spinner"></div>
+    <p class="ew-loader-text">Loading extended warranty options...</p>
+  </div>
+</div>
+<div id="ew-offer-section" class="ew-offer-section hidden"></div>

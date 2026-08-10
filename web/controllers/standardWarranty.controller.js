@@ -59,6 +59,9 @@ export async function addSWuration(req, res) {
     res.json({ success: true });
 }*/
 
+/**
+ * Returns the configured standard-warranty duration list for the current shop.
+ */
 export async function getSWDurations(req, res) {
   try {
     const session = res.locals.shopify.session;
@@ -98,6 +101,9 @@ export async function getSWDurations(req, res) {
   }
 }
 
+/**
+ * Adds a new standard-warranty duration option for the current shop.
+ */
 export async function addSWuration(req, res) {
   try {
     const session = res.locals.shopify.session;
@@ -140,6 +146,10 @@ export async function addSWuration(req, res) {
   }
 }
 
+/**
+ * Builds the Shopify product search query used to power the standard warranty
+ * product selection list.
+ */
 function buildShopifyProductSearchQuery(searchTerm, statusFilter = "all") {
   let statusClause;
   switch (String(statusFilter || "all").toLowerCase()) {
@@ -188,6 +198,10 @@ const STANDARD_PRODUCTS_QUERY = `
   }
 `;
 
+/**
+ * Loads Shopify products and their standard warranty metadata for the admin
+ * product-assignment screen.
+ */
 export async function getAllProducts(req, res) {
   try {
     const session = res.locals.shopify.session;
@@ -285,6 +299,10 @@ export async function getAllProducts(req, res) {
   }
 }
 
+/**
+ * Applies one standard-warranty duration to many products and mirrors the
+ * assignment in both Shopify metafields and the local database.
+ */
 export async function bulkUpdateWarranty(req, res) {
   try {
     const session = res.locals.shopify.session;
@@ -365,6 +383,9 @@ export async function bulkUpdateWarranty(req, res) {
 }
 
 
+/**
+ * Normalizes a Shopify product GID into its numeric id for database writes.
+ */
 function getNumericProductId(gid) {
   if (!gid) return null;
   return Number(gid.split("/").pop());

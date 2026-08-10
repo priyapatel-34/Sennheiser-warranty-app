@@ -7,6 +7,10 @@ import { pool } from "./mysql.js";
 let _columnCache = null;   // Set<"table.column">
 let _indexCache  = null;   // Set<"table.indexName">
 
+/**
+ * Loads information_schema metadata once so schema checks can reuse cached
+ * column and index lookups instead of issuing one query per migration check.
+ */
 async function loadSchemaCache() {
   const [colRows] = await pool.query(`
     SELECT TABLE_NAME, COLUMN_NAME
@@ -23,15 +27,25 @@ async function loadSchemaCache() {
   _indexCache = new Set(idxRows.map((r) => `${r.TABLE_NAME}.${r.INDEX_NAME}`));
 }
 
+/**
+ * Checks whether a cached table column exists in the current database schema.
+ */
 function columnExists(table, column) {
   return Promise.resolve(_columnCache.has(`${table}.${column}`));
 }
 
+/**
+ * Checks whether a cached index exists in the current database schema.
+ */
 function indexExists(table, indexName) {
   return Promise.resolve(_indexCache.has(`${table}.${indexName}`));
 }
 
 /** Additive schema updates for existing installs (no migration framework). */
+/**
+ * Applies non-destructive schema changes so older installs can keep pace with
+ * newer app features without requiring a formal migration engine.
+ */
 async function ensureSchemaUpdates() {
   // Pre-load all column/index metadata in two queries instead of 30+ individual
   // information_schema round-trips.  This is the main source of slow cold starts.
@@ -394,6 +408,10 @@ async function ensureSchemaUpdates() {
   }
 }
 
+/**
+ * Creates the project database tables and applies additive schema updates at
+ * startup before the server begins accepting requests.
+ */
 export async function initDb() {
   try {
     console.log("🔧 Initializing database...");

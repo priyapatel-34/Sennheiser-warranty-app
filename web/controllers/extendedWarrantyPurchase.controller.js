@@ -17,6 +17,10 @@ import {
 import { normalizeWarrantyPricingType } from "../services/extendedWarrantyPricing.js";
 
 /** GET offer data after standard registration. */
+/**
+ * Loads the extended-warranty offer for a completed registration so the
+ * customer can review eligible plans immediately after the standard flow.
+ */
 export async function getExtendedWarrantyOffer(req, res) {
     try {
         const session = res.locals.shopifySession;
@@ -44,6 +48,10 @@ export async function getExtendedWarrantyOffer(req, res) {
 }
 
 /** POST initiate checkout (Draft Order → invoice URL). */
+/**
+ * Starts extended-warranty purchase checkout by creating a draft order and
+ * recording a pending entitlement before the invoice is sent to the customer.
+ */
 export async function initiateExtendedWarrantyCheckout(req, res) {
     try {
         const session = res.locals.shopifySession;
@@ -159,6 +167,10 @@ export async function initiateExtendedWarrantyCheckout(req, res) {
 }
 
 /** Optional cart-based checkout when admin maps a Shopify checkout variant. */
+/**
+ * Builds the cart payload for stores that prefer checkout through a mapped
+ * Shopify variant instead of the draft-order invoice flow.
+ */
 export async function getCartCheckoutPayload(req, res) {
     try {
         const session = res.locals.shopifySession;
@@ -220,6 +232,10 @@ export async function getCartCheckoutPayload(req, res) {
 }
 
 /** Cancel abandoned draft checkout when customer skips the EW offer. */
+/**
+ * Cancels any pending extended-warranty entitlement when the shopper skips the
+ * offer so abandoned checkout state does not linger in the database.
+ */
 export async function cancelExtendedWarrantyPendingCheckout(req, res) {
     try {
         const session = res.locals.shopifySession;

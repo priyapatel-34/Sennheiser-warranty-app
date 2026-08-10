@@ -44,6 +44,10 @@ export const pool = mysql.createPool({
 // Proactive connection health check at startup.
 // Logs a warning (non-fatal) if MySQL is unreachable — useful for Azure cold
 // starts where the first pool.query() would be the one to surface the error.
+/**
+ * Verifies that the MySQL pool can open a live connection during startup so
+ * deployment issues surface before the first request is served.
+ */
 pool.getConnection()
   .then((conn) => {
     console.log("✅ MySQL pool: initial connection succeeded");

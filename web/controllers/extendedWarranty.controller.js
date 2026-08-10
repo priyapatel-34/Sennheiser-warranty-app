@@ -16,12 +16,19 @@ import {
     resolvePlanPrice,
 } from "../services/extendedWarrantyPricing.js";
 
+/**
+ * Normalizes a Shopify GID into its numeric id for database lookups and joins.
+ */
 function getNumericIdFromGid(gid) {
     if (!gid) return null;
     const numeric = Number(gid.split("/").pop());
     return Number.isFinite(numeric) ? numeric : null;
 }
 
+/**
+ * Resolves the installed shop id for the active session so all warranty admin
+ * queries remain scoped to the correct merchant.
+ */
 async function resolveShopId(session) {
     const [[shopRow]] = await pool.query(
         `SELECT id FROM shops WHERE shop_domain = ? AND is_installed = TRUE`,
@@ -30,6 +37,9 @@ async function resolveShopId(session) {
     return shopRow?.id ?? null;
 }
 
+/**
+ * Generates a human-readable warranty plan label from the configured duration.
+ */
 function buildPlanName(durationMonths) {
     const years = durationMonths / 12;
     if (durationMonths % 12 === 0 && years >= 1) {
@@ -38,10 +48,17 @@ function buildPlanName(durationMonths) {
     return `+${durationMonths} Months`;
 }
 
+/**
+ * Converts whole-month durations into a whole-year value for plan storage.
+ */
 function monthsToYears(durationMonths) {
     return durationMonths % 12 === 0 ? durationMonths / 12 : 0;
 }
 
+/**
+ * Shapes a Shopify variant node for the admin UI and attaches any configured
+ * warranty plans that belong to that variant.
+ */
 function formatVariantNode(variantNode, plansByVariantId = {}) {
     const variantNumericId = getNumericIdFromGid(variantNode.id);
     const selectedOptions = (variantNode.selectedOptions || []).map(opt => ({
@@ -109,6 +126,10 @@ const PRODUCTS_WITH_VARIANTS_QUERY = `
   }
 `;
 
+/**
+ * Builds the Shopify product search string used to load eligible products for
+ * extended-warranty configuration.
+ */
 function buildShopifyProductSearchQuery(searchTerm, statusFilter = "") {
     const status = String(statusFilter || "").toLowerCase().trim();
     let statusQuery;
@@ -126,6 +147,10 @@ function buildShopifyProductSearchQuery(searchTerm, statusFilter = "") {
     return `(title:*${sanitized}* OR sku:*${sanitized}*) AND ${statusQuery}`;
 }
 
+/**
+ * Applies an additional local filter so product search can match titles and
+ * variant SKUs after the Shopify query returns results.
+ */
 function productMatchesSearchTerm(productNode, searchTerm) {
     const term = String(searchTerm || "").trim().toLowerCase();
     if (!term) return true;
@@ -142,6 +167,10 @@ function productMatchesSearchTerm(productNode, searchTerm) {
     });
 }
 
+/**
+ * Counts active plan durations for a product so the grid can show how much of
+ * the warranty catalog is already configured.
+ */
 function countActivePlanDurationsForProduct(planRows, productNumericId) {
     const durations = new Set();
     for (const row of planRows) {
@@ -182,7 +211,10 @@ const PRODUCT_VARIANTS_QUERY = `
   }
 `;
 
-/** Load extended warranty plans for a shop, optionally filtered by product or variant. */
+/**
+ * Loads active extended-warranty plans for a shop, optionally scoped to one
+ * product or variant when the UI needs a focused view.
+ */
 async function loadPlansForShop(shopId, { productId = null, variantId = null } = {}) {
     let sql = `
     SELECT
@@ -215,7 +247,10 @@ async function loadPlansForShop(shopId, { productId = null, variantId = null } =
     return rows;
 }
 
-/** Group plan rows by variant numeric ID. */
+/**
+ * Groups plan rows by Shopify variant id so the product and variant views can
+ * render plan pricing next to the matching variant.
+ */
 function groupPlansByVariantId(
     planRows,
     warrantyPricingType,
@@ -272,6 +307,9 @@ function groupPlansByVariantId(
    CONFIGURATION – EXTENDED WARRANTY DURATIONS
    ===================================================== */
 
+/**
+ * Returns the configured extended-warranty durations for the admin settings UI.
+ */
 export async function getEWDurations(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -309,6 +347,9 @@ export async function getEWDurations(req, res) {
     }
 }
 
+/**
+ * Adds a new extended-warranty duration option for the current shop.
+ */
 export async function addEWDuration(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -357,6 +398,10 @@ export async function addEWDuration(req, res) {
    API 1 – GET WARRANTY PRODUCTS
    ===================================================== */
 
+/**
+ * Loads Shopify products and overlays existing warranty-plan configuration so
+ * merchants can manage coverage from a single product list.
+ */
 export async function getWarrantyProducts(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -530,6 +575,9 @@ export async function getWarrantyProducts(req, res) {
    API 2 – GET PRODUCT VARIANTS
    ===================================================== */
 
+/**
+ * Loads a single product's variants and existing plan mappings for editing.
+ */
 export async function getProductVariants(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -626,6 +674,9 @@ export async function getProductVariants(req, res) {
    API 3 – GET WARRANTY PLANS FOR VARIANT
    ===================================================== */
 
+/**
+ * Returns the warranty plans configured for a product or variant.
+ */
 export async function getWarrantyPlans(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -876,6 +927,10 @@ export async function bulkSaveWarrantyPlanMapping(req, res) {
     }
 }
 
+/**
+ * Saves warranty plan mappings for a single product in one transaction so the
+ * UI can update a product without needing a bulk operation.
+ */
 export async function saveWarrantyPlanMapping(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -994,6 +1049,10 @@ export async function updateEWDuration(req, res) {
     }
 }
 
+/**
+ * Normalizes the settings row for the frontend so it can consume a stable
+ * shape regardless of whether a settings record already exists.
+ */
 function mapSettingsRow(row, expiryReminderConfigs = []) {
     if (!row) {
         return {
@@ -1019,6 +1078,9 @@ function mapSettingsRow(row, expiryReminderConfigs = []) {
     };
 }
 
+/**
+ * Loads the shop-level extended-warranty settings and reminder configuration.
+ */
 export async function getEWSettings(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -1047,6 +1109,9 @@ export async function getEWSettings(req, res) {
     }
 }
 
+/**
+ * Persists the shop-level extended-warranty settings and reminder-day rules.
+ */
 export async function saveEWSettings(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -1146,6 +1211,9 @@ export async function saveEWSettings(req, res) {
     }
 }
 
+/**
+ * Deletes an extended-warranty duration and removes any dependent plan rows.
+ */
 export async function deleteEWDuration(req, res) {
     try {
         const session = res.locals.shopify.session;
@@ -1202,6 +1270,9 @@ export async function deleteEWDuration(req, res) {
     }
 }
 
+/**
+ * Deletes a single extended-warranty plan for the current shop.
+ */
 export async function deleteEWPlan(req, res) {
     try {
         const session = res.locals.shopify.session;

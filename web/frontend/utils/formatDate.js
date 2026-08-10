@@ -3,6 +3,10 @@ const MONTHS_SHORT = [
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
+/**
+ * Parses a value into a usable Date so admin displays can normalize dates from
+ * either ISO strings or stored Date objects.
+ */
 function parseDateInput(value) {
   if (value instanceof Date) {
     return Number.isNaN(value.getTime()) ? null : value;
@@ -22,7 +26,10 @@ function parseDateInput(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-/** Human-readable date: 01 Jul 2027. Returns — for null/empty/invalid. */
+/**
+ * Formats a date into a human-readable DD Mon YYYY string for admin tables and
+ * detail panels, returning an em dash when the source value is unusable.
+ */
 export function formatDate(value) {
   const date = parseDateInput(value);
   if (!date) return "—";

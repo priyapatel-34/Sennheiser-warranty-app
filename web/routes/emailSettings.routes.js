@@ -7,6 +7,9 @@ import {
 
 const router = express.Router();
 
+/**
+ * Admin routes for loading, saving, and previewing email template settings.
+ */
 router.get("/", getEmailSettings);
 router.put("/", saveEmailSettings);
 router.post("/preview", previewEmailSettings);
