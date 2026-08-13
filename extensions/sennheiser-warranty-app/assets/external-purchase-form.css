@@ -315,12 +315,36 @@
   transition: all 0.5s;
 }
 
-.register-warranty-form-section .custom-toolip-wrap:hover .tooltip {
+/* Show tooltip */
+.register-warranty-form-section .custom-toolip-wrap.active .tooltip {
   display: block;
 }
 
+/* Tooltip text should be white */
+.register-warranty-form-section .custom-toolip-wrap .tooltip {
+  color: #fff;
+}
+
+.register-warranty-form-section .custom-toolip-wrap .tooltip span {
+  color: #fff;
+}
+
+/* More information link */
 .register-warranty-form-section .custom-toolip-wrap .tooltip a {
-  color: #057CC1;
+  display: inline-block;
+  margin-top: 5px;
+  color: #057CC1 !important;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Keep link white in every state */
+.register-warranty-form-section .custom-toolip-wrap .tooltip a:hover,
+.register-warranty-form-section .custom-toolip-wrap .tooltip a:focus,
+.register-warranty-form-section .custom-toolip-wrap .tooltip a:active,
+.register-warranty-form-section .custom-toolip-wrap .tooltip a:visited {
+  color: #057CC1 !important;
+  text-decoration: underline;
 }
 
 .register-warranty-form-section .custom-toolip-wrap .tooltip::before {
@@ -336,6 +360,26 @@
   left: 0px;
 }
 
+.register-warranty-form-section .custom-toolip-wrap {
+  position: relative;
+}
+
+.register-warranty-form-section .custom-toolip-wrap .tooltip {
+  background-color: #333;
+  color: #fff;
+  border-radius: 4px;
+  padding: 10px;
+  position: absolute;
+  width: 330px;
+  bottom: calc(100% + 10px);
+  left: -3px;
+  display: none;
+  transition: all 0.5s;
+}
+
+.register-warranty-form-section .custom-toolip-wrap .info-icon {
+  cursor: pointer;
+}
 
 .register-warranty-form-section .consent-wrapper:not(:last-child) {
   margin-bottom: 8px;

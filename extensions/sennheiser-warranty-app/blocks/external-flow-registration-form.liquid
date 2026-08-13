@@ -195,35 +195,40 @@
   <div class="form-control form-input">
   
   <div class="label-with-icon-wrap">
-  <label class="wg-translatable">Serial Number</label>
-  
-  <div class="custom-toolip-wrap">
-  <span class="info-icon">
-  <img src="{{ 'info-icon.svg' | asset_url }}">
-  </span>
-  
-  <div class="tooltip">
-  {% if block.settings.serial_number_help_url != blank %}
-    <a
-      href="{{ block.settings.serial_number_help_url }}"
-      target="_blank"
-      rel="noopener noreferrer"
-      class="wg-translatable"
-    >
-      The serial number can be found on the product packaging.
-    </a>
-  {% else %}
-    <span class="wg-translatable">
-      The serial number can be found on the product packaging.
-    </span>
-  {% endif %}
+    <label class="wg-translatable">Serial Number</label>
+
+    <div class="custom-toolip-wrap">
+      <span class="info-icon" role="button" tabindex="0" aria-label="Serial number information">
+        <img
+          src="{{ 'info-icon.svg' | asset_url }}"
+          alt="Information"
+        >
+      </span>
+
+      <div class="tooltip">
+        <span class="wg-translatable tooltip-text">
+          The serial number can be found on the product packaging.
+        </span>
+
+        {% if block.settings.serial_number_help_url != blank %}
+          <a
+            href="{{ block.settings.serial_number_help_url }}"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="tooltip-link wg-translatable"
+          >
+            Click here
+          </a>
+        {% endif %}
+      </div>
+
+    </div>
   </div>
-  
-  </div>
-  </div>
-  
+
   <input data-serial>
   <div class="field-error"></div>
+
+</div>
   
   </div>
   

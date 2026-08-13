@@ -127,6 +127,7 @@
 
     initProductAutocomplete(wrap);
     initRetailerAutocomplete(wrap);
+    initTooltipToggle(wrap);
 
     const serialInput = wrap.querySelector("[data-serial]");
 
@@ -358,6 +359,48 @@
   }
 
   /* ===============================
+   TOOLTIP CLICK TOGGLE
+=============================== */
+  function initTooltipToggle(container) {
+    const wraps = container.querySelectorAll(".custom-toolip-wrap");
+
+    wraps.forEach((wrap) => {
+      const trigger = wrap.querySelector(".info-icon");
+      if (!trigger) return;
+
+      trigger.addEventListener("click", (e) => {
+        e.stopPropagation();
+
+        const isActive = wrap.classList.contains("active");
+
+        // close any other open tooltips first
+        document.querySelectorAll(".custom-toolip-wrap.active").forEach((w) => {
+          if (w !== wrap) w.classList.remove("active");
+        });
+
+        wrap.classList.toggle("active", !isActive);
+      });
+
+      // keyboard support since it's now a role="button"
+      trigger.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          trigger.click();
+        }
+      });
+    });
+  }
+
+  // close tooltip(s) when clicking anywhere outside
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".custom-toolip-wrap")) {
+      document.querySelectorAll(".custom-toolip-wrap.active").forEach((w) => {
+        w.classList.remove("active");
+      });
+    }
+  });
+
+  /* ===============================
      EXTERNAL FLOW VALIDATION
   =============================== */
   function validateExternalFlow() {
@@ -495,8 +538,8 @@
         serial_number: block.querySelector("[data-serial]").value.trim(),
       });
     });
-//The storefront form collects product, serial number, retailer, and purchase date, then posts to /apps/warranty/register. 
-// It handles validation, duplicate serials, and consent checkboxes, showing errors and disabling the submit button during submission.
+    //The storefront form collects product, serial number, retailer, and purchase date, then posts to /apps/warranty/register. 
+    // It handles validation, duplicate serials, and consent checkboxes, showing errors and disabling the submit button during submission.
     try {
       const res = await fetch("/apps/warranty/register", {
         method: "POST",
