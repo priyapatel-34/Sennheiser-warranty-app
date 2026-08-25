@@ -19,6 +19,10 @@ import { useToast } from "../hooks/useToast.js";
 import LoadingPanel from "../components/LoadingPanel.jsx";
 import ExtendedWarrantyRefundsTab from "../components/ExtendedWarrantyRefundsTab.jsx";
 import { formatMoney } from "../utils/formatMoney.js";
+import {
+    buildRemovePricingModalContent,
+    toNumericShopifyId,
+} from "../utils/warrantyPricingDelete.js";
 
 const API_BASE = "/app/extended-warranty";
 const PAGE_SIZE = 25;
@@ -123,7 +127,7 @@ export default function ExtendedWarrantyAdmin() {
     const [productsLoading, setProductsLoading] = useState(false);
     const [productsLoaded, setProductsLoaded] = useState(false);
     const [page, setPage] = useState(1);
-    const [cursorStack, setCursorStack] = useState([null]);
+    const [pageCursorHistory, setPageCursorHistory] = useState([null]);
     const [paginationMeta, setPaginationMeta] = useState({
         total: 0,
         totalPages: 1,
@@ -146,6 +150,17 @@ export default function ExtendedWarrantyAdmin() {
     const [configureMode, setConfigureMode] = useState("single");
     const [variantPricing, setVariantPricing] = useState({});
     const [bulkDurationPricing, setBulkDurationPricing] = useState({});
+    const [confirmAction, setConfirmAction] = useState(null);
+    const [confirmLoading, setConfirmLoading] = useState(false);
+    const confirmInFlightRef = useRef(false);
+    const [addProductsOpen, setAddProductsOpen] = useState(false);
+    const [addSearchInput, setAddSearchInput] = useState("");
+    const [addSearchQuery, setAddSearchQuery] = useState("");
+    const [addProducts, setAddProducts] = useState([]);
+    const [addProductsLoading, setAddProductsLoading] = useState(false);
+    const [addPage, setAddPage] = useState(1);
+    const [addPageCursorHistory, setAddPageCursorHistory] = useState([null]);
+    const [addHasNextPage, setAddHasNextPage] = useState(false);
 
     const {
         selectedResources,
@@ -153,6 +168,15 @@ export default function ExtendedWarrantyAdmin() {
         handleSelectionChange,
         clearSelection,
     } = useIndexResourceState(products, {
+        resourceIDResolver: (p) => p.id,
+    });
+
+    const {
+        selectedResources: addSelectedResources,
+        allResourcesSelected: addAllResourcesSelected,
+        handleSelectionChange: handleAddSelectionChange,
+        clearSelection: clearAddSelection,
+    } = useIndexResourceState(addProducts, {
         resourceIDResolver: (p) => p.id,
     });
 
@@ -169,7 +193,7 @@ export default function ExtendedWarrantyAdmin() {
         setProductSearchQuery("");
         setProductStatusFilter("");
         setPage(1);
-        setCursorStack([null]);
+        setPageCursorHistory([null]);
         setProductsLoaded(false);
         setModalOpen(false);
         setConfigureProducts([]);
@@ -211,7 +235,7 @@ export default function ExtendedWarrantyAdmin() {
             if (jumpLast) {
                 params.set("last", "1");
             } else {
-                const cursor = targetPage > 1 ? cursorStack[targetPage - 1] : null;
+                const cursor = targetPage > 1 ? pageCursorHistory[targetPage - 1] : null;
                 if (cursor) params.set("cursor", cursor);
             }
             if (search) params.set("q", search);
@@ -237,7 +261,7 @@ export default function ExtendedWarrantyAdmin() {
             if (meta.page) setPage(meta.page);
 
             if (data.nextCursor && meta.page) {
-                setCursorStack((prev) => {
+                setPageCursorHistory((prev) => {
                     const next = [...prev];
                     next[meta.page] = data.nextCursor;
                     return next;
@@ -327,7 +351,7 @@ export default function ExtendedWarrantyAdmin() {
      */
     const runProductSearch = () => {
         setPage(1);
-        setCursorStack([null]);
+        setPageCursorHistory([null]);
         setProductSearchQuery(productSearchInput.trim());
     };
 
@@ -338,7 +362,7 @@ export default function ExtendedWarrantyAdmin() {
         setProductSearchInput("");
         setProductSearchQuery("");
         setPage(1);
-        setCursorStack([null]);
+        setPageCursorHistory([null]);
     };
 
     /**
@@ -347,7 +371,7 @@ export default function ExtendedWarrantyAdmin() {
     const handleStatusFilterChange = (value) => {
         setProductStatusFilter(value);
         setPage(1);
-        setCursorStack([null]);
+        setPageCursorHistory([null]);
     };
 
     const goToFirstPage = () => setPage(1);
@@ -568,6 +592,289 @@ export default function ExtendedWarrantyAdmin() {
         }
     };
 
+    const loadExcludedProducts = async ({
+        targetPage = addPage,
+        search = addSearchQuery,
+    } = {}) => {
+        setAddProductsLoading(true);
+        try {
+            const params = new URLSearchParams({
+                limit: String(PAGE_SIZE),
+                page: String(targetPage),
+            });
+            const cursor = targetPage > 1 ? addPageCursorHistory[targetPage - 1] : null;
+            if (cursor) params.set("cursor", cursor);
+            if (search) params.set("q", search);
+
+            const r = await fetch(`${API_BASE}/products/excluded?${params.toString()}`);
+            if (!r.ok) throw new Error();
+            const data = await r.json();
+            setAddProducts(Array.isArray(data.products) ? data.products : []);
+            const meta = data.pagination || {};
+            setAddHasNextPage(Boolean(meta.hasNextPage || data.hasNextPage));
+            if (data.nextCursor && (meta.page || targetPage)) {
+                const pageNumber = meta.page || targetPage;
+                setAddPageCursorHistory((prev) => {
+                    const next = [...prev];
+                    next[pageNumber] = data.nextCursor;
+                    return next;
+                });
+            }
+            if (meta.page) setAddPage(meta.page);
+        } catch {
+            toast.showError("Unable to search products");
+            setAddProducts([]);
+        } finally {
+            setAddProductsLoading(false);
+        }
+    };
+
+    const openAddProductsModal = () => {
+        setAddSearchInput("");
+        setAddSearchQuery("");
+        setAddPage(1);
+        setAddPageCursorHistory([null]);
+        setAddHasNextPage(false);
+        clearAddSelection();
+        setAddProductsOpen(true);
+        loadExcludedProducts({ targetPage: 1, search: "" });
+    };
+
+    const runAddProductSearch = () => {
+        setAddPage(1);
+        setAddPageCursorHistory([null]);
+        const term = addSearchInput.trim();
+        setAddSearchQuery(term);
+        loadExcludedProducts({ targetPage: 1, search: term });
+    };
+
+    const addSelectedExcludedProducts = async () => {
+        if (!addSelectedResources.length) {
+            toast.showError("Select at least one product");
+            return;
+        }
+        setSaving(true);
+        try {
+            const r = await fetch(`${API_BASE}/products/overrides`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ productIds: addSelectedResources }),
+            });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                throw new Error(data.error || "Failed to add products");
+            }
+            const addedCount = Array.isArray(data.added) ? data.added.length : 0;
+            const skippedEligible = (data.skipped || []).filter(
+                (item) => item.reason === "already_eligible"
+            );
+            if (addedCount) {
+                toast.showSuccess(
+                    addedCount === 1
+                        ? "Product added to the eligible list"
+                        : `${addedCount} products added to the eligible list`
+                );
+            } else if ((data.skipped || []).every((item) => item.reason === "already_added")) {
+                toast.showSuccess("Selected products are already on the eligible list");
+            }
+            if (skippedEligible.length && addedCount) {
+                toast.showError(
+                    `${skippedEligible.length} product(s) were already eligible by default`
+                );
+            }
+            setAddProductsOpen(false);
+            clearAddSelection();
+            await loadProducts({
+                targetPage: page,
+                search: productSearchQuery,
+                status: productStatusFilter,
+            });
+        } catch (err) {
+            toast.showError(err.message || "Failed to add products");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const confirmModalCopy = confirmAction
+        ? buildRemovePricingModalContent(confirmAction)
+        : null;
+
+    const executeConfirmedAction = async () => {
+        if (!confirmAction || confirmLoading || confirmInFlightRef.current) return;
+        confirmInFlightRef.current = true;
+        setConfirmLoading(true);
+        try {
+            if (confirmAction.kind === "override") {
+                const productId = toNumericShopifyId(confirmAction.product?.id);
+                const r = await fetch(
+                    `${API_BASE}/products/overrides/${productId}`,
+                    { method: "DELETE" }
+                );
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    throw new Error(data.error || "Failed to remove product");
+                }
+                toast.showSuccess("Product removed from the eligible list");
+                setConfirmAction(null);
+                await loadProducts({
+                    targetPage: page,
+                    search: productSearchQuery,
+                    status: productStatusFilter,
+                });
+                return;
+            }
+
+            const { scope, product, variant, plan } = confirmAction;
+            let url;
+            if (scope === "product") {
+                url = `${API_BASE}/plans/product/${toNumericShopifyId(product.id)}`;
+            } else if (scope === "variant") {
+                url = `${API_BASE}/plans/variant/${toNumericShopifyId(variant.id)}`;
+            } else {
+                if (!plan?.planId) {
+                    throw new Error("Pricing record not found");
+                }
+                url = `${API_BASE}/plans/${plan.planId}`;
+            }
+
+            const r = await fetch(url, { method: "DELETE" });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                throw new Error(data.error || "Failed to remove pricing");
+            }
+
+            if (scope === "year") {
+                setVariantPricing((previous) => ({
+                    ...previous,
+                    [variant.id]: {
+                        ...(previous[variant.id] || {}),
+                        [confirmAction.duration.durationMonths]: "",
+                    },
+                }));
+                setConfigureProducts((previous) =>
+                    previous.map((currentProduct) => ({
+                        ...currentProduct,
+                        variants: currentProduct.variants.map((currentVariant) => {
+                            if (currentVariant.id !== variant.id) return currentVariant;
+                            return {
+                                ...currentVariant,
+                                warrantyPlans: (currentVariant.warrantyPlans || []).filter(
+                                    (currentPlan) =>
+                                        Number(currentPlan.durationMonths) !==
+                                        Number(confirmAction.duration.durationMonths)
+                                ),
+                            };
+                        }),
+                    }))
+                );
+                setProducts((previous) =>
+                    previous.map((currentProduct) => {
+                        if (currentProduct.id !== configureProducts[0]?.id) {
+                            return currentProduct;
+                        }
+                        const updatedVariants = (currentProduct.variants || []).map(
+                            (currentVariant) => {
+                                if (currentVariant.id !== variant.id) return currentVariant;
+                                return {
+                                    ...currentVariant,
+                                    warrantyPlans: (currentVariant.warrantyPlans || []).filter(
+                                        (currentPlan) =>
+                                            Number(currentPlan.durationMonths) !==
+                                            Number(confirmAction.duration.durationMonths)
+                                    ),
+                                };
+                            }
+                        );
+                        const activeDurations = new Set();
+                        updatedVariants.forEach((currentVariant) => {
+                            (currentVariant.warrantyPlans || []).forEach((currentPlan) => {
+                                if (currentPlan.status && currentPlan.status !== "active") return;
+                                if (Number(currentPlan.price) <= 0) return;
+                                activeDurations.add(Number(currentPlan.durationMonths));
+                            });
+                        });
+                        return {
+                            ...currentProduct,
+                            variants: updatedVariants,
+                            configuredPlanCount: activeDurations.size,
+                        };
+                    })
+                );
+                toast.showSuccess(`${confirmAction.duration.planName} pricing removed`);
+            } else if (scope === "variant") {
+                setVariantPricing((previous) => ({
+                    ...previous,
+                    [variant.id]: {},
+                }));
+                setConfigureProducts((previous) =>
+                    previous.map((currentProduct) => ({
+                        ...currentProduct,
+                        variants: currentProduct.variants.map((currentVariant) => {
+                            if (currentVariant.id !== variant.id) return currentVariant;
+                            return { ...currentVariant, warrantyPlans: [] };
+                        }),
+                    }))
+                );
+                toast.showSuccess(`Pricing removed for ${variant.name || variant.title}`);
+                await loadProducts({
+                    targetPage: page,
+                    search: productSearchQuery,
+                    status: productStatusFilter,
+                });
+            } else {
+                toast.showSuccess(`All pricing removed for ${product.title}`);
+                await loadProducts({
+                    targetPage: page,
+                    search: productSearchQuery,
+                    status: productStatusFilter,
+                });
+            }
+            setConfirmAction(null);
+        } catch (err) {
+            toast.showError(err.message || "Failed to remove pricing");
+        } finally {
+            confirmInFlightRef.current = false;
+            setConfirmLoading(false);
+        }
+    };
+
+    const removeProductPricing = (product) => {
+        setConfirmAction({
+            kind: "pricing",
+            scope: "product",
+            product,
+        });
+    };
+
+    const removeVariantPricing = (product, variant) => {
+        setConfirmAction({
+            kind: "pricing",
+            scope: "variant",
+            product,
+            variant,
+        });
+    };
+
+    const removeVariantDurationPricing = (product, variant, duration) => {
+        const existingPlan = (variant.warrantyPlans || []).find(
+            (currentPlan) =>
+                Number(currentPlan.durationMonths) === Number(duration.durationMonths)
+        );
+        if (!existingPlan?.planId) {
+            toast.showError("Pricing record not found");
+            return;
+        }
+        setConfirmAction({
+            kind: "pricing",
+            scope: "year",
+            product,
+            variant,
+            duration,
+            plan: existingPlan,
+        });
+    };
+
     const saveSettings = async () => {
         setSaving(true);
         try {
@@ -687,7 +994,12 @@ export default function ExtendedWarrantyAdmin() {
                         onAction: saveSettings,
                         loading: saving,
                     }
-                    : undefined
+                    : tab === 1
+                        ? {
+                            content: "Add products",
+                            onAction: openAddProductsModal,
+                        }
+                        : undefined
             }
         >
             <Tabs
@@ -863,7 +1175,7 @@ export default function ExtendedWarrantyAdmin() {
                             {productsLoading ? (
                                 <LoadingPanel label="Searching products..." />
                             ) : products.length === 0 ? (
-                                <EmptyState heading="No products found" image="">
+                                <EmptyState heading="No eligible products found" image="">
                                     <p>
                                         {productSearchQuery
                                             ? "Try a different search term."
@@ -911,6 +1223,11 @@ export default function ExtendedWarrantyAdmin() {
                                                             <Text as="span" fontWeight="semibold">
                                                                 {product.title}
                                                             </Text>
+                                                            {product.isOverride ? (
+                                                                <div style={{ marginTop: 4 }}>
+                                                                    <Badge>Manually added</Badge>
+                                                                </div>
+                                                            ) : null}
                                                         </div>
                                                     </IndexTable.Cell>
                                                     <IndexTable.Cell>
@@ -939,14 +1256,33 @@ export default function ExtendedWarrantyAdmin() {
                                                         )}
                                                     </IndexTable.Cell>
                                                     <IndexTable.Cell>
-                                                        <Button
-                                                            size="slim"
-                                                            onClick={() =>
-                                                                openConfigureModal([product], "single")
-                                                            }
+                                                        <div
+                                                            style={{
+                                                                display: "flex",
+                                                                alignItems: "center",
+                                                                gap: 8,
+                                                                flexWrap: "wrap",
+                                                            }}
                                                         >
-                                                            {planCount ? "Edit pricing" : "Set pricing"}
-                                                        </Button>
+                                                            <Button
+                                                                size="slim"
+                                                                onClick={() =>
+                                                                    openConfigureModal([product], "single")
+                                                                }
+                                                            >
+                                                                {planCount ? "Edit pricing" : "Set pricing"}
+                                                            </Button>
+
+                                                            {planCount > 0 && (
+                                                                <Button
+                                                                    size="slim"
+                                                                    tone="critical"
+                                                                    onClick={() => removeProductPricing(product)}
+                                                                >
+                                                                    Remove pricing
+                                                                </Button>
+                                                            )}
+                                                        </div>
                                                     </IndexTable.Cell>
                                                 </IndexTable.Row>
                                             );
@@ -1312,9 +1648,11 @@ export default function ExtendedWarrantyAdmin() {
                                         }}
                                     >
                                         <div style={styles.stack(2)}>
-                                            <Text as="h4" variant="headingSm">
-                                                {variant.name || variant.title}
-                                            </Text>
+                                            <div style={styles.row(8, "center")}>
+                                                <Text as="h4" variant="headingSm">
+                                                    {variant.name || variant.title}
+                                                </Text>
+                                            </div>
                                             {variant.sku && (
                                                 <Text as="p" tone="subdued" variant="bodySm">
                                                     SKU: {variant.sku}
@@ -1327,35 +1665,369 @@ export default function ExtendedWarrantyAdmin() {
                                             )}
                                         </div>
                                         <div style={styles.grid2}>
-                                            {durations.map((d) => (
-                                                <TextField
-                                                    key={`${variant.id}-${d.durationMonths}`}
-                                                    label={d.planName}
-                                                    type="number"
-                                                    value={
-                                                        variantPricing[variant.id]?.[d.durationMonths] || ""
-                                                    }
-                                                    onChange={(v) =>
-                                                        setVariantPricing((p) => ({
-                                                            ...p,
-                                                            [variant.id]: {
-                                                                ...p[variant.id],
-                                                                [d.durationMonths]: v,
-                                                            },
-                                                        }))
-                                                    }
-                                                    autoComplete="off"
-                                                    helpText={priceFieldHelp}
-                                                    placeholder={priceFieldPlaceholder}
-                                                    suffix={isPercentagePricing ? "%" : undefined}
-                                                />
-                                            ))}
+                                            {durations.map((d) => {
+                                                const existingPlan = (
+                                                    variant.warrantyPlans || []
+                                                ).find(
+                                                    (plan) =>
+                                                        Number(plan.durationMonths) ===
+                                                        Number(d.durationMonths)
+                                                );
+
+                                                const currentPrice =
+                                                    variantPricing[variant.id]?.[
+                                                    d.durationMonths
+                                                    ] ?? "";
+
+                                                return (
+                                                    <div
+                                                        key={`${variant.id}-${d.durationMonths}`}
+                                                        style={{
+                                                            display: "flex",
+                                                            flexDirection: "column",
+                                                            gap: 6,
+                                                        }}
+                                                    >
+                                                        {/* Duration label + remove icon */}
+                                                        <div
+                                                            style={{
+                                                                display: "flex",
+                                                                alignItems: "center",
+                                                                justifyContent: "space-between",
+                                                                gap: 8,
+                                                            }}
+                                                        >
+                                                            <Text
+                                                                as="span"
+                                                                variant="bodyMd"
+                                                                fontWeight="semibold"
+                                                            >
+                                                                {d.planName}
+                                                            </Text>
+
+                                                            {existingPlan?.planId && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() =>
+                                                                        removeVariantDurationPricing(
+                                                                            configureProducts[0],
+                                                                            variant,
+                                                                            d
+                                                                        )
+                                                                    }
+                                                                    title={`Remove ${d.planName} price`}
+                                                                    aria-label={`Remove ${d.planName} price`}
+                                                                    style={{
+                                                                        border: "none",
+                                                                        background: "transparent",
+                                                                        cursor: "pointer",
+                                                                        padding: "2px 5px",
+                                                                        margin: 0,
+                                                                        color: "#8e1f0b",
+                                                                        fontSize: 18,
+                                                                        lineHeight: 1,
+                                                                        fontWeight: 600,
+                                                                        borderRadius: 4,
+                                                                    }}
+                                                                    onMouseEnter={(e) => {
+                                                                        e.currentTarget.style.background =
+                                                                            "#fce8e6";
+                                                                    }}
+                                                                    onMouseLeave={(e) => {
+                                                                        e.currentTarget.style.background =
+                                                                            "transparent";
+                                                                    }}
+                                                                >
+                                                                    ×
+                                                                </button>
+                                                            )}
+                                                        </div>
+
+                                                        <TextField
+                                                            label={d.planName}
+                                                            labelHidden
+                                                            type="number"
+                                                            value={currentPrice}
+                                                            onChange={(v) =>
+                                                                setVariantPricing((p) => ({
+                                                                    ...p,
+                                                                    [variant.id]: {
+                                                                        ...(p[variant.id] || {}),
+                                                                        [d.durationMonths]: v,
+                                                                    },
+                                                                }))
+                                                            }
+                                                            autoComplete="off"
+                                                            helpText={priceFieldHelp}
+                                                            placeholder={priceFieldPlaceholder}
+                                                            suffix={
+                                                                isPercentagePricing
+                                                                    ? "%"
+                                                                    : undefined
+                                                            }
+                                                        />
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
+                                        {/* <div style={styles.grid2}>
+                                            {durations.map((d) => {
+                                                const existingPlan = (
+                                                    variant.warrantyPlans || []
+                                                ).find(
+                                                    (plan) =>
+                                                        Number(plan.durationMonths) ===
+                                                        Number(d.durationMonths)
+                                                );
+
+                                                const currentPrice =
+                                                    variantPricing[variant.id]?.[
+                                                    d.durationMonths
+                                                    ] ?? "";
+
+                                                return (
+                                                    <div
+                                                        key={`${variant.id}-${d.durationMonths}`}
+                                                        style={{
+                                                            display: "flex",
+                                                            flexDirection: "column",
+                                                            gap: 6,
+                                                        }}
+                                                    >
+                                                        <TextField
+                                                            label={d.planName}
+                                                            type="number"
+                                                            value={currentPrice}
+                                                            onChange={(v) =>
+                                                                setVariantPricing((p) => ({
+                                                                    ...p,
+                                                                    [variant.id]: {
+                                                                        ...(p[variant.id] || {}),
+                                                                        [d.durationMonths]: v,
+                                                                    },
+                                                                }))
+                                                            }
+                                                            autoComplete="off"
+                                                            helpText={priceFieldHelp}
+                                                            placeholder={priceFieldPlaceholder}
+                                                            suffix={
+                                                                isPercentagePricing
+                                                                    ? "%"
+                                                                    : undefined
+                                                            }
+                                                        />
+
+                                                        {existingPlan?.planId && (
+                                                            <Button
+                                                                size="slim"
+                                                                tone="critical"
+                                                                onClick={() =>
+                                                                    removeVariantDurationPricing(
+                                                                        configureProducts[0],
+                                                                        variant,
+                                                                        d
+                                                                    )
+                                                                }
+                                                            >
+                                                                Remove price
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div> */}
                                     </div>
                                 </div>
                             ))}
                         </div>
                     )}
+                </Modal.Section>
+            </Modal>
+
+            <Modal
+                open={addProductsOpen}
+                onClose={() => {
+                    if (saving) return;
+                    setAddProductsOpen(false);
+                }}
+                title="Add products"
+                primaryAction={{
+                    content: "Add products",
+                    onAction: addSelectedExcludedProducts,
+                    loading: saving,
+                    disabled: addSelectedResources.length === 0 || addProductsLoading,
+                }}
+                secondaryActions={[
+                    {
+                        content: "Cancel",
+                        onAction: () => setAddProductsOpen(false),
+                        disabled: saving,
+                    },
+                ]}
+                large
+            >
+                <Modal.Section>
+                    <div style={styles.stack(16)}>
+                        <Text as="p" tone="subdued">
+                            Search products that are excluded from the default warranty list
+                            (accessories, spare parts, or products without a product type)
+                            and add them explicitly.
+                        </Text>
+                        <TextField
+                            label="Search excluded products"
+                            labelHidden
+                            value={addSearchInput}
+                            onChange={setAddSearchInput}
+                            placeholder="Search by product name or SKU…"
+                            autoComplete="off"
+                            clearButton
+                            onClearButtonClick={() => {
+                                setAddSearchInput("");
+                                setAddSearchQuery("");
+                                setAddPage(1);
+                                setAddPageCursorHistory([null]);
+                                loadExcludedProducts({ targetPage: 1, search: "" });
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") runAddProductSearch();
+                            }}
+                            connectedRight={
+                                <Button variant="primary" onClick={runAddProductSearch}>
+                                    Search
+                                </Button>
+                            }
+                        />
+                        {addProductsLoading ? (
+                            <LoadingPanel label="Searching products..." />
+                        ) : addProducts.length === 0 ? (
+                            <EmptyState heading="No excluded products found" image="">
+                                <p>
+                                    {addSearchQuery
+                                        ? "Try a different search term. Eligible headphones and soundbars are not shown here."
+                                        : "No excluded products are available to add."}
+                                </p>
+                            </EmptyState>
+                        ) : (
+                            <>
+                                <IndexTable
+                                    resourceName={{ singular: "product", plural: "products" }}
+                                    itemCount={addProducts.length}
+                                    selectedItemsCount={
+                                        addAllResourcesSelected
+                                            ? "All"
+                                            : addSelectedResources.length
+                                    }
+                                    onSelectionChange={handleAddSelectionChange}
+                                    headings={[
+                                        { title: "Product" },
+                                        { title: "Status" },
+                                        { title: "Product type" },
+                                        { title: "Variants" },
+                                    ]}
+                                >
+                                    {addProducts.map((product, index) => (
+                                        <IndexTable.Row
+                                            id={product.id}
+                                            key={product.id}
+                                            selected={addSelectedResources.includes(product.id)}
+                                            position={index}
+                                        >
+                                            <IndexTable.Cell>
+                                                <Text as="span" fontWeight="semibold">
+                                                    {product.title}
+                                                </Text>
+                                            </IndexTable.Cell>
+                                            <IndexTable.Cell>
+                                                <Badge
+                                                    tone={
+                                                        product.status === "ACTIVE"
+                                                            ? "success"
+                                                            : "warning"
+                                                    }
+                                                >
+                                                    {product.status}
+                                                </Badge>
+                                            </IndexTable.Cell>
+                                            <IndexTable.Cell>
+                                                {product.productType || product.category || "—"}
+                                            </IndexTable.Cell>
+                                            <IndexTable.Cell>
+                                                {product.variantCount ??
+                                                    (product.variants || []).length}
+                                            </IndexTable.Cell>
+                                        </IndexTable.Row>
+                                    ))}
+                                </IndexTable>
+                                <div
+                                    style={{
+                                        ...styles.row(8, "center"),
+                                        justifyContent: "space-between",
+                                    }}
+                                >
+                                    <Text as="p" tone="subdued">
+                                        {addSelectedResources.length} selected
+                                    </Text>
+                                    <Pagination
+                                        hasPrevious={addPage > 1}
+                                        onPrevious={() => {
+                                            const nextPage = Math.max(1, addPage - 1);
+                                            setAddPage(nextPage);
+                                            loadExcludedProducts({
+                                                targetPage: nextPage,
+                                                search: addSearchQuery,
+                                            });
+                                        }}
+                                        hasNext={addHasNextPage}
+                                        onNext={() => {
+                                            const nextPage = addPage + 1;
+                                            setAddPage(nextPage);
+                                            loadExcludedProducts({
+                                                targetPage: nextPage,
+                                                search: addSearchQuery,
+                                            });
+                                        }}
+                                        label={`Page ${addPage}`}
+                                    />
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </Modal.Section>
+            </Modal>
+
+            <Modal
+                open={Boolean(confirmAction)}
+                onClose={() => {
+                    if (confirmLoading) return;
+                    setConfirmAction(null);
+                }}
+                title={confirmModalCopy?.title || "Remove pricing?"}
+                primaryAction={{
+                    content: confirmModalCopy?.confirmLabel || "Remove Pricing",
+                    destructive: true,
+                    loading: confirmLoading,
+                    onAction: executeConfirmedAction,
+                }}
+                secondaryActions={[
+                    {
+                        content: "Cancel",
+                        onAction: () => {
+                            if (confirmLoading) return;
+                            setConfirmAction(null);
+                        },
+                        disabled: confirmLoading,
+                    },
+                ]}
+            >
+                <Modal.Section>
+                    <div style={styles.stack(8)}>
+                        <Text as="p">{confirmModalCopy?.body}</Text>
+                        {(confirmModalCopy?.details || []).map((line) => (
+                            <Text as="p" key={line} tone="subdued">
+                                {line}
+                            </Text>
+                        ))}
+                    </div>
                 </Modal.Section>
             </Modal>
         </Page>

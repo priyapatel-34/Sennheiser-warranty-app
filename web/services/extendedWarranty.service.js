@@ -15,6 +15,10 @@ import {
 } from "./extendedWarrantyPricing.js";
 import { computePurchaseWindowState, formatExtensionOfferExpiryLabel } from "./purchaseWindow.utils.js";
 import { syncExtendedWarrantyOrderTags } from "./shopifyOrderTags.service.js";
+import {
+  slugifyProductType,
+  hasProductOverride,
+} from "./warrantyProductEligibility.service.js";
 
 export {
   computePurchaseWindowState,
@@ -301,22 +305,32 @@ export async function getExtendedWarrantySettings(shopId) {
       coverage_text,
       extended_warranty_purchase_days,
       warranty_pricing_type,
-      extended_warranty_offer_enabled
+      extended_warranty_offer_enabled,
+      allowed_product_types
     FROM extended_warranty_settings
     WHERE shop_id = ?
     `,
     [shopId]
   );
 
-  return (
-    row || {
+  if (!row) {
+    return {
       terms_url: null,
       coverage_text: null,
       extended_warranty_purchase_days: null,
       warranty_pricing_type: DEFAULT_WARRANTY_PRICING_TYPE,
       extended_warranty_offer_enabled: 1,
-    }
-  );
+      allowed_product_types: [],
+    };
+  }
+
+  return {
+    ...row,
+    allowed_product_types:
+      row.allowed_product_types && typeof row.allowed_product_types === "string"
+        ? JSON.parse(row.allowed_product_types)
+        : row.allowed_product_types || [],
+  };
 }
 
 export async function fetchProductPricing(session, registered) {
@@ -1065,10 +1079,10 @@ export async function activateEntitlementFromPayment({
     if (!entitlement) {
       const variantPricing = session
         ? await fetchVariantPricing(
-            session,
-            registered.shopify_variant_id,
-            registered.shopify_product_id
-          )
+          session,
+          registered.shopify_variant_id,
+          registered.shopify_product_id
+        )
         : null;
 
       let resolvedPrice = Number(plan.price);
@@ -1267,6 +1281,46 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
     };
   }
 
+  // Enforce admin-configured allowed product types when present. If a whitelist
+  // is configured and the product's type isn't in it, the product is not
+  // eligible unless an explicit product override exists. This requires a
+  // Shopify session to resolve the product type; if no session is available
+  // we conservatively skip the type check.
+  // const allowedTypesRaw = Array.isArray(settings.allowed_product_types)
+  //   ? settings.allowed_product_types
+  //   : [];
+  // if (allowedTypesRaw.length) {
+  //   let productTypeValue = null;
+  //   if (session) {
+  //     try {
+  //       const admin = new shopify.api.clients.Graphql({ session });
+  //       const productGid = String(registered.shopify_product_id).startsWith("gid://")
+  //         ? registered.shopify_product_id
+  //         : `gid://shopify/Product/${registered.shopify_product_id}`;
+  //       const res = await admin.request(
+  //         `query ($id: ID!) { product(id: $id) { productType } }`,
+  //         { variables: { id: productGid } }
+  //       );
+  //       productTypeValue = res?.data?.product?.productType || null;
+  //     } catch (err) {
+  //       // ignore and allow fallback to override check
+  //       productTypeValue = null;
+  //     }
+  //   }
+
+  //   const allowedSet = new Set(allowedTypesRaw.map((t) => slugifyProductType(t)).filter(Boolean));
+  //   const nodeSlug = slugifyProductType(productTypeValue || "");
+  //   const isAllowedType = nodeSlug && allowedSet.has(nodeSlug);
+
+  //   if (!isAllowedType) {
+  //     // Check admin overrides; if an override exists the product is eligible.
+  //     const overrideExists = await hasProductOverride(pool, shopId, registered.shopify_product_id);
+  //     if (!overrideExists) {
+  //       return { eligible: false, reason: "product_type_not_allowed" };
+  //     }
+  //   }
+  // }
+
   const plans = await loadEligiblePlans(shopId, registered);
   if (!plans.length) {
     return { eligible: false, reason: "no_plans_configured" };
@@ -1347,6 +1401,287 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
       purchaseDate: registered.purchase_date,
       variantId: registered.shopify_variant_id,
       productId: registered.shopify_product_id,
+    },
+  };
+}
+
+/**
+ * PDP merchandising offer: same shop-scoped plans and pricing as registration,
+ * but without a registered serial. Purchase-window / already-purchased checks
+ * do not apply until the customer later registers the product.
+ */
+export async function buildPdpExtendedWarrantyOffer(
+  shopId,
+  {
+    session = null,
+    productId,
+    variantId,
+    sku = null,
+    country = null,
+  } = {}
+) {
+  const settings = await getExtendedWarrantySettings(shopId);
+
+  /*
+   * PDP eligibility:
+   * Unlike the registration flow, the customer has not registered
+   * the product yet, so purchase-window and entitlement checks
+   * must NOT be applied here.
+   */
+  if (!isExtendedWarrantyOfferEnabled(settings)) {
+    return {
+      eligible: false,
+      reason: "feature_disabled",
+    };
+  }
+
+  /*
+   * Normalize Shopify product/variant IDs.
+   *
+   * The storefront can send either:
+   * - numeric Shopify IDs
+   * - Shopify GIDs
+   */
+  const productNumeric =
+    getNumericIdFromGid(productId) || Number(productId);
+
+  const variantNumeric = variantId
+    ? getNumericIdFromGid(variantId) || Number(variantId)
+    : null;
+
+  if (
+    !Number.isFinite(productNumeric) ||
+    productNumeric <= 0
+  ) {
+    return {
+      eligible: false,
+      reason: "invalid_product",
+    };
+  }
+
+  /*
+   * IMPORTANT:
+   * Plan eligibility is evaluated against the selected variant.
+   *
+   * If no variant-specific plans exist, loadEligiblePlans()
+   * falls back to product-level plans.
+   */
+  const productRef = {
+    shopify_product_id: productNumeric,
+
+    shopify_variant_id:
+      Number.isFinite(variantNumeric) &&
+      variantNumeric > 0
+        ? variantNumeric
+        : null,
+
+    sku: sku || null,
+  };
+
+  const plans = await loadEligiblePlans(
+    shopId,
+    productRef
+  );
+
+  if (!plans.length) {
+    return {
+      eligible: false,
+      reason: "no_plans_configured",
+    };
+  }
+
+  /*
+   * Resolve warranty pricing.
+   *
+   * For percentage pricing we MUST use the currently
+   * selected Shopify variant price.
+   *
+   * Example:
+   * Product = ₹48,690
+   * 5% warranty = ₹2,434.50
+   */
+  const pricingType =
+    normalizeWarrantyPricingType(
+      settings.warranty_pricing_type
+    );
+
+  const variantPricing =
+    pricingType === "percentage" &&
+    session &&
+    productRef.shopify_variant_id
+      ? await fetchVariantPricing(
+          session,
+          productRef.shopify_variant_id,
+          productNumeric
+        )
+      : null;
+
+  /*
+   * Percentage plans cannot be calculated without
+   * the selected variant price.
+   */
+  if (
+    pricingType === "percentage" &&
+    !variantPricing
+  ) {
+    return {
+      eligible: false,
+      reason: "pricing_unavailable",
+    };
+  }
+
+  const shopCurrency =
+    plans[0]?.currency || null;
+
+  /*
+   * DO NOT filter plans based on
+   * shopify_checkout_variant_id.
+   *
+   * A plan can be displayed even when it does not have
+   * a mapped Shopify checkout variant.
+   *
+   * checkoutMethod tells the frontend how to purchase it.
+   */
+  const basePlans = [];
+
+  for (const planRow of plans) {
+    const pricing = mapPlanForApi(
+      planRow,
+      pricingType,
+      variantPricing
+    );
+
+    if (!pricing) {
+      continue;
+    }
+
+    /*
+     * PDP does not have a registered product yet.
+     *
+     * Therefore we do not calculate registration-based
+     * activation/expiry dates here.
+     */
+    basePlans.push({
+      planId: planRow.plan_id,
+      planName: planRow.plan_name,
+
+      durationYears:
+        planRow.duration_years,
+
+      durationMonths:
+        planRow.duration_months,
+
+      pricingType:
+        pricing.pricingType,
+
+      /*
+       * For percentage pricing this is the calculated
+       * price based on the selected product variant.
+       */
+      price:
+        pricing.displayPrice ||
+        String(pricing.calculatedPrice),
+
+      percentage:
+        pricing.percentage ?? null,
+
+      calculatedPrice:
+        pricing.calculatedPrice,
+
+      currency:
+        planRow.currency,
+
+      coverageText:
+        planRow.coverage_text ||
+        settings.coverage_text,
+
+      /*
+       * Checkout information.
+       *
+       * If a Shopify warranty variant exists:
+       *     cart checkout
+       *
+       * If it does not exist:
+       *     draft-order checkout
+       *
+       * IMPORTANT:
+       * Missing checkoutVariantId must NOT hide the plan.
+       */
+      checkoutVariantId:
+        planRow.shopify_checkout_variant_id
+          ? String(
+              planRow.shopify_checkout_variant_id
+            )
+          : null,
+
+      checkoutMethod:
+        planRow.shopify_checkout_variant_id
+          ? "cart"
+          : "draft_order",
+    });
+  }
+
+  if (!basePlans.length) {
+    return {
+      eligible: false,
+      reason: "no_plans_configured",
+    };
+  }
+
+  const enrichedPlans =
+    sortPlansByDuration(
+      await attachMerchandisingBadges(
+        shopId,
+        basePlans
+      )
+    );
+
+  /*
+   * Resolve Terms & Conditions URL for storefront.
+   */
+  let termsUrl =
+    settings.terms_url || null;
+
+  if (termsUrl && session?.shop) {
+    try {
+      termsUrl = normalizeTermsUrl(
+        settings.terms_url,
+        session.shop
+      );
+    } catch {
+      termsUrl = settings.terms_url;
+    }
+  }
+
+  return {
+    eligible: true,
+
+    currency: shopCurrency,
+
+    pricingType,
+
+    country: country || null,
+
+    plans: enrichedPlans,
+
+    settings: {
+      termsUrl,
+
+      coverageText:
+        settings.coverage_text,
+
+      warrantyPricingType:
+        pricingType,
+    },
+
+    product: {
+      productId: productNumeric,
+
+      variantId:
+        productRef.shopify_variant_id,
+
+      sku:
+        sku || null,
     },
   };
 }

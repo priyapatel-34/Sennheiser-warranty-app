@@ -5,6 +5,7 @@ import {
     loadRegisteredProduct,
     loadEligiblePlans,
     buildExtendedWarrantyOffer,
+    buildPdpExtendedWarrantyOffer,
     createDraftOrderCheckout,
     createPendingEntitlement,
     cancelPendingEntitlementForRegistration,
@@ -262,5 +263,120 @@ export async function cancelExtendedWarrantyPendingCheckout(req, res) {
     } catch (err) {
         console.error("❌ cancelExtendedWarrantyPendingCheckout error:", err);
         return res.status(500).json({ error: err.message || "Failed to cancel pending checkout" });
+    }
+}
+
+function parseStorefrontNumericId(value) {
+    if (value == null || value === "") return null;
+    return getNumericIdFromGid(value) || Number(value) || null;
+}
+
+/**
+ * Storefront PDP offer: shop is taken from the signed app-proxy session,
+ * never from a client-supplied shopId. Product/variant IDs are hints that are
+ * re-resolved against this shop's plan catalog.
+ */
+export async function getPdpExtendedWarrantyOffer(req, res) {
+    try {
+        const session = res.locals.shopifySession;
+        if (!session?.shop) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+
+        const shopId = await resolveShopId(session.shop);
+        if (!shopId) {
+            return res.status(404).json({ error: "Shop not registered" });
+        }
+
+        const source = req.method === "GET" ? req.query : req.body || {};
+        const productId = parseStorefrontNumericId(source.product_id);
+        const variantId = parseStorefrontNumericId(source.variant_id);
+        const sku = source.sku ? String(source.sku).slice(0, 100) : null;
+        const country = source.country ? String(source.country).slice(0, 10) : null;
+
+        if (!productId) {
+            return res.status(400).json({ error: "product_id is required" });
+        }
+
+        const offer = await buildPdpExtendedWarrantyOffer(shopId, {
+            session,
+            productId,
+            variantId,
+            sku,
+            country,
+        });
+
+        return res.json({ success: true, ...offer });
+    } catch (err) {
+        console.error("❌ getPdpExtendedWarrantyOffer error:", err);
+        return res.status(500).json({ error: "Failed to load PDP warranty offer" });
+    }
+}
+
+/**
+ * Re-validates the selected PDP plan server-side before the storefront adds
+ * the mapped Shopify warranty variant to cart. Browser prices are ignored.
+ */
+export async function getPdpCartPayload(req, res) {
+    try {
+        const session = res.locals.shopifySession;
+        if (!session?.shop) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+
+        const shopId = await resolveShopId(session.shop);
+        if (!shopId) {
+            return res.status(404).json({ error: "Shop not registered" });
+        }
+
+        const productId = parseStorefrontNumericId(req.body?.product_id);
+        const variantId = parseStorefrontNumericId(req.body?.variant_id);
+        const planId = Number(req.body?.plan_id);
+
+        if (!productId || !planId) {
+            return res.status(400).json({ error: "product_id and plan_id are required" });
+        }
+
+        const offer = await buildPdpExtendedWarrantyOffer(shopId, {
+            session,
+            productId,
+            variantId,
+            sku: req.body?.sku || null,
+            country: req.body?.country || null,
+        });
+
+        if (!offer.eligible) {
+            return res.status(400).json({
+                error: "Extended warranty is not available for this product",
+                reason: offer.reason,
+            });
+        }
+
+        const plan = (offer.plans || []).find(p => Number(p.planId) === planId);
+        if (!plan) {
+            return res.status(400).json({ error: "Plan not eligible for this product/variant" });
+        }
+
+        if (!plan.checkoutVariantId) {
+            return res.status(400).json({
+                error: "Checkout variant not configured for this plan",
+            });
+        }
+
+        return res.json({
+            success: true,
+            method: "cart",
+            variantId: plan.checkoutVariantId,
+            properties: {
+                _ew_type: "extended_warranty",
+                _ew_source: "pdp",
+                _ew_plan_id: String(plan.planId),
+                _ew_product_id: String(productId),
+                _ew_variant_id: String(variantId || ""),
+            },
+        });
+    } catch (err) {
+        console.error("❌ getPdpCartPayload error:", err);
+        return res.status(500).json({ error: "Failed to build PDP cart payload" });
     }
 }

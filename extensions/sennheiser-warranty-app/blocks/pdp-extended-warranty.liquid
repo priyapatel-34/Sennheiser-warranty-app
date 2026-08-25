@@ -1,0 +1,186 @@
+{% comment %}
+  PDP Extended Warranty App Block
+
+  Purpose:
+  - Provides the product/variant context required by pdp-extended-warranty.js.
+  - Provides initial variant information through Liquid.
+  - The JavaScript file is responsible for rendering the PDP warranty UI
+    and the "What's Covered?" modal.
+
+  IMPORTANT:
+  Do not put the modal HTML directly in this Liquid file.
+  pdp-extended-warranty.js dynamically creates the modal so that:
+  - variant changes can be handled without a Liquid re-render
+  - warranty plans can be fetched dynamically
+  - the same component can be reused across PDP variants
+{% endcomment %}
+
+{% assign ew_product = block.settings.product | default: product %}
+
+{% if ew_product == blank %}
+  {% assign ew_product = product %}
+{% endif %}
+
+{% if ew_product != blank %}
+
+  {% assign ew_variant = ew_product.selected_or_first_available_variant %}
+  {% assign ew_variant_image = ew_variant.featured_image | default: ew_product.featured_image %}
+
+  {% if ew_variant_image %}
+    {% assign ew_variant_image_url = ew_variant_image | image_url: width: 600 %}
+  {% else %}
+    {% assign ew_variant_image_url = "" %}
+  {% endif %}
+
+  <div
+    id="ew-pdp-{{ block.id }}"
+    class="ew-pdp"
+    data-ew-pdp-root
+    data-block-id="{{ block.id }}"
+    data-product-id="{{ ew_product.id }}"
+    data-product-title="{{ ew_product.title | escape }}"
+    data-product-handle="{{ ew_product.handle | escape }}"
+    data-variant-id="{{ ew_variant.id }}"
+    data-variant-sku="{{ ew_variant.sku | escape }}"
+    data-variant-title="{{ ew_variant.title | escape }}"
+    data-product-image="{{ ew_variant_image_url | escape }}"
+    data-country="{{ localization.country.iso_code }}"
+    data-currency="{{ cart.currency.iso_code }}"
+
+    data-heading="{{ block.settings.heading | escape }}"
+    data-whats-covered-label="{{ block.settings.whats_covered_label | escape }}"
+    data-show-whats-covered="{{ block.settings.show_whats_covered }}"
+    data-save-label="{{ block.settings.save_label | escape }}"
+    data-none-label="{{ block.settings.none_plan_label | escape }}"
+    data-terms-label="{{ block.settings.terms_label | escape }}"
+    data-loading-label="{{ block.settings.loading_label | escape }}"
+    data-empty-label="{{ block.settings.empty_label | escape }}"
+    data-error-label="{{ block.settings.error_label | escape }}"
+
+    hidden
+  >
+
+    {% comment %}
+      Variant data is serialized here so JavaScript can immediately respond
+      to variant changes without another Liquid request.
+    {% endcomment %}
+
+    <script type="application/json" data-ew-pdp-variants>
+      [
+        {%- for variant in ew_product.variants -%}
+
+          {%- assign variant_image = variant.featured_image | default: ew_product.featured_image -%}
+
+          {%- if variant_image -%}
+            {%- assign variant_image_url = variant_image | image_url: width: 600 -%}
+          {%- else -%}
+            {%- assign variant_image_url = nil -%}
+          {%- endif -%}
+
+          {
+            "id": {{ variant.id | json }},
+            "sku": {{ variant.sku | json }},
+            "title": {{ variant.title | json }},
+            "image": {{ variant_image_url | json }},
+            "available": {{ variant.available | json }}
+          }
+
+          {%- unless forloop.last -%}
+            ,
+          {%- endunless -%}
+
+        {%- endfor -%}
+      ]
+    </script>
+
+  </div>
+
+{% endif %}
+
+
+{% schema %}
+{
+  "name": "Extended Warranty",
+  "target": "section",
+  "stylesheet": "pdp-extended-warranty.css",
+  "javascript": "pdp-extended-warranty.js",
+
+  "enabled_on": {
+    "templates": [
+      "product"
+    ]
+  },
+
+  "settings": [
+    {
+      "type": "product",
+      "id": "product",
+      "label": "Product",
+      "autofill": true
+    },
+
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "default": "Add Extended Warranty"
+    },
+
+    {
+      "type": "checkbox",
+      "id": "show_whats_covered",
+      "label": "Show What's covered link",
+      "default": true
+    },
+
+    {
+      "type": "text",
+      "id": "whats_covered_label",
+      "label": "What's covered label",
+      "default": "What's covered?"
+    },
+
+    {
+      "type": "text",
+      "id": "save_label",
+      "label": "Modal save button",
+      "default": "SAVE"
+    },
+
+    {
+      "type": "text",
+      "id": "none_plan_label",
+      "label": "No coverage label",
+      "default": "No Extended Coverage"
+    },
+
+    {
+      "type": "text",
+      "id": "terms_label",
+      "label": "Terms link label",
+      "default": "Detailed Terms And Conditions"
+    },
+
+    {
+      "type": "text",
+      "id": "loading_label",
+      "label": "Loading text",
+      "default": "Loading warranty options..."
+    },
+
+    {
+      "type": "text",
+      "id": "empty_label",
+      "label": "Unavailable text",
+      "default": "Extended warranty is not available"
+    },
+
+    {
+      "type": "text",
+      "id": "error_label",
+      "label": "Error text",
+      "default": "Warranty options could not be loaded"
+    }
+  ]
+}
+{% endschema %}

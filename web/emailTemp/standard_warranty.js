@@ -10,6 +10,7 @@ export default function WarrantyRegistrationSuccessTemplate({
   orderNumber,
   purchaseDate,
   warrantyPeriod,
+  serialNumber,
   productDetailsHtml = "",
 }) {
   const bodyHtml = `
@@ -24,6 +25,7 @@ export default function WarrantyRegistrationSuccessTemplate({
       <strong>Product:</strong> ${productTitle}<br/>
       ${orderNumber && orderNumber !== "N/A" ? `<strong>Order Number:</strong> ${orderNumber}<br/>` : ""}
       ${purchaseDate ? `<strong>Purchase Date:</strong> ${purchaseDate}<br/>` : ""}
+      ${serialNumber ? `<strong>Serial Number:</strong> ${serialNumber}<br/>` : ""}
       <strong>Warranty Period:</strong> ${warrantyPeriod}<br/>
     </p>
 

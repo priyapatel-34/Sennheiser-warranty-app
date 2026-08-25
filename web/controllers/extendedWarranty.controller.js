@@ -15,14 +15,143 @@ import {
     formatConfiguredPlanPrice,
     resolvePlanPrice,
 } from "../services/extendedWarrantyPricing.js";
+import {
+    getNumericIdFromGid,
+    isDefaultEligible,
+    isEffectivelyEligible,
+    isExcludedFromDefaultList,
+    getOverrideSkipReason,
+    productMatchesSearchTerm,
+    buildEligibleProductsShopifyQuery,
+    buildExcludedProductsShopifyQuery,
+    listEnabledOverrideProductIds,
+    upsertProductOverride,
+    deleteProductOverride,
+    slugifyProductType,
+    isEffectivelyEligibleWithAllowed,
+} from "../services/warrantyProductEligibility.service.js";
+import {
+    PRICING_DELETE_SCOPE,
+    removeWarrantyPricingRecords,
+    // writeAdminAudit,
+} from "../services/extendedWarrantyPricingDeletion.service.js";
 
 /**
- * Normalizes a Shopify GID into its numeric id for database lookups and joins.
+ * Resolves a stable actor label for admin audit rows from the Shopify session.
  */
-function getNumericIdFromGid(gid) {
-    if (!gid) return null;
-    const numeric = Number(gid.split("/").pop());
-    return Number.isFinite(numeric) ? numeric : null;
+function getAdminActor(session) {
+    const user = session?.onlineAccessInfo?.associated_user;
+    if (user?.email) return user.email;
+    if (user?.id) return `staff:${user.id}`;
+    return session?.shop || null;
+}
+
+function normalizeProductSearchText(value) {
+    return String(value || "")
+        .replace(/["\\]/g, " ")
+        .trim();
+}
+
+function buildShopifyProductSearchQuery(searchTerm, statusFilter = "") {
+    const status = String(statusFilter || "").toLowerCase().trim();
+    let statusQuery;
+    if (status === "active") {
+        statusQuery = "status:active";
+    } else if (status === "draft") {
+        statusQuery = "status:draft";
+    } else {
+        statusQuery = "(status:active OR status:draft)";
+    }
+
+    const term = normalizeProductSearchText(searchTerm);
+    if (!term) return statusQuery;
+    return `(title:*${term}* OR sku:*${term}*) AND ${statusQuery}`;
+}
+
+function getShopifyProductSearchQueryForScope(searchTerm, statusFilter, scope = "eligible") {
+    const baseQuery = buildShopifyProductSearchQuery(searchTerm, statusFilter);
+    if (scope !== "eligible") return baseQuery;
+    return baseQuery;
+}
+
+async function loadProductOverrides(shopId) {
+    const [rows] = await pool.query(
+        `
+        SELECT shopify_product_id
+        FROM extended_warranty_product_overrides
+        WHERE shop_id = ? AND enabled = 1
+        `,
+        [shopId]
+    );
+
+    return new Set(
+        rows.flatMap(row => {
+            const productId = String(row.shopify_product_id);
+            const numeric = Number(productId);
+            return Number.isFinite(numeric) ? [productId, numeric] : [productId];
+        })
+    );
+}
+
+async function loadEffectiveProductContext(shopId, products) {
+    const overrideIds = await loadProductOverrides(shopId);
+    return products.map(product => ({
+        ...mapProductWithEligibility(product, overrideIds),
+        overrideIds,
+    }));
+}
+
+async function writeAdminAudit({
+    shopId,
+    session,
+    actionType,
+    entityType,
+    entityId,
+    beforeValue = null,
+    afterValue = null,
+}) {
+    const adminUserId = session?.id || session?.shop || "admin";
+    const region = session?.country || session?.locale || null;
+    await pool.query(
+        `
+        INSERT INTO extended_warranty_admin_audit (
+          shop_id,
+          region,
+          admin_user_id,
+          action_type,
+          entity_type,
+          entity_id,
+          before_value,
+          after_value
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+            shopId,
+            region,
+            adminUserId,
+            actionType,
+            entityType,
+            String(entityId),
+            beforeValue == null ? null : JSON.stringify(beforeValue),
+            afterValue == null ? null : JSON.stringify(afterValue),
+        ]
+    );
+}
+
+function parseAdminProductId(productId) {
+    if (!productId) return null;
+    const productGid = productId.startsWith("gid://")
+        ? productId
+        : `gid://shopify/Product/${productId}`;
+    return getNumericIdFromGid(productGid);
+}
+
+function parseAdminVariantId(variantId) {
+    if (!variantId) return null;
+    const variantGid = variantId.startsWith("gid://")
+        ? variantId
+        : `gid://shopify/ProductVariant/${variantId}`;
+    return getNumericIdFromGid(variantGid);
 }
 
 /**
@@ -101,6 +230,7 @@ const PRODUCTS_WITH_VARIANTS_QUERY = `
           status
           totalInventory
           productType
+          tags
           variants(first: 100) {
             edges {
               node {
@@ -126,46 +256,39 @@ const PRODUCTS_WITH_VARIANTS_QUERY = `
   }
 `;
 
-/**
- * Builds the Shopify product search string used to load eligible products for
- * extended-warranty configuration.
- */
-function buildShopifyProductSearchQuery(searchTerm, statusFilter = "") {
-    const status = String(statusFilter || "").toLowerCase().trim();
-    let statusQuery;
-    if (status === "active") {
-        statusQuery = "status:active";
-    } else if (status === "draft") {
-        statusQuery = "status:draft";
-    } else {
-        statusQuery = "(status:active OR status:draft)";
+const PRODUCTS_BY_IDS_QUERY = `
+  query ExtendedWarrantyProductsByIds($ids: [ID!]!) {
+    shop {
+      currencyCode
     }
-
-    const term = String(searchTerm || "").trim();
-    if (!term) return statusQuery;
-    const sanitized = term.replace(/["\\]/g, " ").trim();
-    return `(title:*${sanitized}* OR sku:*${sanitized}*) AND ${statusQuery}`;
-}
-
-/**
- * Applies an additional local filter so product search can match titles and
- * variant SKUs after the Shopify query returns results.
- */
-function productMatchesSearchTerm(productNode, searchTerm) {
-    const term = String(searchTerm || "").trim().toLowerCase();
-    if (!term) return true;
-
-    const title = String(productNode.title || "").toLowerCase();
-    if (title.includes(term)) return true;
-
-    const variants = productNode.variants?.edges || [];
-    return variants.some(edge => {
-        const variant = edge.node || {};
-        const variantTitle = String(variant.displayName || variant.title || "").toLowerCase();
-        const sku = String(variant.sku || "").toLowerCase();
-        return variantTitle.includes(term) || sku.includes(term);
-    });
-}
+    nodes(ids: $ids) {
+      ... on Product {
+        id
+        title
+        status
+        totalInventory
+        productType
+        tags
+        variants(first: 100) {
+          edges {
+            node {
+              id
+              title
+              displayName
+              sku
+              price
+              compareAtPrice
+              selectedOptions {
+                name
+                value
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
 
 /**
  * Counts active plan durations for a product so the grid can show how much of
@@ -182,6 +305,41 @@ function countActivePlanDurationsForProduct(planRows, productNumericId) {
     return durations.size;
 }
 
+/**
+ * Shapes a Shopify product node for the admin eligible-product list.
+ */
+function shapeListedProduct(node, {
+    overrideSet = new Set(),
+    plansByVariantId = {},
+    allPlanRows = [],
+} = {}) {
+    const productNumericId = getNumericIdFromGid(node.id);
+    const variants = (node.variants?.edges || []).map(v =>
+        formatVariantNode(v.node, plansByVariantId)
+    );
+    const isOverride = Boolean(
+        productNumericId && overrideSet.has(Number(productNumericId))
+    );
+
+    return {
+        id: node.id,
+        title: node.title,
+        status: node.status,
+        inventory: node.totalInventory,
+        category: node.productType,
+        productType: node.productType || "",
+        tags: Array.isArray(node.tags) ? node.tags : [],
+        isOverride,
+        eligibilitySource: isOverride && !isDefaultEligible(node) ? "override" : "default",
+        variants,
+        warrantyPlans: variants.flatMap(v => v.warrantyPlans),
+        configuredPlanCount: countActivePlanDurationsForProduct(
+            allPlanRows,
+            productNumericId
+        ),
+    };
+}
+
 const PRODUCT_VARIANTS_QUERY = `
   query ExtendedWarrantyProductVariants($productId: ID!) {
     shop {
@@ -191,6 +349,8 @@ const PRODUCT_VARIANTS_QUERY = `
       id
       title
       status
+      productType
+      tags
       variants(first: 100) {
         edges {
           node {
@@ -418,12 +578,20 @@ export async function getWarrantyProducts(req, res) {
         const cursor = jumpLast ? null : req.query.cursor || null;
         const searchTerm = req.query.q || req.query.search || "";
         const statusFilter = req.query.status || "";
+        const scope = String(req.query.scope || "eligible").toLowerCase();
         const pageSize = Math.min(
             50,
             Math.max(1, parseInt(req.query.limit, 10) || 25)
         );
-        const productQuery = buildShopifyProductSearchQuery(searchTerm, statusFilter);
+        const overrideIds = await listEnabledOverrideProductIds(pool, shopId);
+        const overrideSet = new Set(overrideIds.map(Number));
+        const productQuery = buildEligibleProductsShopifyQuery({
+            searchTerm,
+            statusFilter,
+            overrideProductIds: overrideIds,
+        });
         const admin = new shopify.api.clients.Graphql({ session });
+        // const overrideIds = await loadProductOverrides(shopId);
 
         let response;
         if (jumpLast) {
@@ -453,28 +621,92 @@ export async function getWarrantyProducts(req, res) {
         }
 
         const edges = response.data?.products?.edges || [];
-        const filteredEdges = searchTerm
-            ? edges.filter(edge => productMatchesSearchTerm(edge.node, searchTerm))
-            : edges;
-        const currency = response.data?.shop?.currencyCode || "USD";
+const eligibleEdges = edges.filter(edge => {
+            const product = edge.node;
+            const matchesSearch = searchTerm
+                ? productMatchesSearchTerm(product, searchTerm)
+                : true;
+            if (!matchesSearch) return false;
+            // const eligibility = evaluateProductEligibility(product, overrideIds);
+            // return scope === "excluded"
+            //     ? !eligibility.isEligible
+            //     : eligibility.isEligible;
+        });
+        // Load EW settings early so we can apply any admin-configured product-type
+        // whitelist when filtering the product list.
         const ewSettings = await getExtendedWarrantySettings(shopId);
+        const allowedTypesRaw = Array.isArray(ewSettings.allowed_product_types)
+            ? ewSettings.allowed_product_types
+            : [];
+        const allowedSlugSet = new Set(
+            allowedTypesRaw.map((t) => slugifyProductType(t)).filter(Boolean)
+        );
+
         const warrantyPricingType =
             ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
+
+        const filteredEdges = edges.filter((edge) => {
+            if (searchTerm && !productMatchesSearchTerm(edge.node, searchTerm)) {
+                return false;
+            }
+
+            const productNode = edge.node;
+            const numericId = getNumericIdFromGid(productNode.id);
+            const isOverride = numericId && overrideSet.has(Number(numericId));
+
+            if (allowedSlugSet.size) {
+                const nodeSlug = slugifyProductType(productNode.productType || "");
+                return isOverride || allowedSlugSet.has(nodeSlug);
+            }
+
+            return isEffectivelyEligible(edge.node, overrideIds);
+        });
+
+        const requestedPage = Math.max(1, parseInt(req.query.page, 10) || 1);
+        if (
+            !cursor &&
+            !jumpLast &&
+            requestedPage === 1 &&
+            !searchTerm &&
+            overrideIds.length
+        ) {
+            const presentIds = new Set(
+                filteredEdges.map((edge) => getNumericIdFromGid(edge.node.id))
+            );
+            const missingOverrideIds = overrideIds.filter(
+                (id) => !presentIds.has(Number(id))
+            );
+            if (missingOverrideIds.length) {
+                const nodesResponse = await admin.request(PRODUCTS_BY_IDS_QUERY, {
+                    variables: {
+                        ids: missingOverrideIds
+                            .slice(0, 50)
+                            .map((id) => `gid://shopify/Product/${id}`),
+                    },
+                });
+                for (const node of nodesResponse.data?.nodes || []) {
+                    if (!node?.id) continue;
+                    filteredEdges.unshift({ cursor: null, node });
+                }
+            }
+        }
+
+        const currency = response.data?.shop?.currencyCode || "USD";
         const totalCount = searchTerm
-            ? filteredEdges.length
-            : response.data?.productsCount?.count ?? filteredEdges.length;
+            ? eligibleEdges.length
+            : response.data?.productsCount?.count ?? eligibleEdges.length;
         const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
         const currentPage = jumpLast
             ? totalPages
             : Math.max(1, parseInt(req.query.page, 10) || 1);
 
-        const productNumericIds = filteredEdges
+        const productNumericIds = eligibleEdges
             .map(e => getNumericIdFromGid(e.node.id))
             .filter(Boolean);
 
         let plansByVariantId = {};
         let allPlanRows = [];
-        if (productNumericIds.length > 0) {
+        if (scope !== "excluded" && productNumericIds.length > 0) {
             const placeholders = productNumericIds.map(() => "?").join(",");
             const [planRows] = await pool.query(
                 `
@@ -500,7 +732,7 @@ export async function getWarrantyProducts(req, res) {
             allPlanRows = planRows;
 
             const variantPricingById = {};
-            for (const edge of filteredEdges) {
+            for (const edge of eligibleEdges) {
                 for (const variantEdge of edge.node.variants?.edges || []) {
                     const variantNumericId = getNumericIdFromGid(variantEdge.node.id);
                     if (!variantNumericId) continue;
@@ -525,34 +757,20 @@ export async function getWarrantyProducts(req, res) {
             );
         }
 
-        const products = filteredEdges.map(edge => {
-            const node = edge.node;
-            const productNumericId = getNumericIdFromGid(node.id);
-            const variants = (node.variants?.edges || []).map(v =>
-                formatVariantNode(v.node, plansByVariantId)
-            );
-
-            return {
-                id: node.id,
-                title: node.title,
-                status: node.status,
-                inventory: node.totalInventory,
-                category: node.productType,
-                variants,
-                warrantyPlans: variants.flatMap(v => v.warrantyPlans),
-                configuredPlanCount: countActivePlanDurationsForProduct(
-                    allPlanRows,
-                    productNumericId
-                ),
-            };
-        });
+        const products = filteredEdges.map(edge =>
+            shapeListedProduct(edge.node, {
+                overrideSet,
+                plansByVariantId,
+                allPlanRows,
+            })
+        );
 
         return res.json({
             success: true,
             currency,
             warrantyPricingType,
             products,
-            nextCursor: filteredEdges.length ? filteredEdges[filteredEdges.length - 1].cursor : null,
+            nextCursor: eligibleEdges.length ? eligibleEdges[eligibleEdges.length - 1].cursor : null,
             hasNextPage: Boolean(response.data?.products?.pageInfo?.hasNextPage),
             pagination: {
                 total: totalCount,
@@ -748,7 +966,8 @@ async function applyProductPlanMappings(
     productId,
     mappings,
     shopCurrency,
-    warrantyPricingType = DEFAULT_WARRANTY_PRICING_TYPE
+    warrantyPricingType = DEFAULT_WARRANTY_PRICING_TYPE,
+    actor = null
 ) {
     const pricingType = normalizeWarrantyPricingType(warrantyPricingType);
     const productGid = productId.startsWith("gid://")
@@ -795,15 +1014,18 @@ async function applyProductPlanMappings(
         const planCurrency = currency?.trim() || shopCurrency;
 
         if (planPrice === 0 && normalizedStatus === "active") {
-            await connection.query(
-                `
-        DELETE FROM extended_warranty_plans
-        WHERE shop_id = ?
-          AND shopify_variant_id = ?
-          AND duration_months = ?
-        `,
-                [shopId, variantNumericId, months]
-            );
+            try {
+                await removeWarrantyPricingRecords(connection, {
+                    shopId,
+                    productId: productNumericId,
+                    variantId: variantNumericId,
+                    durationMonths: months,
+                    actor,
+                    scope: PRICING_DELETE_SCOPE.VARIANT_DURATION,
+                });
+            } catch (err) {
+                if (err.statusCode !== 404) throw err;
+            }
             continue;
         }
 
@@ -866,6 +1088,7 @@ export async function bulkSaveWarrantyPlanMapping(req, res) {
         const ewSettings = await getExtendedWarrantySettings(shopId);
         const warrantyPricingType =
             ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
+        const actor = getAdminActor(session);
 
         const connection = await pool.getConnection();
         const errors = [];
@@ -886,7 +1109,8 @@ export async function bulkSaveWarrantyPlanMapping(req, res) {
                         item.productId,
                         item.mappings,
                         shopCurrency,
-                        warrantyPricingType
+                        warrantyPricingType,
+                        actor
                     );
                     saved += 1;
                 } catch (itemErr) {
@@ -972,6 +1196,7 @@ export async function saveWarrantyPlanMapping(req, res) {
         const ewSettings = await getExtendedWarrantySettings(shopId);
         const warrantyPricingType =
             ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
+        const actor = getAdminActor(session);
 
         const connection = await pool.getConnection();
         try {
@@ -982,7 +1207,8 @@ export async function saveWarrantyPlanMapping(req, res) {
                 productId,
                 mappings,
                 shopCurrency,
-                warrantyPricingType
+                warrantyPricingType,
+                actor
             );
             await connection.commit();
             return res.json({ success: true });
@@ -1075,6 +1301,7 @@ function mapSettingsRow(row, expiryReminderConfigs = []) {
             true
         ),
         expiryReminderConfigs,
+        allowedProductTypes: row?.allowed_product_types ? JSON.parse(row.allowed_product_types) : [],
     };
 }
 
@@ -1110,6 +1337,61 @@ export async function getEWSettings(req, res) {
 }
 
 /**
+ * Fetch distinct product types from the store's Shopify catalog (paginated).
+ */
+// export async function getShopProductTypes(req, res) {
+//         try {
+//                 const session = res.locals.shopify.session;
+//                 if (!session?.shop) return res.status(401).json({ error: "Unauthorized" });
+
+//                 const client = new shopify.api.clients.Graphql({ session });
+//                 const PRODUCT_TYPES_QUERY = `
+//                     query FetchProductTypes($cursor: String, $first: Int!) {
+//                         products(first: $first, after: $cursor) {
+//                             edges {
+//                                 cursor
+//                                 node { productType }
+//                             }
+//                             pageInfo { hasNextPage }
+//                         }
+//                     }
+//                 `;
+
+//                     let cursor = null;
+//                     let hasNext = true;
+//                     const map = new Map(); // slug -> Set(rawValues)
+
+//                     while (hasNext) {
+//                         const response = await client.request(PRODUCT_TYPES_QUERY, {
+//                             cursor,
+//                             first: 250,
+//                         });
+//                         const edges = (response?.products?.edges) || [];
+//                             for (const e of edges) {
+//                                 const pt = e?.node?.productType;
+//                                 if (!pt) continue;
+//                                 const slug = slugifyProductType(pt);
+//                             if (!slug) continue;
+//                             if (!map.has(slug)) map.set(slug, new Set());
+//                             map.get(slug).add(String(pt).trim());
+//                         }
+//                         hasNext = Boolean(response?.products?.pageInfo?.hasNextPage);
+//                         cursor = edges.length ? edges[edges.length - 1].cursor : null;
+//                     }
+
+//                     const productTypes = Array.from(map.entries()).map(([slug, rawSet]) => ({
+//                         slug,
+//                         raw: Array.from(rawSet)[0] || slug,
+//                     })).sort((a, b) => a.raw.localeCompare(b.raw));
+
+//                     return res.json({ success: true, productTypes });
+//         } catch (err) {
+//                 console.error("❌ getShopProductTypes error:", err);
+//                 return res.status(500).json({ error: "Failed to fetch product types" });
+//         }
+// }
+
+/**
  * Persists the shop-level extended-warranty settings and reminder-day rules.
  */
 export async function saveEWSettings(req, res) {
@@ -1130,7 +1412,19 @@ export async function saveEWSettings(req, res) {
             extendedWarrantyPurchaseDays = null,
             warrantyPricingType = DEFAULT_WARRANTY_PRICING_TYPE,
             expiryReminderConfigs = [],
+            allowedProductTypes = [],
         } = req.body;
+
+        // Normalize and dedupe allowed product types as raw strings trimmed
+        const normalizedAllowed = Array.isArray(allowedProductTypes)
+            ? Array.from(
+                  new Set(
+                      allowedProductTypes
+                          .map((v) => (v == null ? "" : String(v).trim()))
+                          .filter(Boolean)
+                  )
+              )
+            : [];
         const extendedWarrantyOfferEnabled = parseExtendedWarrantyOfferEnabled(
             req.body.extendedWarrantyOfferEnabled,
             true
@@ -1168,24 +1462,27 @@ export async function saveEWSettings(req, res) {
         terms_url,
         coverage_text,
         extended_warranty_purchase_days,
-        warranty_pricing_type,
-        extended_warranty_offer_enabled
+                warranty_pricing_type,
+                extended_warranty_offer_enabled,
+                allowed_product_types
       ) VALUES (?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         terms_url = VALUES(terms_url),
         coverage_text = VALUES(coverage_text),
         extended_warranty_purchase_days = VALUES(extended_warranty_purchase_days),
-        warranty_pricing_type = VALUES(warranty_pricing_type),
-        extended_warranty_offer_enabled = VALUES(extended_warranty_offer_enabled),
-        updated_at = CURRENT_TIMESTAMP
+                warranty_pricing_type = VALUES(warranty_pricing_type),
+                extended_warranty_offer_enabled = VALUES(extended_warranty_offer_enabled),
+                allowed_product_types = VALUES(allowed_product_types),
+                updated_at = CURRENT_TIMESTAMP
       `,
             [
                 shopId,
                 normalizedTermsUrl,
                 coverageText || null,
                 purchaseDays,
-                normalizedPricingType,
-                extendedWarrantyOfferEnabled ? 1 : 0,
+                                normalizedPricingType,
+                                extendedWarrantyOfferEnabled ? 1 : 0,
+                                normalizedAllowed.length ? JSON.stringify(normalizedAllowed) : null,
             ]
         );
 
@@ -1243,10 +1540,23 @@ export async function deleteEWDuration(req, res) {
         const conn = await pool.getConnection();
         try {
             await conn.beginTransaction();
-            await conn.query(
-                `DELETE FROM extended_warranty_plans WHERE shop_id = ? AND duration_months = ?`,
+            const [planRows] = await conn.query(
+                `SELECT id FROM extended_warranty_plans WHERE shop_id = ? AND duration_months = ?`,
                 [shopId, durationRow.duration_months]
             );
+            const actor = getAdminActor(session);
+            for (const planRow of planRows) {
+                try {
+                    await removeWarrantyPricingRecords(conn, {
+                        shopId,
+                        planId: planRow.id,
+                        actor,
+                        scope: PRICING_DELETE_SCOPE.PLAN,
+                    });
+                } catch (planErr) {
+                    if (planErr.statusCode !== 404) throw planErr;
+                }
+            }
             const [result] = await conn.query(
                 `DELETE FROM extended_warranty_durations WHERE shop_id = ? AND id = ?`,
                 [shopId, durationId]
@@ -1290,18 +1600,458 @@ export async function deleteEWPlan(req, res) {
             return res.status(400).json({ error: "Invalid plan id" });
         }
 
-        const [result] = await pool.query(
-            `DELETE FROM extended_warranty_plans WHERE shop_id = ? AND id = ?`,
-            [shopId, planId]
-        );
-
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ error: "Plan not found" });
+        const connection = await pool.getConnection();
+        try {
+            await connection.beginTransaction();
+            const result = await removeWarrantyPricingRecords(connection, {
+                shopId,
+                planId,
+                actor: getAdminActor(session),
+                scope: PRICING_DELETE_SCOPE.PLAN,
+            });
+            await connection.commit();
+            return res.json({ success: true, ...result });
+        } catch (err) {
+            await connection.rollback();
+            if (err.statusCode === 404) {
+                return res.status(404).json({ error: "Plan not found" });
+            }
+            throw err;
+        } finally {
+            connection.release();
         }
-
-        return res.json({ success: true });
     } catch (err) {
         console.error("❌ deleteEWPlan error:", err);
         return res.status(500).json({ error: "Failed to delete plan" });
+    }
+}
+
+/**
+ * Deletes ALL extended-warranty pricing for one product.
+ *
+ * This removes every pricing mapping belonging to the product:
+ * - all variants
+ * - all warranty durations
+ *
+ * The delete is always scoped by shop_id so one merchant
+ * cannot affect another merchant's pricing.
+ */
+export async function deleteEWProductPricing(req, res) {
+    try {
+        const session = res.locals.shopify.session;
+
+        if (!session?.shop) {
+            return res.status(401).json({
+                error: "Unauthorized",
+            });
+        }
+
+        const shopId = await resolveShopId(session);
+
+        if (!shopId) {
+            return res.status(404).json({
+                error: "Shop not registered",
+            });
+        }
+
+        const { productId } = req.params;
+
+        if (!productId) {
+            return res.status(400).json({
+                error: "Product ID is required",
+            });
+        }
+
+        const productGid = productId.startsWith("gid://")
+            ? productId
+            : `gid://shopify/Product/${productId}`;
+
+        const productNumericId = getNumericIdFromGid(productGid);
+
+        if (!productNumericId) {
+            return res.status(400).json({
+                error: "Invalid product ID",
+            });
+        }
+
+        const connection = await pool.getConnection();
+        try {
+            await connection.beginTransaction();
+            const result = await removeWarrantyPricingRecords(connection, {
+                shopId,
+                productId: productNumericId,
+                actor: getAdminActor(session),
+                scope: PRICING_DELETE_SCOPE.PRODUCT,
+            });
+            await connection.commit();
+            return res.json({
+                success: true,
+                removed: result.removed,
+                deleted: result.deleted,
+                deactivated: result.deactivated,
+            });
+        } catch (err) {
+            await connection.rollback();
+            if (err.statusCode === 404) {
+                return res.status(404).json({
+                    error: "Pricing record not found",
+                });
+            }
+            throw err;
+        } finally {
+            connection.release();
+        }
+    } catch (err) {
+        console.error(
+            "❌ deleteEWProductPricing error:",
+            err
+        );
+
+        return res.status(500).json({
+            error: "Failed to remove product pricing",
+        });
+    }
+}
+
+/**
+ * Deletes all extended-warranty pricing for one variant of a product.
+ */
+export async function deleteEWVariantPricing(req, res) {
+    try {
+        const session = res.locals.shopify.session;
+        if (!session?.shop) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+
+        const shopId = await resolveShopId(session);
+        if (!shopId) {
+            return res.status(404).json({ error: "Shop not registered" });
+        }
+
+        const { variantId } = req.params;
+        if (!variantId) {
+            return res.status(400).json({ error: "Variant ID is required" });
+        }
+
+        const variantGid = variantId.startsWith("gid://")
+            ? variantId
+            : `gid://shopify/ProductVariant/${variantId}`;
+        const variantNumericId = getNumericIdFromGid(variantGid);
+        if (!variantNumericId) {
+            return res.status(400).json({ error: "Invalid variant ID" });
+        }
+
+        const connection = await pool.getConnection();
+        try {
+            await connection.beginTransaction();
+            const result = await removeWarrantyPricingRecords(connection, {
+                shopId,
+                variantId: variantNumericId,
+                actor: getAdminActor(session),
+                scope: PRICING_DELETE_SCOPE.VARIANT,
+            });
+            await connection.commit();
+            return res.json({
+                success: true,
+                removed: result.removed,
+                deleted: result.deleted,
+                deactivated: result.deactivated,
+            });
+        } catch (err) {
+            await connection.rollback();
+            if (err.statusCode === 404) {
+                return res.status(404).json({ error: "Pricing record not found" });
+            }
+            throw err;
+        } finally {
+            connection.release();
+        }
+    } catch (err) {
+        console.error("❌ deleteEWVariantPricing error:", err);
+        return res.status(500).json({ error: "Failed to remove variant pricing" });
+    }
+}
+
+const EXCLUDED_SEARCH_MAX_PAGES = 8;
+
+/**
+ * Searches Shopify products that are excluded from the default eligible list
+ * so an admin can explicitly add them as overrides.
+ */
+export async function searchExcludedWarrantyProducts(req, res) {
+    try {
+        const session = res.locals.shopify.session;
+        if (!session?.shop) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+
+        const shopId = await resolveShopId(session);
+        if (!shopId) {
+            return res.status(404).json({ error: "Shop not registered" });
+        }
+
+        const cursor = req.query.cursor || null;
+        const searchTerm = req.query.q || req.query.search || "";
+        const statusFilter = req.query.status || "";
+        const pageSize = Math.min(
+            50,
+            Math.max(1, parseInt(req.query.limit, 10) || 25)
+        );
+        const currentPage = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const overrideIds = await listEnabledOverrideProductIds(pool, shopId);
+        const productQuery = buildExcludedProductsShopifyQuery({
+            searchTerm,
+            statusFilter,
+        });
+        const admin = new shopify.api.clients.Graphql({ session });
+
+        const collected = [];
+        let walkCursor = cursor;
+        let hasNextPage = true;
+        let response = null;
+        let pagesWalked = 0;
+
+        while (
+            collected.length < pageSize &&
+            hasNextPage &&
+            pagesWalked < EXCLUDED_SEARCH_MAX_PAGES
+        ) {
+            response = await admin.request(PRODUCTS_WITH_VARIANTS_QUERY, {
+                variables: {
+                    cursor: walkCursor,
+                    query: productQuery,
+                    first: pageSize,
+                },
+            });
+            const edges = response.data?.products?.edges || [];
+            hasNextPage = Boolean(response.data?.products?.pageInfo?.hasNextPage);
+            walkCursor = edges.length ? edges[edges.length - 1].cursor : null;
+            pagesWalked += 1;
+
+            for (const edge of edges) {
+                const node = edge.node;
+                if (searchTerm && !productMatchesSearchTerm(node, searchTerm)) {
+                    continue;
+                }
+                if (!isExcludedFromDefaultList(node, overrideIds)) {
+                    continue;
+                }
+                collected.push(edge);
+                if (collected.length >= pageSize) break;
+            }
+        }
+
+        const products = collected.map(edge => ({
+            id: edge.node.id,
+            title: edge.node.title,
+            status: edge.node.status,
+            inventory: edge.node.totalInventory,
+            category: edge.node.productType,
+            productType: edge.node.productType || "",
+            tags: Array.isArray(edge.node.tags) ? edge.node.tags : [],
+            isOverride: false,
+            variantCount: (edge.node.variants?.edges || []).length,
+        }));
+
+        return res.json({
+            success: true,
+            currency: response?.data?.shop?.currencyCode || "USD",
+            products,
+            nextCursor: walkCursor,
+            hasNextPage,
+            pagination: {
+                pageSize,
+                page: currentPage,
+                hasNextPage,
+                hasPreviousPage: currentPage > 1,
+            },
+        });
+    } catch (err) {
+        console.error("❌ searchExcludedWarrantyProducts error:", err);
+        return res.status(500).json({ error: "Failed to search excluded products" });
+    }
+}
+
+/**
+ * Adds shop-scoped overrides so excluded products appear in the eligible list.
+ */
+export async function addWarrantyProductOverrides(req, res) {
+    try {
+        const session = res.locals.shopify.session;
+        if (!session?.shop) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+
+        const shopId = await resolveShopId(session);
+        if (!shopId) {
+            return res.status(404).json({ error: "Shop not registered" });
+        }
+
+        const rawIds = req.body?.productIds;
+        if (!Array.isArray(rawIds) || !rawIds.length) {
+            return res.status(400).json({ error: "productIds array is required" });
+        }
+        if (rawIds.length > 50) {
+            return res.status(400).json({
+                error: "A maximum of 50 products can be added at once",
+            });
+        }
+
+        const gids = [...new Set(
+            rawIds
+                .map(id => {
+                    const numericId = getNumericIdFromGid(id);
+                    return numericId ? `gid://shopify/Product/${numericId}` : null;
+                })
+                .filter(Boolean)
+        )];
+
+        if (!gids.length) {
+            return res.status(400).json({ error: "No valid product IDs provided" });
+        }
+
+        const admin = new shopify.api.clients.Graphql({ session });
+        const response = await admin.request(PRODUCTS_BY_IDS_QUERY, {
+            variables: { ids: gids },
+        });
+        const nodes = (response.data?.nodes || []).filter(node => node?.id);
+        const foundById = new Map(
+            nodes.map(node => [getNumericIdFromGid(node.id), node])
+        );
+        const overrideIds = await listEnabledOverrideProductIds(pool, shopId);
+        const actor = getAdminActor(session);
+        const added = [];
+        const skipped = [];
+
+        const connection = await pool.getConnection();
+        try {
+            await connection.beginTransaction();
+            for (const gid of gids) {
+                const numericId = getNumericIdFromGid(gid);
+                const product = foundById.get(numericId) || null;
+                const skip = getOverrideSkipReason(product, overrideIds);
+                if (skip) {
+                    skipped.push({
+                        productId: gid,
+                        title: product?.title,
+                        ...skip,
+                    });
+                    continue;
+                }
+
+                await upsertProductOverride(connection, shopId, numericId, actor);
+                await writeAdminAudit(connection, {
+                    shopId,
+                    actionType: "product_override_add",
+                    entityType: "extended_warranty_product_override",
+                    entityId: numericId,
+                    beforeValue: null,
+                    afterValue: {
+                        shopifyProductId: numericId,
+                        title: product.title,
+                        enabled: true,
+                    },
+                    actor,
+                });
+                added.push({ productId: gid, title: product.title });
+                overrideIds.push(numericId);
+            }
+            await connection.commit();
+        } catch (err) {
+            await connection.rollback();
+            throw err;
+        } finally {
+            connection.release();
+        }
+
+        const allAlreadyAdded =
+            added.length === 0 &&
+            skipped.length > 0 &&
+            skipped.every(item => item.reason === "already_added");
+        const allAlreadyEligible =
+            added.length === 0 &&
+            skipped.length > 0 &&
+            skipped.every(item => item.reason === "already_eligible");
+
+        if (allAlreadyEligible) {
+            return res.status(409).json({
+                success: false,
+                error:
+                    skipped.length === 1
+                        ? "Product is already eligible by default"
+                        : "Selected products are already eligible by default",
+                added,
+                skipped,
+            });
+        }
+
+        return res.json({
+            success: added.length > 0 || allAlreadyAdded,
+            added,
+            skipped,
+        });
+    } catch (err) {
+        console.error("❌ addWarrantyProductOverrides error:", err);
+        return res.status(500).json({ error: "Failed to add products" });
+    }
+}
+
+/**
+ * Removes a shop-scoped product override. Existing warranty pricing is kept.
+ */
+export async function removeWarrantyProductOverride(req, res) {
+    try {
+        const session = res.locals.shopify.session;
+        if (!session?.shop) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+
+        const shopId = await resolveShopId(session);
+        if (!shopId) {
+            return res.status(404).json({ error: "Shop not registered" });
+        }
+
+        const { productId } = req.params;
+        const numericId = getNumericIdFromGid(
+            productId?.startsWith("gid://")
+                ? productId
+                : `gid://shopify/Product/${productId}`
+        );
+        if (!numericId) {
+            return res.status(400).json({ error: "Invalid product ID" });
+        }
+
+        const connection = await pool.getConnection();
+        try {
+            await connection.beginTransaction();
+            const affected = await deleteProductOverride(
+                connection,
+                shopId,
+                numericId
+            );
+            if (!affected) {
+                await connection.rollback();
+                return res.status(404).json({ error: "Override not found" });
+            }
+            await writeAdminAudit(connection, {
+                shopId,
+                actionType: "product_override_remove",
+                entityType: "extended_warranty_product_override",
+                entityId: numericId,
+                beforeValue: { shopifyProductId: numericId, enabled: true },
+                afterValue: null,
+                actor: getAdminActor(session),
+            });
+            await connection.commit();
+            return res.json({ success: true });
+        } catch (err) {
+            await connection.rollback();
+            throw err;
+        } finally {
+            connection.release();
+        }
+    } catch (err) {
+        console.error("❌ removeWarrantyProductOverride error:", err);
+        return res.status(500).json({ error: "Failed to remove product" });
     }
 }

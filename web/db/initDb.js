@@ -269,7 +269,7 @@ async function ensureSchemaUpdates() {
     [
       "extended_warranty_offer_enabled",
       "TINYINT(1) NOT NULL DEFAULT 1 AFTER warranty_pricing_type",
-    ],
+    ]
   ];
 
   for (const [col, definition] of ewSettingsColumns) {
@@ -747,6 +747,44 @@ export async function initDb() {
     `);
 
     console.log("✅ Email settings tables ready");
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS extended_warranty_product_overrides (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        shop_id BIGINT UNSIGNED NOT NULL,
+        shopify_product_id BIGINT NOT NULL,
+        enabled TINYINT(1) NOT NULL DEFAULT 1,
+        created_by VARCHAR(255) NULL,
+        updated_by VARCHAR(255) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_shop_ew_product_override (shop_id, shopify_product_id),
+        INDEX idx_ew_override_shop_enabled (shop_id, enabled),
+        FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+      )
+    `);
+
+    console.log("✅ Extended warranty product overrides table ready");
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS extended_warranty_admin_audit (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        shop_id BIGINT UNSIGNED NOT NULL,
+        action_type VARCHAR(80) NOT NULL,
+        entity_type VARCHAR(80) NOT NULL,
+        entity_id VARCHAR(100) NULL,
+        before_value JSON NULL,
+        after_value JSON NULL,
+        actor VARCHAR(255) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_ew_admin_audit_shop (shop_id, created_at),
+        INDEX idx_ew_admin_audit_entity (entity_type, entity_id),
+        FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+      )
+    `);
+
+    console.log("✅ Extended warranty admin audit table ready");
 
     await ensureSchemaUpdates();
 

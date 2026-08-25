@@ -12,8 +12,19 @@ scopes = "write_products,read_orders,read_all_orders,write_orders,read_customers
 [webhooks]
 api_version = "2026-07"
 
+[events]
+api_version = "unstable"
+
+[[events.subscription]]
+handle = "product-updates"
+topic = "Product"
+actions = ["create", "update", "delete"]
+uri = "/events/products"
+
 [auth]
-redirect_urls = [ "https://patrick-exposed-rough-responsibilities.trycloudflare.com/api/auth" ]
+redirect_urls = [
+  "https://patrick-exposed-rough-responsibilities.trycloudflare.com/api/auth"
+]
 
 [build]
 automatically_update_urls_on_dev = true

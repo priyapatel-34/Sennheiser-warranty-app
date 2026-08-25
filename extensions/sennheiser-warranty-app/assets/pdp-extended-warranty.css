@@ -1,0 +1,817 @@
+/* =========================================================
+   Sennheiser / SureBright — PDP Extended Warranty
+   Desktop: two-column modal. Mobile: single-column sheet
+   (brand + product image → What's Included → plans → SAVE)
+   ========================================================= */
+
+.ew-pdp {
+  --ew-bg: #000000;
+  --ew-card: #111111;
+  --ew-card-hover: #1a1a1a;
+  --ew-border: #333333;
+
+  --ew-text: #ffffff;
+  --ew-text-secondary: #d8d8d8;
+  --ew-text-muted: #9a9a9c;
+
+  --ew-blue: #0096d6;
+  --ew-blue-hover: #0aa3e2;
+  --ew-blue-soft: #bde8fb;
+
+  --ew-radius: 4px;
+
+  width: 100%;
+  margin: 18px 0 22px;
+
+  color: var(--ew-text);
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.ew-pdp *,
+.ew-pdp *::before,
+.ew-pdp *::after {
+  box-sizing: border-box;
+}
+
+.ew-pdp[hidden] {
+  display: none !important;
+}
+
+/* ================= PDP HEADER ================= */
+
+.ew-pdp__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  min-height: 22px;
+  width: 80%;
+}
+
+.ew-pdp__heading {
+  margin: 0;
+  color: #fff;
+  font-size: 17px;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+.ew-pdp__covered-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ew-pdp__covered-link:hover {
+  color: var(--ew-blue);
+}
+
+.ew-pdp__covered-link:focus-visible {
+  outline: 2px solid var(--ew-blue);
+  outline-offset: 3px;
+}
+
+/* Right-side provider logo/lockup, pushed to the far right */
+.ew-pdp__brand {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #a06bff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.ew-pdp__brand img {
+  display: block;
+  height: 16px;
+  width: auto;
+}
+
+/* ================= PLAN CARDS ================= */
+
+.ew-pdp__plans {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  width: 80%;
+}
+
+.ew-pdp__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 4px;
+
+  width: 100%;
+  min-height: 54px;
+  padding: 10px 12px;
+
+  border: 1px solid var(--ew-border);
+  border-radius: var(--ew-radius);
+  background: var(--ew-card);
+  color: #fff;
+
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.ew-pdp__card:hover {
+  border-color: #5a5a5a;
+  background: var(--ew-card-hover);
+}
+
+.ew-pdp__card.is-selected {
+  border-color: var(--ew-blue);
+  background: rgba(0, 150, 214, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(0, 150, 214, 0.45);
+}
+
+.ew-pdp__card:focus-visible {
+  outline: 2px solid var(--ew-blue);
+  outline-offset: 2px;
+}
+
+.ew-pdp__card-name {
+  margin: 0;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 500;
+}
+
+.ew-pdp__card-price {
+  margin: 0;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 400;
+}
+
+/* BEST SELLER badge — centered above the card */
+.ew-pdp__badge {
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: #1c5068;
+  color: #fefefe;
+
+  font-size: 8px;
+  line-height: 1.1;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ================= STATUS ================= */
+
+.ew-pdp__status {
+  margin: 10px 0 0;
+  color: var(--ew-text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ew-pdp__status.is-error {
+  color: #e47777;
+}
+
+/* ================= MODAL ================= */
+
+.ew-pdp-modal[hidden] {
+  display: none !important;
+}
+
+.ew-pdp-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  color: #fff;
+}
+
+.ew-pdp-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.78);
+}
+
+.ew-pdp-modal__dialog {
+  position: relative;
+  z-index: 1;
+
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  grid-template-rows: 1fr auto;
+
+  width: min(1020px, 100%);
+  max-height: 92vh;
+  overflow: hidden;
+
+  border: 1px solid #2a2a2a;
+  border-radius: 20px;
+  background: #000;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.7);
+}
+
+.ew-pdp-modal__close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 20;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-family: Arial, sans-serif;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ew-pdp-modal__close:hover {
+  opacity: 0.75;
+}
+
+.ew-pdp-modal__close:focus-visible {
+  outline: 2px solid var(--ew-blue, #0096d6);
+  outline-offset: 2px;
+}
+
+/* ---------- LEFT PANEL ---------- */
+
+.ew-pdp-modal__left {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 46px 44px 34px;
+  border-right: 1px solid #2a2a2a;
+  overflow-y: auto;
+}
+
+.ew-pdp-modal__kicker {
+  margin: 0 0 26px;
+  color: #fff;
+  font-size: 21px;
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+.ew-pdp-modal__coverage {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ew-pdp-modal__coverage li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0;
+  color: #e6e6e6;
+  font-size: 13.5px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+/* Shield + check icon, matching the screenshot */
+.ew-pdp-modal__coverage li::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 15px;
+  height: 16px;
+  margin-top: 2px;
+
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 26'%3E%3Cpath fill='none' stroke='%23ffffff' stroke-width='1.6' stroke-linejoin='round' d='M12 1.6 22 5.2v7.4c0 6-4.2 10-10 11.8C6 22.6 2 18.6 2 12.6V5.2z'/%3E%3Cpath fill='none' stroke='%23ffffff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M7.6 12.6l3 3 5.8-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
+/* Trust block (stars + copy + logos) */
+.ew-pdp-modal__trust {
+  margin-top: auto;
+  padding-top: 40px;
+  text-align: center;
+}
+
+.ew-pdp-modal__stars {
+  color: #f5a623;
+  font-size: 15px;
+  letter-spacing: 3px;
+  line-height: 1;
+}
+
+.ew-pdp-modal__trust-text {
+  margin: 8px 0 0;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ew-pdp-modal__brands {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 18px;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.ew-pdp-modal__brands img {
+  display: block;
+  height: 22px;
+  width: auto;
+}
+
+.ew-pdp-modal__brands-plus {
+  color: #cfcfcf;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.ew-pdp-modal__brands-provider {
+  color: #a06bff;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+/* ---------- RIGHT PANEL ---------- */
+
+.ew-pdp-modal__right {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 46px 44px 30px;
+  overflow-y: auto;
+}
+
+.ew-pdp-modal__product {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 0 26px;
+}
+
+.ew-pdp-modal__product-title {
+  order: 1;
+  margin: 0 0 14px;
+  color: #fff;
+  font-size: 15px;
+  line-height: 1.25;
+  font-weight: 700;
+}
+
+.ew-pdp-modal__product img {
+  order: 2;
+  display: block;
+  width: 160px;
+  height: 160px;
+  margin: 0;
+  object-fit: contain;
+  background: #fff;
+  border-radius: 0;
+}
+
+.ew-pdp-modal__select-label {
+  margin: 0 0 12px;
+  color: #fff;
+  font-size: 15px;
+  line-height: 1.3;
+  font-weight: 700;
+}
+
+.ew-pdp-modal__plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.ew-pdp-modal__plan {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  width: 100%;
+  min-height: 50px;
+  padding: 13px 16px;
+
+  border: 1px solid #303030;
+  border-radius: 4px;
+  background: #141414;
+  color: #fff;
+
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.ew-pdp-modal__plan:hover {
+  border-color: #555;
+  background: #1d1d1d;
+}
+
+.ew-pdp-modal__plan.is-selected {
+  border-color: var(--ew-blue, #0096d6);
+  background: var(--ew-blue-soft, #bde8fb);
+  color: #000;
+}
+
+.ew-pdp-modal__plan-name {
+  color: inherit;
+  font-size: 14px;
+  line-height: 1.25;
+  font-weight: 600;
+}
+
+.ew-pdp-modal__plan-price {
+  margin-left: auto;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.25;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ew-pdp-modal__plan-badge {
+  position: absolute;
+  top: -7px;
+  right: 14px;
+  z-index: 2;
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: var(--ew-blue-soft, #1c5068);
+  color: #fefefe;
+  font-size: 8px;
+  line-height: 1.1;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Selected check pill on the right edge */
+.ew-pdp-modal__plan.is-selected::after {
+  content: "✓";
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #1288c4;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.ew-pdp-modal__save {
+  display: block;
+  width: 100%;
+  margin-top: 22px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 3px;
+  background: #0b8ed0;
+  color: #fff;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.ew-pdp-modal__save:hover:not(:disabled) {
+  background: var(--ew-blue-hover, #0aa3e2);
+}
+
+.ew-pdp-modal__save:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+/* ---------- FOOTER (spans both columns) ---------- */
+
+.ew-pdp-modal__footer {
+  grid-column: 1 / -1;
+  grid-row: 2;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+
+  min-height: 48px;
+  padding: 12px 44px;
+
+  border-top: 1px solid #2a2a2a;
+  background: #000;
+  color: #d0d0d0;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.ew-pdp-modal__footer > * {
+  margin: 0;
+}
+
+.ew-pdp-modal__terms {
+  color: #fff;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+
+.ew-pdp-modal__terms:hover {
+  color: var(--ew-blue, #0096d6);
+}
+
+body.ew-pdp-modal-open {
+  overflow: hidden;
+}
+
+/* ================= TABLET ================= */
+
+@media (max-width: 900px) {
+  .ew-pdp-modal__dialog {
+    width: min(780px, 100%);
+  }
+
+  .ew-pdp-modal__left {
+    padding: 40px 28px 28px;
+  }
+
+  .ew-pdp-modal__right {
+    padding: 40px 28px 24px;
+  }
+
+  .ew-pdp-modal__footer {
+    padding: 12px 28px;
+  }
+
+  .ew-pdp-modal__product img {
+    width: 140px;
+    height: 140px;
+  }
+}
+
+/* ================= MOBILE =================
+   Single scrolling column in this exact order:
+   product (brand + image) → What's Included →
+   Select a coverage plan → plans → SAVE → trust → footer.
+   The two panels use display:contents so their children
+   become direct flex items and can be ordered freely.
+   ========================================================= */
+
+@media (max-width: 749px) {
+  .ew-pdp {
+    margin: 14px 0 18px;
+  }
+
+  .ew-pdp__header {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .ew-pdp__plans {
+    width: 100%;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .ew-pdp__badge {
+    left: 14px;
+    transform: none;
+  }
+
+  .ew-pdp-modal {
+    align-items: stretch;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .ew-pdp-modal__dialog {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 100%;
+    max-height: 100vh;
+    max-height: 100dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 0;
+    border-radius: 0;
+    padding: 46px 20px 28px;
+    background: #0b0b0d;
+  }
+
+  /* unwrap the two panels */
+  .ew-pdp-modal__left,
+  .ew-pdp-modal__right {
+    display: contents;
+  }
+
+  .ew-pdp-modal__close {
+    top: 14px;
+    right: 12px;
+    width: 30px;
+    height: 30px;
+    font-size: 20px;
+  }
+
+  /* --- 1. product: brand/title above a white image tile --- */
+  .ew-pdp-modal__product {
+    order: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    margin: 0 0 26px;
+  }
+
+  .ew-pdp-modal__product-title {
+    order: 1;
+    margin: 0 0 16px;
+    text-align: center;
+    font-size: 15px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .ew-pdp-modal__product img {
+    order: 2;
+    width: 150px;
+    height: 150px;
+    max-width: 60%;
+    background: #fff;
+  }
+
+  /* --- 2. What's Included --- */
+  .ew-pdp-modal__kicker {
+    order: 2;
+    width: 100%;
+    margin: 0 0 18px;
+    font-size: 20px;
+    text-align: left;
+  }
+
+  .ew-pdp-modal__coverage {
+    order: 3;
+    width: 100%;
+    gap: 14px;
+    margin: 0 0 26px;
+  }
+
+  .ew-pdp-modal__coverage li {
+    color: #cfe6f4;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  /* --- 3. plan selection --- */
+  .ew-pdp-modal__select-label {
+    order: 4;
+    width: 100%;
+    margin: 0 0 12px;
+    font-size: 14px;
+  }
+
+  .ew-pdp-modal__plan-list {
+    order: 5;
+    width: 100%;
+    gap: 12px;
+  }
+
+  .ew-pdp-modal__plan {
+    min-height: 54px;
+    padding: 15px 16px;
+    border-radius: 6px;
+  }
+
+  .ew-pdp-modal__save {
+    order: 6;
+    width: 100%;
+    margin-top: 20px;
+    padding: 15px 16px;
+    border-radius: 4px;
+  }
+
+  /* --- 4. trailing trust + footer --- */
+  .ew-pdp-modal__trust {
+    order: 7;
+    width: 100%;
+    margin-top: 0;
+    padding-top: 30px;
+  }
+
+  .ew-pdp-modal__footer {
+    order: 8;
+    width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 24px;
+    padding: 14px 0 0;
+  }
+
+  .ew-pdp-modal__terms {
+    white-space: normal;
+  }
+}
+
+@media (max-width: 420px) {
+  .ew-pdp-modal__coverage li {
+    font-size: 12.5px;
+  }
+
+  .ew-pdp-modal__plan-name {
+    font-size: 13px;
+  }
+
+  .ew-pdp-modal__plan-price {
+    font-size: 12px;
+  }
+}
+
+/* ================= A11Y / MOTION ================= */
+
+.ew-pdp button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ew-pdp-modal button:focus-visible {
+  outline: 2px solid var(--ew-blue, #0096d6);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ew-pdp *,
+  .ew-pdp-modal * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

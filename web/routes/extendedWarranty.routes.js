@@ -4,10 +4,16 @@ import {
     addEWDuration,
     deleteEWDuration,
     getWarrantyProducts,
+    searchExcludedWarrantyProducts,
+    addWarrantyProductOverrides,
+    removeWarrantyProductOverride,
+    // getExcludedWarrantyProducts,
     getProductVariants,
     getWarrantyPlans,
     saveWarrantyPlanMapping,
     bulkSaveWarrantyPlanMapping,
+    deleteEWProductPricing,
+    deleteEWVariantPricing,
     deleteEWPlan,
     getEWSettings,
     saveEWSettings,
@@ -41,11 +47,26 @@ router.put("/settings", saveEWSettings);
 router.post("/settings", saveEWSettings);
 
 router.get("/products", getWarrantyProducts);
+router.get("/products/excluded", searchExcludedWarrantyProducts);
+router.post("/products/overrides", addWarrantyProductOverrides);
+router.delete("/products/overrides/:productId", removeWarrantyProductOverride);
+// router.get("/products/excluded", getExcludedWarrantyProducts);
 router.get("/products/:productId/variants", getProductVariants);
 router.get("/variants/:variantId/plans", getWarrantyPlans);
 router.post("/plans", saveWarrantyPlanMapping);
 router.post("/plans/bulk", bulkSaveWarrantyPlanMapping);
+
+// Delete all pricing for one product
+router.delete("/plans/product/:productId", deleteEWProductPricing);
+
+// Delete all pricing for one variant
+router.delete("/plans/variant/:variantId", deleteEWVariantPricing);
+
+// Delete one pricing plan
 router.delete("/plans/:id", deleteEWPlan);
+
+router.post("/product-overrides", addWarrantyProductOverrides);
+router.delete("/product-overrides/:productId", removeWarrantyProductOverride);
 
 router.patch("/durations/:id", updateEWDuration);
 
