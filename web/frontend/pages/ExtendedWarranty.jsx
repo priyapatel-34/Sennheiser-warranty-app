@@ -523,7 +523,7 @@ export default function ExtendedWarrantyAdmin() {
         if (isPercentagePricing) {
             return num > 0 && num <= 100;
         }
-        return num >= 0;
+        return num > 0;
     };
 
     const savePricing = async () => {
@@ -537,7 +537,7 @@ export default function ExtendedWarrantyAdmin() {
             toast.showError(
                 isPercentagePricing
                     ? "Each percentage must be greater than 0 and at most 100"
-                    : "Each amount must be greater than or equal to 0"
+                    : "Each amount must be greater than 0"
             );
             return;
         }
@@ -584,7 +584,12 @@ export default function ExtendedWarrantyAdmin() {
 
             setModalOpen(false);
             clearSelection();
-            loadProducts({ targetPage: page, search: productSearchQuery });
+
+            await loadProducts({
+                targetPage: page,
+                search: productSearchQuery,
+                status: productStatusFilter,
+            });
         } catch (err) {
             toast.showError(err.message || "Failed to save pricing");
         } finally {
