@@ -64,6 +64,14 @@ async function ensureSchemaUpdates() {
       "shopify_checkout_variant_id",
       "BIGINT NULL AFTER coverage_text",
     ],
+    [
+      "shopify_checkout_product_id",
+      "BIGINT NULL AFTER shopify_checkout_variant_id",
+    ],
+    [
+      "checkout_variant_synced_at",
+      "TIMESTAMP NULL AFTER shopify_checkout_product_id",
+    ],
   ];
 
   for (const [col, definition] of planColumns) {
@@ -269,7 +277,11 @@ async function ensureSchemaUpdates() {
     [
       "extended_warranty_offer_enabled",
       "TINYINT(1) NOT NULL DEFAULT 1 AFTER warranty_pricing_type",
-    ]
+    ],
+    [
+      "shopify_checkout_product_id",
+      "BIGINT NULL AFTER extended_warranty_offer_enabled",
+    ],
   ];
 
   for (const [col, definition] of ewSettingsColumns) {

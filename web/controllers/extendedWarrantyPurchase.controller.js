@@ -15,6 +15,7 @@ import {
     fetchProductPricing,
     resolvePlanRowForCheckout,
 } from "../services/extendedWarranty.service.js";
+import { ensurePlanCheckoutVariant } from "../services/extendedWarrantyCheckoutVariant.service.js";
 import { normalizeWarrantyPricingType } from "../services/extendedWarrantyPricing.js";
 
 /** GET offer data after standard registration. */
@@ -316,6 +317,9 @@ export async function getPdpExtendedWarrantyOffer(req, res) {
 /**
  * Re-validates the selected PDP plan server-side before the storefront adds
  * the mapped Shopify warranty variant to cart. Browser prices are ignored.
+ *
+ * Response `variantId` is shopify_checkout_variant_id (the warranty product
+ * variant), never the customer's selected product variant.
  */
 export async function getPdpCartPayload(req, res) {
     try {
@@ -333,8 +337,10 @@ export async function getPdpCartPayload(req, res) {
         const variantId = parseStorefrontNumericId(req.body?.variant_id);
         const planId = Number(req.body?.plan_id);
 
-        if (!productId || !planId) {
-            return res.status(400).json({ error: "product_id and plan_id are required" });
+        if (!productId || !variantId || !planId) {
+            return res.status(400).json({
+                error: "product_id, variant_id, and plan_id are required",
+            });
         }
 
         const offer = await buildPdpExtendedWarrantyOffer(shopId, {
@@ -352,12 +358,35 @@ export async function getPdpCartPayload(req, res) {
             });
         }
 
-        const plan = (offer.plans || []).find(p => Number(p.planId) === planId);
+        const plan = (offer.plans || []).find((p) => Number(p.planId) === planId);
         if (!plan) {
             return res.status(400).json({ error: "Plan not eligible for this product/variant" });
         }
 
-        if (!plan.checkoutVariantId) {
+        let warrantyVariantId = parseStorefrontNumericId(plan.checkoutVariantId);
+        if (
+            !warrantyVariantId ||
+            Number(warrantyVariantId) === Number(variantId)
+        ) {
+            try {
+                warrantyVariantId = await ensurePlanCheckoutVariant({
+                    session,
+                    shopId,
+                    plan,
+                    parentVariantId: variantId,
+                });
+            } catch (provisionErr) {
+                console.error("❌ Failed to provision warranty checkout variant:", provisionErr);
+                return res.status(400).json({
+                    error: "Checkout variant not configured for this plan",
+                });
+            }
+        }
+
+        if (
+            !warrantyVariantId ||
+            Number(warrantyVariantId) === Number(variantId)
+        ) {
             return res.status(400).json({
                 error: "Checkout variant not configured for this plan",
             });
@@ -366,13 +395,16 @@ export async function getPdpCartPayload(req, res) {
         return res.json({
             success: true,
             method: "cart",
-            variantId: plan.checkoutVariantId,
+            variantId: String(warrantyVariantId),
+            parentVariantId: String(variantId),
+            planId: String(plan.planId),
+            planName: plan.planName || null,
             properties: {
                 _ew_type: "extended_warranty",
                 _ew_source: "pdp",
                 _ew_plan_id: String(plan.planId),
                 _ew_product_id: String(productId),
-                _ew_variant_id: String(variantId || ""),
+                _ew_variant_id: String(variantId),
             },
         });
     } catch (err) {

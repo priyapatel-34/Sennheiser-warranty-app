@@ -66,7 +66,7 @@ export default defineConfig({
       "^/app/settings(/|(\\?.*)?$)": proxyOptions,
       "^/app/standard-warranty(/|(\\?.*)?$)": proxyOptions,
       "^/app/extended-warranty(/|(\\?.*)?$)": proxyOptions,
-      "^/app/registered-products(/.*)?$": proxyOptions,
+      "^/app/registered-products(/|(\\?.*)?$)": proxyOptions,
       "^/app/email-settings(/|(\\?.*)?$)": proxyOptions,
     },
   },

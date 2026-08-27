@@ -306,6 +306,7 @@ export async function getExtendedWarrantySettings(shopId) {
       extended_warranty_purchase_days,
       warranty_pricing_type,
       extended_warranty_offer_enabled,
+      shopify_checkout_product_id,
       allowed_product_types
     FROM extended_warranty_settings
     WHERE shop_id = ?
@@ -320,6 +321,7 @@ export async function getExtendedWarrantySettings(shopId) {
       extended_warranty_purchase_days: null,
       warranty_pricing_type: DEFAULT_WARRANTY_PRICING_TYPE,
       extended_warranty_offer_enabled: 1,
+      shopify_checkout_product_id: null,
       allowed_product_types: [],
     };
   }

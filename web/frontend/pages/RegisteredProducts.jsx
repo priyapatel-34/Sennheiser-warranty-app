@@ -112,6 +112,65 @@ function formatOrderNo(item) {
   return item.order_number || "—";
 }
 
+function csvEscape(value) {
+  const stringValue = value == null ? "" : String(value);
+  return `"${stringValue.replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(filename, rows) {
+  if (!rows.length) return;
+
+  const headers = [
+    "Warranty Record ID",
+    "Customer",
+    "Product",
+    "Serial Number",
+    "Purchase Type",
+    "Order Number",
+    "SKU",
+    "Email",
+    "Warranty Type",
+    "Warranty End",
+    "Extended Warranty End",
+  ];
+
+  const csv = [
+    headers.map(csvEscape).join(","),
+    ...rows.map(item =>
+      [
+        item.id,
+        item.customer_name,
+        item.product_name,
+        item.serial_number,
+        item.purchase_type === "shopify"
+          ? "Shopify Purchase"
+          : "External Purchase",
+        formatOrderNo(item),
+        item.sku,
+        item.customer_email,
+        formatWarrantyType(item),
+        formatDate(item.warranty_end),
+        formatDate(item.extended_warranty_end),
+      ]
+        .map(csvEscape)
+        .join(",")
+    ),
+  ].join("\r\n");
+
+  const blob = new Blob(["\uFEFF", csv], {
+    type: "text/csv;charset=utf-8;",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 /**
  * Renders the registered-products table and detail modal used to review each
  * customer's warranty registration history.
@@ -138,6 +197,7 @@ export default function RegisteredProductsTable() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -261,6 +321,63 @@ export default function RegisteredProductsTable() {
     }
   };
 
+  const handleExportCsv = async () => {
+    try {
+      setExporting(true);
+
+      const allProducts = [];
+      let currentPage = 1;
+      let totalPages = 1;
+
+      // Fetch every page so the CSV contains all products matching the
+      // current search and filters, not only the 25 rows on screen.
+      do {
+        const params = new URLSearchParams({
+          page: String(currentPage),
+          limit: String(PAGE_SIZE),
+          sort: "created_at",
+          order: "desc",
+        });
+
+        if (searchQuery) {
+          params.set("q", searchQuery);
+        }
+        if (warrantyTypeFilter !== "all") {
+          params.set("warrantyType", warrantyTypeFilter);
+        }
+        if (purchaseTypeFilter !== "all") {
+          params.set("purchaseType", purchaseTypeFilter);
+        }
+
+        const res = await fetch(`/app/registered-products?${params.toString()}`);
+        const json = await res.json();
+
+        if (!res.ok) {
+          throw new Error(json.error || "Failed to export registered products");
+        }
+
+        allProducts.push(...(json.data || []));
+
+        const meta = json.pagination || {};
+        totalPages = meta.totalPages || 1;
+        currentPage += 1;
+      } while (currentPage <= totalPages);
+
+      if (!allProducts.length) {
+        toast.showError("No registered products to export");
+        return;
+      }
+
+      const date = new Date().toISOString().slice(0, 10);
+      downloadCsv(`registered-products-${date}.csv`, allProducts);
+      toast.showSuccess(`${allProducts.length} registered product(s) exported`);
+    } catch (err) {
+      toast.showError(err.message || "Failed to export registered products");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const openRegistrationDetails = async product => {
     setDetailOpen(true);
     setDetailLoading(true);
@@ -298,7 +415,13 @@ export default function RegisteredProductsTable() {
 
   return (
     <>
-      <Page title="Registered Products" fullWidth>
+      <Page title="Registered Products" fullWidth
+      primaryAction={{
+        content: "Export CSV",
+        onAction: handleExportCsv,
+        loading: exporting,
+        disabled: loading || Boolean(error) || paginationMeta.total === 0,
+      }}>
         <Layout>
           <Layout.Section>
             <LegacyCard sectioned>

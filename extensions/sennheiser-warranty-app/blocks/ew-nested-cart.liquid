@@ -1,0 +1,22 @@
+{% comment %}
+  Extended Warranty nested cart sync (app embed)
+
+  Enable this embed in the theme editor so warranty children stay attached
+  to the correct parent cart line when quantity changes happen on the cart
+  page or in a cart drawer, not only on the PDP.
+
+  Shopify nested cart lines already remove a warranty when its parent
+  product line is removed. This script additionally:
+  - keeps warranty quantity in sync with the parent line
+  - removes the lowest-priced warranty first when a parent quantity drops
+  - never moves a warranty from one parent product onto another
+{% endcomment %}
+
+{% schema %}
+{
+  "name": "EW nested cart",
+  "target": "body",
+  "javascript": "pdp-extended-warranty.js",
+  "settings": []
+}
+{% endschema %}
