@@ -26,9 +26,7 @@ const PAGE_SIZE = 25;
 const WARRANTY_TYPE_OPTIONS = [
   { label: "All statuses", value: "all" },
   { label: "Standard warranty", value: "standard" },
-  { label: "Extended warranty", value: "extended" },
-  { label: "Active warranty", value: "extended_active" },
-  { label: "Pending payment", value: "extended_pending" },
+  { label: "Extended warranty", value: "extended" }
 ];
 
 const PURCHASE_TYPE_OPTIONS = [
@@ -81,12 +79,6 @@ function DetailField({ label, value, isDate = false }) {
 function formatWarrantyType(item) {
   const status = item.extended_warranty_status;
   if (status === "active") return "Extended (Active)";
-  if (
-    status === "pending_payment" &&
-    item.extended_warranty_draft_order_id
-  ) {
-    return "Extended (Pending)";
-  }
   if (status === "refunded") return "Extended (Refunded)";
   if (status === "cancelled") return "Extended (Cancelled)";
   if (status === "expired") return "Extended (Expired)";
@@ -96,12 +88,6 @@ function formatWarrantyType(item) {
 function warrantyTone(item) {
   const status = item.extended_warranty_status;
   if (status === "active") return "success";
-  if (
-    status === "pending_payment" &&
-    item.extended_warranty_draft_order_id
-  ) {
-    return "warning";
-  }
   if (status === "refunded" || status === "cancelled" || status === "expired") {
     return "critical";
   }

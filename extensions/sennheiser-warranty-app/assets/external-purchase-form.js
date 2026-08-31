@@ -22,14 +22,11 @@
   const consentConfirmError = document.getElementById("consentConfirmError");
 
   const externalProducts = document.getElementById("externalProducts");
-  console.log("External Div:", externalProducts);
   const addProductBtn = document.getElementById("addProduct");
 
   const infoIconUrl = document.getElementById("info-icon").value;
 
   let retailerRequired = true;
-
-  console.log("In js external 110");
 
   /* ===============================
      ERROR HELPERS
@@ -579,29 +576,6 @@
         return;
       }
 
-      //if(!data.success){
-      //const remaining = document.querySelectorAll(".external-products-wrapper");
-      //const serialInput = remaining.querySelector("[data-serial]");
-      //showError(serialInput, data.message);
-      //}else{
-
-      console.log("Response 22 ::", data.success, data.message);
-
-      //}
-
-      // if (!res.ok){
-      //   throw new Error();
-      // }else{
-      //   console.log("Response ::", res.message, res.success);
-      // }
-
-      // const successBox = document.getElementById("successMessage");
-      // if (successBox) {
-      //   successBox.classList.add("show");
-      // }
-      console.log("outer if sucess msg", data.success);
-
-
       if (data.success === true) {
         window.scrollTo({ top: 0, behavior: "smooth" });
 
@@ -661,8 +635,6 @@
       );
     }
   });
-
-  console.log("In js external 222");
 
   async function loadStoreSettings() {
     try {

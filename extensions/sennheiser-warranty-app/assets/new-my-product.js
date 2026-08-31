@@ -139,10 +139,6 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
     }
   }
 
-  console.log("External Link : ", externalBTN, external_register_link);
-
-
-
   rootWarpper.classList.remove("breadcrumb-mobile");
 
   const track = document.getElementById("mp-track");
@@ -320,7 +316,6 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
       showProductsEmptyState();
     } else {
       hideProductsEmptyState();
-      console.log("from my product api", data);
 
       sliderWrapper.classList.remove("hidden");
 
@@ -429,8 +424,6 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
     let sessionPayload = {};
 
     if (source === "shopify") {
-
-      console.log("source : ", source);
       const orderId = btn.dataset.orderId;
       const productId = btn.dataset.productId;
 
@@ -452,24 +445,15 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
         JSON.stringify(sessionPayload)
       );
 
-      console.log("External Link : ", externalBTN, external_register_link);
-
-
       window.location.href = web_register_link;
 
     } else if (source === "external") {
-      console.log("source : ", source);
       sessionPayload = { flow: "external" };
-
-
 
       sessionStorage.setItem(
         "warranty_registration_context",
         JSON.stringify(sessionPayload)
       );
-
-      console.log("External Link : ", externalBTN, external_register_link);
-
 
       window.location.href = external_register_link;
 
@@ -478,15 +462,6 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
       return;
     }
 
-    // sessionStorage.setItem(
-    //   "warranty_registration_context",
-    //   JSON.stringify(sessionPayload)
-    // );
-
-    //   console.log("External Link : ", externalBTN, external_register_link);
-
-
-    // window.location.href = web_register_link;
   });
 
   /* ===============================
@@ -594,7 +569,6 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
 
     const product = data.product;
 
-    console.log(product);
     productsSection.classList.add("hidden");
     detailSection.classList.remove("hidden");
 

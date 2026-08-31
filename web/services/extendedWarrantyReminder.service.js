@@ -359,22 +359,6 @@ export async function sendExtendedWarrantyEligibilityReminders() {
     }
   }
 
-  if (summary.checked > 0 || summary.errors > 0) {
-    console.log("📬 EW eligibility reminder job:", {
-      checked: summary.checked,
-      sent: summary.sent,
-      skipped: summary.skipped,
-      errors: summary.errors,
-      skipReasons: summary.skipReasons,
-    });
-    if (summary.errorDetails.length) {
-      console.error(
-        "📬 EW reminder failures (sample):",
-        summary.errorDetails.slice(0, 5)
-      );
-    }
-  }
-
   return summary;
 }
 
@@ -383,10 +367,6 @@ export async function sendExtendedWarrantyEligibilityReminders() {
  * during the extended-warranty purchase window.
  */
 export function startExtendedWarrantyReminderScheduler() {
-  if (process.env.EW_REMINDER_EMAILS_ENABLED === "false") {
-    console.log("ℹ️ EW eligibility reminder emails disabled (EW_REMINDER_EMAILS_ENABLED=false)");
-    return;
-  }
 
   const intervalMs = Number(process.env.EW_REMINDER_JOB_INTERVAL_MS) || 6 * 60 * 60 * 1000;
   let running = false;
@@ -405,9 +385,6 @@ export function startExtendedWarrantyReminderScheduler() {
 
   setTimeout(run, 60 * 1000);
   setInterval(run, intervalMs);
-  console.log(
-    `✅ EW eligibility reminder scheduler started (every ${Math.round(intervalMs / 3600000)}h)`
-  );
 }
 
 

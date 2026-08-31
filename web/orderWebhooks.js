@@ -6,10 +6,7 @@ import {
   activateEntitlementFromPayment,
   cancelEntitlementFromRefund,
   getNumericIdFromGid,
-  getActiveEntitlement,
-  findPendingEntitlementsByPaidOrder,
 } from "./services/extendedWarranty.service.js";
-import { syncExtendedWarrantyOrderTags } from "./services/shopifyOrderTags.service.js";
 
 /**
  * Extracts extended-warranty registration metadata from a Shopify line item.
@@ -77,8 +74,7 @@ function isOrderPaid(orderPayload) {
 
 /**
  * Activates extended-warranty entitlements from a paid Shopify order payload.
- * Called by the order-created and order-paid webhooks, with a GraphQL lookup to
- * ensure line-item metadata is available before updating entitlement records.
+ * The order-paid webhook is the authoritative signal that payment completed.
  */
 async function processExtendedWarrantyOrder(session, orderPayload) {
   if (!isOrderPaid(orderPayload)) {
@@ -155,56 +151,15 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
   });
 
   if (targets.size === 0) {
-    const draftMatches = await findPendingEntitlementsByPaidOrder(
-      shopId,
-      orderId,
-      session
-    );
-
-    console.log("[EW Webhook] Draft-order fallback matches", {
+    console.warn("[EW Webhook] Paid order has no EW line-item metadata", {
       orderId,
       orderName: order.name,
-      matchCount: draftMatches.length,
-      matches: draftMatches.map(match => ({
-        registerId: match.registerId,
-        planId: match.planId,
-        productOrderId: match.productOrderId,
-      })),
     });
-
-    for (const match of draftMatches) {
-      try {
-        await activateEntitlementFromPayment({
-          shopId,
-          registerId: match.registerId,
-          planId: match.planId,
-          shopifyOrderId: String(orderId),
-          shopifyOrderName: order.name,
-          customerEmail,
-          customerName,
-          shopDisplayName: shopName,
-          session,
-        });
-        console.log(
-          `[EW Webhook] Activated via draft-order fallback: register=${match.registerId}, order=${orderId}`
-        );
-      } catch (err) {
-        console.error("[EW Webhook] Draft-order fallback activation failed:", err.message);
-      }
-    }
-
     return;
   }
 
   for (const [registerId, planIdFromPayload] of targets) {
     let planId = planIdFromPayload;
-
-    if (!planId) {
-      const pending = await getActiveEntitlement(shopId, registerId);
-      if (pending?.status === "pending_payment") {
-        planId = pending.extended_warranty_plan_id;
-      }
-    }
 
     if (!planId) {
       console.warn(
@@ -230,26 +185,6 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
       );
     } catch (err) {
       console.error("[EW Webhook] EW activation failed:", err.message);
-
-      const active = await getActiveEntitlement(shopId, registerId);
-      if (active?.status === "active") {
-        const [[registered]] = await pool.query(
-          `SELECT shopify_order_id FROM registered_products WHERE shop_id = ? AND id = ?`,
-          [shopId, registerId]
-        );
-
-        const tagResults = await syncExtendedWarrantyOrderTags({
-          shop: session.shop,
-          productOrderId: registered?.shopify_order_id,
-          purchaseOrderId: active.shopify_order_id || String(orderId),
-          session,
-          registerId,
-        });
-        console.log("[EW Webhook] Tag sync retry for active entitlement", {
-          registerId,
-          tagResults,
-        });
-      }
     }
   }
 }
@@ -268,11 +203,6 @@ async function handleOrderWebhook(topic, shop, body) {
 
 export const OrderWebhookHandlers = {
   ORDERS_PAID: {
-    deliveryMethod: DeliveryMethod.Http,
-    callbackUrl: "/api/webhooks",
-    callback: handleOrderWebhook,
-  },
-  ORDERS_CREATE: {
     deliveryMethod: DeliveryMethod.Http,
     callbackUrl: "/api/webhooks",
     callback: handleOrderWebhook,
@@ -328,7 +258,7 @@ export async function registerOrderWebhooks(admin) {
   }
 
   const callbackUrl = `${appUrl.replace(/\/$/, "")}/api/webhooks`;
-  const topics = ["ORDERS_PAID", "ORDERS_CREATE", "REFUNDS_CREATE"];
+  const topics = ["ORDERS_PAID", "REFUNDS_CREATE"];
 
   // Fetch all existing webhook subscriptions for these topics in one query so
   // we can skip topics that are already registered.  Previously this loop used
@@ -351,9 +281,6 @@ export async function registerOrderWebhooks(admin) {
       ordersPayedSubs: webhookSubscriptions(first: 5, topics: ORDERS_PAID) {
         edges { node { endpoint { ... on WebhookHttpEndpoint { callbackUrl } } } }
       }
-      ordersCreateSubs: webhookSubscriptions(first: 5, topics: ORDERS_CREATE) {
-        edges { node { endpoint { ... on WebhookHttpEndpoint { callbackUrl } } } }
-      }
       refundsCreateSubs: webhookSubscriptions(first: 5, topics: REFUNDS_CREATE) {
         edges { node { endpoint { ... on WebhookHttpEndpoint { callbackUrl } } } }
       }
@@ -362,7 +289,6 @@ export async function registerOrderWebhooks(admin) {
 
   const existingByTopic = {
     ORDERS_PAID:    existingResponse.data?.ordersPayedSubs?.edges  || [],
-    ORDERS_CREATE:  existingResponse.data?.ordersCreateSubs?.edges || [],
     REFUNDS_CREATE: existingResponse.data?.refundsCreateSubs?.edges || [],
   };
 

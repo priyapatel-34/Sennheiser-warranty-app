@@ -42,7 +42,6 @@ router.post("/register", registerProducts);
 router.get("/extended-warranty/offer", getExtendedWarrantyOffer);
 router.post("/extended-warranty/offer", getExtendedWarrantyOffer);
 router.post("/extended-warranty/checkout", initiateExtendedWarrantyCheckout);
-router.post("/extended-warranty/cancel-pending", cancelExtendedWarrantyPendingCheckout);
 router.post("/extended-warranty/cart-payload", getCartCheckoutPayload);
 router.get("/extended-warranty/pdp-offer", getPdpExtendedWarrantyOffer);
 router.post("/extended-warranty/pdp-offer", getPdpExtendedWarrantyOffer);

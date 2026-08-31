@@ -8,7 +8,6 @@ import {
   formatEntitlementForApiExport,
   buildExtendedWarrantyOffer,
   getNumericIdFromGid,
-  trySyncPendingEntitlementActivation,
   canPurchaseExtendedWarranty,
   getExtendedWarrantySettings,
   buildPlanAvailabilityIndex,
@@ -38,6 +37,16 @@ function normalizeEmail(email) {
  */
 function normalizeSerialNumber(serial) {
   return String(serial || "").trim();
+}
+
+/**
+ * Treats only paid or partially-paid Shopify orders as completed purchases.
+ */
+function isPaidShopifyOrder(order) {
+  const status = String(
+    order?.displayFinancialStatus || order?.financialStatus || order?.financial_status || ""
+  ).toUpperCase();
+  return status === "PAID" || status === "PARTIALLY_PAID";
 }
 
 /**
@@ -266,7 +275,6 @@ function getExtendedWarrantyDisplayStatus(entitlement, refundRecord = null) {
   const refundStatus = getCustomerFacingRefundStatus(entitlement, refundRecord);
   if (refundStatus) return refundStatus;
 
-  if (entitlement.status === "pending_payment") return null;
   if (entitlement.status === "cancelled") return "Cancelled";
   if (entitlement.status === "refunded") return "Refunded";
   if (entitlement.status === "expired") return "Expired";
@@ -279,30 +287,6 @@ function getExtendedWarrantyDisplayStatus(entitlement, refundRecord = null) {
   }
   if (entitlement.status === "active") return "Active";
   return entitlement.status;
-}
-
-/**
- * Refreshes a pending entitlement against Shopify order activity before the UI
- * decides how to display the warranty state.
- */
-async function resolveEntitlementWithSync({
-  session,
-  shopId,
-  registerId,
-  customerEmail,
-  entitlement,
-}) {
-  if (entitlement?.status !== "pending_payment" || !registerId) {
-    return entitlement;
-  }
-
-  const synced = await trySyncPendingEntitlementActivation({
-    session,
-    shopId,
-    registerId,
-    customerEmail,
-  });
-  return synced || entitlement;
 }
 
 /**
@@ -327,7 +311,7 @@ async function enrichProductWarrantyFields(
 
   const hasActiveExtendedWarranty = entitlementRow?.status === "active";
 
-  if (entitlementRow && entitlementRow.status !== "pending_payment") {
+  if (entitlementRow) {
     const registeredProduct = {
       warranty_end: product.warranty_end,
     };
@@ -409,8 +393,6 @@ async function enrichProductWarrantyFields(
  * Shopify orders and locally registered products.
  */
 export async function getMyProductsOld(req, res) {
-  console.log("➡️ App Proxy hit: /my-products");
-
   try {
     const { shop, logged_in_customer_id } = req.query;
 
@@ -571,8 +553,6 @@ export async function getMyProductsOld(req, res) {
  * storefront warranty flow maintenance.
  */
 export async function getMyProductsWorkingOld1702(req, res) {
-  console.log("➡️ App Proxy hit: /my-products");
-
   try {
     const { shop, logged_in_customer_id } = req.query;
 
@@ -807,12 +787,8 @@ export async function getMyProductsWorkingOld1702(req, res) {
  * extended-warranty eligibility data for the logged-in customer.
  */
 export async function getMyProducts(req, res) {
-  console.log("➡️ App Proxy hit: /my-products");
-
   try {
     const { shop, logged_in_customer_id } = req.query;
-
-    console.log("in getMyProducts 111", shop);
 
     if (!shop || !logged_in_customer_id) {
       return res.status(401).json({
@@ -882,7 +858,7 @@ export async function getMyProducts(req, res) {
       [shopId, normalizedCustomerEmail, loggedInCustomerId],
     );
 
-    const registeredMap = buildRegisteredProductsByLineItem(registeredRows);
+    let registeredMap = new Map();
 
     /* =====================================
        3️⃣ SHOPIFY ORDER PRODUCTS
@@ -896,6 +872,7 @@ export async function getMyProducts(req, res) {
               id
               name
               processedAt
+              displayFinancialStatus
               lineItems(first: 50) {
                 edges {
                   node {
@@ -925,13 +902,28 @@ export async function getMyProducts(req, res) {
         }
       }
       `,
-      { variables: { query: `email:${customerEmail}` } },
+      { variables: { query: `email:${customerEmail} financial_status:paid` } },
     );
 
-    const products = [];
-
+    const paidOrderIds = new Set();
     for (const orderEdge of ordersResult.data?.orders?.edges || []) {
       const order = orderEdge.node;
+      if (!isPaidShopifyOrder(order)) continue;
+      paidOrderIds.add(String(order.id).split("/").pop());
+    }
+
+    const paidRegisteredRows = registeredRows.filter(row => {
+      if (row.purchase_type !== "shopify") return true;
+      if (!row.shopify_order_id) return false;
+      return paidOrderIds.has(String(row.shopify_order_id));
+    });
+
+    registeredMap = buildRegisteredProductsByLineItem(paidRegisteredRows);
+
+    const products = [];
+    for (const orderEdge of ordersResult.data?.orders?.edges || []) {
+      const order = orderEdge.node;
+      if (!paidOrderIds.has(String(order.id).split("/").pop())) continue;
 
       for (const itemEdge of order.lineItems.edges) {
         const item = itemEdge.node;
@@ -1180,6 +1172,26 @@ export async function getProductDetail(req, res) {
         }
         line_item_id = registered.shopify_line_item_id || line_item_id;
         product_id = registered.shopify_product_id || product_id;
+
+        if (registered.shopify_order_id) {
+          const orderStatusResponse = await client.request(
+            `
+            query ($id: ID!) {
+              order(id: $id) {
+                displayFinancialStatus
+              }
+            }
+            `,
+            { variables: { id: order_id } },
+          );
+
+          if (!isPaidShopifyOrder(orderStatusResponse?.data?.order)) {
+            return res.status(404).json({
+              success: false,
+              error: "Order payment not completed",
+            });
+          }
+        }
       }
     }
 
@@ -1216,6 +1228,7 @@ export async function getProductDetail(req, res) {
             id
             name
             processedAt
+            displayFinancialStatus
             lineItems(first: 50) {
               edges {
                 node {
@@ -1250,35 +1263,22 @@ export async function getProductDetail(req, res) {
         });
       }
 
+      if (!isPaidShopifyOrder(order)) {
+        return res.status(404).json({
+          success: false,
+          error: "Order payment not completed",
+        });
+      }
+
       /* ---- Match EXACT line item ---- */
 
-      console.log("Lineitem Id from post req.::", line_item_id);
-
       const numeric_line_item_id = `gid://shopify/LineItem/${line_item_id}`;
-      console.log("Lineitem Id from item line.::", numeric_line_item_id);
-
-      // const matchedItem = order.lineItems.edges.find(
-      //   (edge) => {
-      //     edge.node.id === numeric_line_item_id
-      //     console.log("edge.node.id ::",edge.node.id);
-      //     console.log("line item id  ::",numeric_line_item_id);
-      //   }
-      // );
 
       const matchedItem = order.lineItems.edges.find((edge) => {
         const numericEdgeId = edge.node.id;
 
-        console.log("numericEdgeId ::", numericEdgeId);
-        console.log("numeric_line_item_id ::", numeric_line_item_id);
-
         return numericEdgeId === numeric_line_item_id;
       });
-
-      console.log(
-        "Lineitem Id from order shopify.::",
-        matchedItem,
-        numeric_line_item_id,
-      );
 
       if (!matchedItem) {
         return res.status(404).json({
@@ -1318,13 +1318,7 @@ export async function getProductDetail(req, res) {
         ? await getEntitlementsForRegistrations(shopId, [registered.id])
         : new Map();
       const entitlement = registered
-        ? await resolveEntitlementWithSync({
-          session,
-          shopId,
-          registerId: registered.id,
-          customerEmail: registered.customer_email,
-          entitlement: entitlementMap.get(registered.id) || null,
-        })
+        ? entitlementMap.get(registered.id) || null
         : null;
       const refundMap =
         entitlement?.id
@@ -1436,13 +1430,7 @@ export async function getProductDetail(req, res) {
 
       const image = variant?.image?.url || product?.featuredImage?.url || null;
       const entitlementMap = await getEntitlementsForRegistrations(shopId, [r.id]);
-      const entitlement = await resolveEntitlementWithSync({
-        session,
-        shopId,
-        registerId: r.id,
-        customerEmail: r.customer_email,
-        entitlement: entitlementMap.get(r.id) || null,
-      });
+      const entitlement = entitlementMap.get(r.id) || null;
       const refundMap = entitlement?.id
         ? await getLatestRefundForEntitlements(shopId, [entitlement.id])
         : new Map();
@@ -1570,51 +1558,35 @@ export async function getUnregisteredProductDetail(req, res) {
       }
     `;
 
-    //console.log("in getUnregisteredProductDetail 111");
-
     const ordersResult = await client.request(ordersQuery, {
       variables: {
         query: `email:${customerEmail}`,
       },
     });
 
-    //console.log("in getUnregisteredProductDetail 222", ordersResult);
-
     /**
      * 6️⃣ Match PRODUCT inside ORDERS
      */
     let matchedProduct = null;
-    // console.log("in getUnregisteredProductDetail 222 11");
 
     let purchaseDate = null;
-    // console.log("in getUnregisteredProductDetail 222 222");
 
     for (const orderEdge of ordersResult.data?.orders?.edges || []) {
-      //  console.log("in getUnregisteredProductDetail 333", orderEdge);
 
       for (const itemEdge of orderEdge.node.lineItems.edges) {
-        //  console.log("in getUnregisteredProductDetail 444 ", itemEdge);
 
         if (itemEdge.node.product?.id === productGid) {
-          //console.log("Product id storefront :: ",productGid);
-          //console.log("Product id from api:: ",itemEdge.node.product?.id);
-
-          // console.log("data::",itemEdge.node.product,orderEdge.node.createdAt);
 
           matchedProduct = itemEdge.node.product;
           purchaseDate = orderEdge.node.createdAt;
           break;
         }
       }
-      console.log("in getUnregisteredProductDetail 555");
 
       if (matchedProduct) break;
     }
 
     if (!matchedProduct) {
-      console.log("in getUnregisteredProductDetail 666", matchedProduct);
-
-      console.warn("⚠️ Product not found in customer orders");
       return res.status(404).json({
         error: "Product not found in customer orders",
       });
@@ -1633,7 +1605,6 @@ export async function getUnregisteredProductDetail(req, res) {
       },
     });
   } catch (error) {
-    console.error("❌ Unregistered product detail error:", error);
     return res.status(500).json({ error: "Server error" });
   }
 }
@@ -1643,8 +1614,6 @@ export async function getUnregisteredProductDetail(req, res) {
  * registration flows.
  */
 export async function getOrdersDetails(req, res) {
-  console.log("➡️ App Proxy hit: /apps/warranty/orders");
-
   try {
     /* -------------------------------------------------
      1️⃣ BASIC APP PROXY VALIDATION
@@ -1652,21 +1621,7 @@ export async function getOrdersDetails(req, res) {
     const { shop, logged_in_customer_id } = req.query;
     const { order_id, product_id } = req.body;
 
-    //const shop = req.query.shop;
-    //const logged_in_customer_id = req.query.logged_in_customer_id;
-    //  const order_id = req.query.order_id;
-    // const product_id = req.query.product_id;
-
-    console.log("Query params:", {
-      shop,
-      logged_in_customer_id,
-      order_id,
-      product_id,
-    });
-
     const productId = "gid://shopify/Product/" + product_id;
-
-    console.log("Order detail: ", order_id, productId);
 
     if (!shop || !logged_in_customer_id) {
       return res.status(401).json({
@@ -1730,9 +1685,6 @@ export async function getOrdersDetails(req, res) {
     });
 
     const order = result?.data?.order;
-
-    console.log("order detail 22", order);
-
     if (!order) {
       return res.status(404).json({
         error: "Order not found",
@@ -1759,8 +1711,6 @@ export async function getOrdersDetails(req, res) {
     const lineItemEdge = order.lineItems.edges.find(
       (edge) => edge.node.product?.id === productId,
     );
-
-    // console.log("in orders 333", lineItemEdge);
 
     if (!lineItemEdge) {
       return res.status(404).json({
@@ -2045,14 +1995,10 @@ export async function getStoreSettings(req, res) {
 
   const shopId = shopRow.id;
 
-  console.log("in getStoreSettings 111", shop);
-
   const [[row]] = await pool.query(
     "SELECT retailer_required FROM store_settings WHERE shop_id = ?",
     [shopId],
   );
-
-  console.log("in getStoreSettings 222");
 
   res.json(row || { retailer_required: 1 });
 }
@@ -2066,9 +2012,6 @@ export async function getStoreSettings(req, res) {
  */
 export async function registerProductsOLd(req, res) {
   const session = res.locals.shopifySession;
-
-  console.log("In Register Products FN 11", res.locals);
-  console.log(session);
 
   if (!session?.shop) {
     return res.status(401).json({ error: "Unauthorized" });
@@ -2275,8 +2218,6 @@ export async function registerProductsNew0502(req, res) {
         throw new Error("Invalid serial number");
       }
 
-      console.log("in registerProducts fn 11", p.product_id);
-
       let productId = p.product_id || null;
       let productName = null;
 
@@ -2285,18 +2226,15 @@ export async function registerProductsNew0502(req, res) {
          product_id already sent
       ===================================================== */
       if (flow === "shopify") {
-        console.log("in registerProducts fn 22");
 
         if (!productId) {
           throw new Error("Missing product_id from frontend");
         }
-        console.log("in registerProducts fn 33");
 
         const gid = productId.startsWith("gid://")
           ? productId
           : `gid://shopify/Product/${productId}`;
 
-        console.log("in registerProducts fn 44", gid);
 
         const response = await client.request(
           `
@@ -2316,13 +2254,8 @@ export async function registerProductsNew0502(req, res) {
           },
         );
 
-        console.log("in registerProducts fn 55");
-
         productName = response.data.product.title;
 
-        //        const productSku = response.variants?.nodes?.[0]?.sku || null;
-
-        console.log("in registerProducts fn 66", productName);
       } else {
         /* =====================================================
          EXTERNAL FLOW
@@ -2360,13 +2293,8 @@ export async function registerProductsNew0502(req, res) {
         productName = found.node.title;
       }
 
-      console.log("in get fn productId", productId);
-
       const numericPId = productId.split("/").pop();
 
-      console.log("In shopify_line_item_id 11 ", p.shopify_line_item_id);
-
-      //const shopify_line_item_id = p.shopify_line_item_id.split("/").pop();
       const shopify_line_item_id = p.shopify_line_item_id
         ? p.shopify_line_item_id.split("/").pop()
         : null;
@@ -2382,7 +2310,6 @@ export async function registerProductsNew0502(req, res) {
         `,
         [shopId, numericPId],
       );
-      console.log("in registerProducts fn 77");
 
       if (!durRow) {
         throw new Error(
@@ -2390,19 +2317,13 @@ export async function registerProductsNew0502(req, res) {
         );
       }
 
-      console.log("in registerProducts fn 88");
-
       const warrantyStart = today;
-
-      console.log("in registerProducts fn 99");
 
       const warrantyEnd = new Date(
         today.getFullYear(),
         today.getMonth() + durRow.duration_months,
         today.getDate(),
       );
-
-      console.log("in registerProducts fn 100100", warrantyEnd);
 
       /* =====================================================
          INSERT
@@ -2450,11 +2371,7 @@ export async function registerProductsNew0502(req, res) {
       );
     }
 
-    console.log("in registerProducts fn 11 11 11");
-
     await conn.commit();
-
-    console.log("in registerProducts fn 12 12");
 
     return res.json({ success: true });
   } catch (err) {
@@ -3075,17 +2992,42 @@ export async function registerProducts(req, res) {
       return res.status(400).json({ error: "Invalid customer email" });
     }
 
-    /* ===============================
-       FETCH SHOP ADMIN EMAIL (Dynamic)
-    =============================== */
-    const shopResponse = await client.request(`
-      query {
-        shop {
-          name
-          email
+    if (flow === "shopify") {
+      const orderIds = [
+        ...new Set(
+          products
+            .map(p => String(p.shopify_order_id || "").trim())
+            .filter(Boolean)
+        ),
+      ];
+
+      if (!orderIds.length) {
+        return res.status(400).json({ error: "shopify_order_id is required" });
+      }
+
+      for (const orderId of orderIds) {
+        const normalizedOrderGid = orderId.startsWith("gid://")
+          ? orderId
+          : `gid://shopify/Order/${orderId}`;
+
+        const orderStatusResponse = await client.request(
+          `
+          query ($id: ID!) {
+            order(id: $id) {
+              displayFinancialStatus
+            }
+          }
+          `,
+          { variables: { id: normalizedOrderGid } }
+        );
+
+        if (!isPaidShopifyOrder(orderStatusResponse?.data?.order)) {
+          return res.status(409).json({
+            error: "Order payment not completed",
+          });
         }
       }
-    `);
+    }
 
     const conn = await pool.getConnection();
     await conn.beginTransaction();

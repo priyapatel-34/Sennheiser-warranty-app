@@ -1,4 +1,3 @@
-import shopify from "../shopify.js";
 import { pool } from "../db/mysql.js";
 import {
     resolveShopId,
@@ -6,9 +5,9 @@ import {
     loadEligiblePlans,
     buildExtendedWarrantyOffer,
     buildPdpExtendedWarrantyOffer,
-    createDraftOrderCheckout,
-    createPendingEntitlement,
-    cancelPendingEntitlementForRegistration,
+    // createDraftOrderCheckout,
+    // createPendingEntitlement,
+    // cancelPendingEntitlementForRegistration,
     getExtendedWarrantySettings,
     getNumericIdFromGid,
     canPurchaseExtendedWarranty,
@@ -17,6 +16,142 @@ import {
 } from "../services/extendedWarranty.service.js";
 import { ensurePlanCheckoutVariant } from "../services/extendedWarrantyCheckoutVariant.service.js";
 import { normalizeWarrantyPricingType } from "../services/extendedWarrantyPricing.js";
+
+function buildCartCheckoutUrl({ variantId, properties = {} }) {
+    const params = new URLSearchParams();
+    params.set("id", String(variantId));
+    params.set("quantity", "1");
+    params.set("return_to", "/checkout");
+
+    for (const [key, value] of Object.entries(properties)) {
+        if (value == null || value === "") continue;
+        params.set(`properties[${key}]`, String(value));
+    }
+
+    return `/cart/add?${params.toString()}`;
+}
+
+async function resolveExtendedWarrantyCheckoutData({
+    session,
+    registerId,
+    planId,
+    customerEmail,
+    customerGid,
+    customerName,
+}) {
+    const shopId = await resolveShopId(session.shop);
+    if (!shopId) {
+        throw new Error("Shop not registered");
+    }
+
+    const registered = await loadRegisteredProduct(shopId, registerId);
+    if (!registered) {
+        throw new Error("Registration not found");
+    }
+
+    const [ rows ] = await pool.query(
+    `SELECT *
+     FROM extended_warranty_plans
+     WHERE shop_id = $1
+       AND id = $2
+       AND status = 'active'
+     LIMIT 1`,
+    [shopId, planId]
+);
+
+const planRow = rows[0];
+
+    if (!planRow) {
+        throw new Error("Warranty plan not found");
+    }
+
+    const eligiblePlans = await loadEligiblePlans(shopId, registered);
+    if (!eligiblePlans.some(p => Number(p.plan_id) === planId)) {
+    throw new Error("Plan not eligible for this registration");
+}
+
+    const eligibility = await canPurchaseExtendedWarranty(shopId, registerId, { session });
+    if (!eligibility.eligible) {
+        throw new Error(
+            eligibility.reason === "purchase_window_expired"
+                ? "Extended warranty purchase window has expired"
+                : "Extended warranty is not available for this registration"
+        );
+    }
+
+    const settings = await getExtendedWarrantySettings(shopId);
+    const pricingType = normalizeWarrantyPricingType(settings.warranty_pricing_type);
+    const variantPricing = await fetchProductPricing(session, registered);
+
+    let resolvedPlanRow;
+    try {
+        resolvedPlanRow = await resolvePlanRowForCheckout({
+            planRow,
+            pricingType,
+            variantPricing,
+        });
+    } catch (resolveErr) {
+        throw new Error(resolveErr.message);
+    }
+
+    if (!resolvedPlanRow.shopify_checkout_variant_id) {
+    try {
+        const checkoutVariantId = await ensurePlanCheckoutVariant({
+            session,
+            shopId,
+            plan: {
+                planId: planRow.id,
+                planName: planRow.plan_name,
+                price: resolvedPlanRow.price,
+                calculatedPrice: resolvedPlanRow.calculated_price,
+                durationMonths: planRow.duration_months,
+                durationYears: planRow.duration_years,
+                currency: planRow.currency,
+            },
+            parentVariantId: registered.shopify_variant_id,
+        });
+
+        resolvedPlanRow.shopify_checkout_variant_id = checkoutVariantId;
+    } catch (ensureErr) {
+        console.error("❌ Failed to ensure checkout variant:", ensureErr);
+        throw new Error(
+            "Failed to configure checkout for this plan: " + ensureErr.message
+        );
+    }
+}
+
+if (!resolvedPlanRow.shopify_checkout_variant_id) {
+    throw new Error("Checkout variant not configured for this plan");
+}
+
+    return {
+        shopId,
+        registered,
+        planRow: resolvedPlanRow,
+        checkoutUrl: buildCartCheckoutUrl({
+            variantId: resolvedPlanRow.shopify_checkout_variant_id,
+            properties: {
+                _ew_type: "extended_warranty",
+                _ew_register_id: String(registerId),
+                _ew_plan_id: String(planId),
+                _ew_serial: registered.serial_number,
+                _parent_product_id: String(registered.shopify_product_id || ""),
+            },
+        }),
+        checkoutProperties: {
+            _ew_type: "extended_warranty",
+            _ew_register_id: String(registerId),
+            _ew_plan_id: String(planId),
+            _ew_serial: registered.serial_number,
+            _parent_product_id: String(registered.shopify_product_id || ""),
+        },
+        customerEmail: customerEmail || registered.customer_email,
+        customerGid,
+        customerName: customerName || registered.customer_name || null,
+        settings,
+        pricingType,
+    };
+}
 
 /** GET offer data after standard registration. */
 /**
@@ -49,11 +184,7 @@ export async function getExtendedWarrantyOffer(req, res) {
     }
 }
 
-/** POST initiate checkout (Draft Order → invoice URL). */
-/**
- * Starts extended-warranty purchase checkout by creating a draft order and
- * recording a pending entitlement before the invoice is sent to the customer.
- */
+/** POST initiate checkout using a normal Shopify cart/checkout flow. */
 export async function initiateExtendedWarrantyCheckout(req, res) {
     try {
         const session = res.locals.shopifySession;
@@ -71,96 +202,22 @@ export async function initiateExtendedWarrantyCheckout(req, res) {
             return res.status(400).json({ error: "register_id and plan_id are required" });
         }
 
-        const shopId = await resolveShopId(session.shop);
-        if (!shopId) {
-            return res.status(404).json({ error: "Shop not registered" });
-        }
-
-        const registered = await loadRegisteredProduct(shopId, registerId);
-        if (!registered) {
-            return res.status(404).json({ error: "Registration not found" });
-        }
-
-        const [[planRow]] = await pool.query(
-            `
-      SELECT *
-      FROM extended_warranty_plans
-      WHERE shop_id = ? AND id = ? AND status = 'active'
-      `,
-            [shopId, planId]
-        );
-
-        if (!planRow) {
-            return res.status(404).json({ error: "Warranty plan not found" });
-        }
-
-        const settings = await getExtendedWarrantySettings(shopId);
-
-        const eligiblePlans = await loadEligiblePlans(shopId, registered);
-        if (!eligiblePlans.some(p => p.plan_id === planId)) {
-            return res.status(400).json({ error: "Plan not eligible for this registration" });
-        }
-
-        const eligibility = await canPurchaseExtendedWarranty(shopId, registerId, { session });
-        if (!eligibility.eligible) {
-            return res.status(400).json({
-                error:
-                    eligibility.reason === "purchase_window_expired"
-                        ? "Extended warranty purchase window has expired"
-                        : "Extended warranty is not available for this registration",
-                reason: eligibility.reason,
-            });
-        }
-
         const customerGid = logged_in_customer_id
             ? `gid://shopify/Customer/${logged_in_customer_id}`
             : null;
-        const email = customer_email || registered.customer_email;
-
-        const pricingType = normalizeWarrantyPricingType(settings.warranty_pricing_type);
-        const variantPricing = await fetchProductPricing(session, registered);
-
-        let resolvedPlanRow;
-        try {
-            resolvedPlanRow = await resolvePlanRowForCheckout({
-                planRow,
-                pricingType,
-                variantPricing,
-            });
-        } catch (resolveErr) {
-            return res.status(400).json({ error: resolveErr.message });
-        }
-
-        const draftOrder = await createDraftOrderCheckout({
+        const checkoutData = await resolveExtendedWarrantyCheckoutData({
             session,
-            customerEmail: email,
-            customerGid,
-            registeredProduct: registered,
-            planRow: resolvedPlanRow,
             registerId,
             planId,
-            settings,
-        });
-
-        if (!draftOrder?.invoiceUrl) {
-            return res.status(500).json({ error: "Failed to create checkout" });
-        }
-
-        const draftOrderNumericId = getNumericIdFromGid(draftOrder.id);
-
-        await createPendingEntitlement({
-            shopId,
-            registeredProductId: registerId,
-            planId,
-            planRow: resolvedPlanRow,
-            draftOrderId: draftOrderNumericId ? String(draftOrderNumericId) : draftOrder.id,
-            pricingType,
+            customerEmail: customer_email,
+            customerGid,
+            customerName: customer_name,
         });
 
         return res.json({
             success: true,
-            checkoutUrl: draftOrder.invoiceUrl,
-            draftOrderId: draftOrder.id,
+            checkoutUrl: checkoutData.checkoutUrl,
+            checkoutProperties: checkoutData.checkoutProperties,
         });
     } catch (err) {
         console.error("❌ initiateExtendedWarrantyCheckout error:", err);
@@ -168,10 +225,9 @@ export async function initiateExtendedWarrantyCheckout(req, res) {
     }
 }
 
-/** Optional cart-based checkout when admin maps a Shopify checkout variant. */
 /**
  * Builds the cart payload for stores that prefer checkout through a mapped
- * Shopify variant instead of the draft-order invoice flow.
+ * Shopify variant instead of the old invoice-style flow.
  */
 export async function getCartCheckoutPayload(req, res) {
     try {
@@ -183,49 +239,18 @@ export async function getCartCheckoutPayload(req, res) {
         const { register_id, plan_id } = req.body;
         const registerId = Number(register_id);
         const planId = Number(plan_id);
-
-        const shopId = await resolveShopId(session.shop);
-        if (!shopId) {
-            return res.status(404).json({ error: "Shop not registered" });
-        }
-
-        const registered = await loadRegisteredProduct(shopId, registerId);
-        const [[planRow]] = await pool.query(
-            `SELECT * FROM extended_warranty_plans WHERE shop_id = ? AND id = ? AND status = 'active'`,
-            [shopId, planId]
-        );
-
-        if (!registered || !planRow) {
-            return res.status(404).json({ error: "Registration or plan not found" });
-        }
-
-        const eligibility = await canPurchaseExtendedWarranty(shopId, registerId, { session });
-        if (!eligibility.eligible) {
-            return res.status(400).json({
-                error: "Extended warranty is not available for this registration",
-                reason: eligibility.reason,
-            });
-        }
-
-        if (!planRow.shopify_checkout_variant_id) {
-            return res.status(400).json({
-                error: "Checkout variant not configured for this plan. Use draft order checkout.",
-            });
-        }
-
-        const settings = await getExtendedWarrantySettings(shopId);
+        const checkoutData = await resolveExtendedWarrantyCheckoutData({
+            session,
+            registerId,
+            planId,
+        });
 
         return res.json({
             success: true,
             method: "cart",
-            variantId: planRow.shopify_checkout_variant_id,
-            properties: {
-                _ew_type: "extended_warranty",
-                _ew_register_id: String(registerId),
-                _ew_plan_id: String(planId),
-                _ew_serial: registered.serial_number,
-                _parent_product_id: String(registered.shopify_product_id || ""),
-            },
+            variantId: checkoutData.planRow.shopify_checkout_variant_id,
+            properties: checkoutData.checkoutProperties,
+            checkoutUrl: checkoutData.checkoutUrl,
         });
     } catch (err) {
         console.error("❌ getCartCheckoutPayload error:", err);
@@ -255,10 +280,10 @@ export async function cancelExtendedWarrantyPendingCheckout(req, res) {
             return res.status(404).json({ error: "Shop not registered" });
         }
 
-        const result = await cancelPendingEntitlementForRegistration(
-            shopId,
-            registerId
-        );
+        // const result = await cancelPendingEntitlementForRegistration(
+        //     shopId,
+        //     registerId
+        // );
 
         return res.json({ success: true, ...result });
     } catch (err) {
@@ -271,11 +296,10 @@ function parseStorefrontNumericId(value) {
     if (value == null || value === "") return null;
     return getNumericIdFromGid(value) || Number(value) || null;
 }
-
 /**
- * Storefront PDP offer: shop is taken from the signed app-proxy session,
- * never from a client-supplied shopId. Product/variant IDs are hints that are
- * re-resolved against this shop's plan catalog.
+ * Simple PDP offer endpoint used by the storefront proxy script when the
+ * full PDP offer implementation is not present. Returns a neutral response
+ * (not eligible) so the frontend degrades gracefully instead of erroring.
  */
 export async function getPdpExtendedWarrantyOffer(req, res) {
     try {
@@ -310,16 +334,14 @@ export async function getPdpExtendedWarrantyOffer(req, res) {
         return res.json({ success: true, ...offer });
     } catch (err) {
         console.error("❌ getPdpExtendedWarrantyOffer error:", err);
-        return res.status(500).json({ error: "Failed to load PDP warranty offer" });
+        return res.status(500).json({ error: "Failed to load PDP offer" });
     }
 }
 
 /**
- * Re-validates the selected PDP plan server-side before the storefront adds
- * the mapped Shopify warranty variant to cart. Browser prices are ignored.
- *
- * Response `variantId` is shopify_checkout_variant_id (the warranty product
- * variant), never the customer's selected product variant.
+ * Simple PDP cart payload endpoint used by the storefront proxy script to
+ * build a warranty payload for nested cart adds. Returns an error-like
+ * not-configured response for now so calling code can handle it.
  */
 export async function getPdpCartPayload(req, res) {
     try {

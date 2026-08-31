@@ -55,7 +55,6 @@ async function ensureSchemaUpdates() {
       ALTER TABLE registered_products
       ADD COLUMN shopify_variant_id VARCHAR(100) NULL AFTER shopify_product_id
     `);
-    console.log("✅ Added registered_products.shopify_variant_id");
   }
 
   const planColumns = [
@@ -79,7 +78,6 @@ async function ensureSchemaUpdates() {
       await pool.query(
         `ALTER TABLE extended_warranty_plans ADD COLUMN ${col} ${definition}`
       );
-      console.log(`✅ Added extended_warranty_plans.${col}`);
     }
   }
 
@@ -93,7 +91,6 @@ async function ensureSchemaUpdates() {
       await pool.query(
         `ALTER TABLE extended_warranty_entitlements ADD COLUMN ${col} ${definition}`
       );
-      console.log(`✅ Added extended_warranty_entitlements.${col}`);
     }
   }
 
@@ -126,7 +123,6 @@ async function ensureSchemaUpdates() {
       ALTER TABLE registered_products
       ADD UNIQUE KEY uniq_shop_line_item (shop_id, shopify_line_item_id)
     `);
-    console.log("✅ Added registered_products.uniq_shop_line_item");
   }
 
   const refundRecordColumns = [
@@ -171,7 +167,6 @@ async function ensureSchemaUpdates() {
       await pool.query(
         `ALTER TABLE extended_warranty_refund_records ADD COLUMN ${col} ${definition}`
       );
-      console.log(`✅ Added extended_warranty_refund_records.${col}`);
     }
   }
 
@@ -189,7 +184,6 @@ async function ensureSchemaUpdates() {
       await pool.query(
         `ALTER TABLE extended_warranty_refund_settings ADD COLUMN ${col} ${definition}`
       );
-      console.log(`✅ Added extended_warranty_refund_settings.${col}`);
     }
   }
 
@@ -265,7 +259,6 @@ async function ensureSchemaUpdates() {
       ALTER TABLE extended_warranty_durations
       ADD COLUMN merchandising_badge VARCHAR(50) NULL AFTER plan_name
     `);
-    console.log("✅ Added extended_warranty_durations.merchandising_badge");
   }
 
   const ewSettingsColumns = [
@@ -294,12 +287,10 @@ async function ensureSchemaUpdates() {
           ALTER TABLE extended_warranty_settings
           CHANGE COLUMN default_purchase_window_days extended_warranty_purchase_days INT NULL
         `);
-        console.log("✅ Renamed default_purchase_window_days to extended_warranty_purchase_days");
       } else {
         await pool.query(
           `ALTER TABLE extended_warranty_settings ADD COLUMN ${col} ${definition}`
         );
-        console.log(`✅ Added extended_warranty_settings.${col}`);
       }
     }
   }
@@ -319,18 +310,15 @@ async function ensureSchemaUpdates() {
       await pool.query(
         `ALTER TABLE extended_warranty_settings DROP COLUMN ${col}`
       );
-      console.log(`✅ Removed extended_warranty_settings.${col}`);
     }
   }
 
   if (await columnExists("extended_warranty_plans", "region_code")) {
     await pool.query(`ALTER TABLE extended_warranty_plans DROP COLUMN region_code`);
-    console.log("✅ Removed extended_warranty_plans.region_code");
   }
 
   try {
     await pool.query(`DROP TABLE IF EXISTS extended_warranty_purchase_windows`);
-    console.log("✅ Removed extended_warranty_purchase_windows table (if existed)");
   } catch (err) {
     console.warn("⚠️ Purchase windows table drop skipped:", err.message);
   }
@@ -348,7 +336,6 @@ async function ensureSchemaUpdates() {
       FOREIGN KEY (registered_product_id) REFERENCES registered_products(id) ON DELETE CASCADE
     )
   `);
-  console.log("✅ Extended warranty eligibility reminders table ready");
 
   if (
     await columnExists("extended_warranty_eligibility_reminders", "reminder_days")
@@ -377,14 +364,12 @@ async function ensureSchemaUpdates() {
       FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
     )
   `);
-  console.log("✅ Extended warranty expiry reminder configs table ready");
 
   if (!(await columnExists("registered_products", "country_code"))) {
     await pool.query(`
       ALTER TABLE registered_products
       ADD COLUMN country_code VARCHAR(10) NULL AFTER purchase_type
     `);
-    console.log("✅ Added registered_products.country_code");
   }
 
   if (
@@ -398,9 +383,6 @@ async function ensureSchemaUpdates() {
       ADD COLUMN extended_warranty_offer_enabled_at_registration TINYINT(1) NULL
       AFTER consent_marketing
     `);
-    console.log(
-      "✅ Added registered_products.extended_warranty_offer_enabled_at_registration"
-    );
   }
 
   if (!(await columnExists("extended_warranty_entitlements", "pricing_type"))) {
@@ -408,7 +390,6 @@ async function ensureSchemaUpdates() {
       ALTER TABLE extended_warranty_entitlements
       ADD COLUMN pricing_type ENUM('amount', 'percentage') NOT NULL DEFAULT 'amount' AFTER currency
     `);
-    console.log("✅ Added extended_warranty_entitlements.pricing_type");
   }
 
   if (!(await columnExists("retailers", "retailer_name_ja"))) {
@@ -416,7 +397,6 @@ async function ensureSchemaUpdates() {
       ALTER TABLE retailers
       ADD COLUMN retailer_name_ja VARCHAR(255) NULL AFTER retailer_name
     `);
-    console.log("✅ Added retailers.retailer_name_ja");
   }
 }
 
@@ -426,8 +406,6 @@ async function ensureSchemaUpdates() {
  */
 export async function initDb() {
   try {
-    console.log("🔧 Initializing database...");
-
     await pool.query(`
       CREATE TABLE IF NOT EXISTS shops (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,                 -- Shopify Shop ID (gid numeric)
@@ -474,8 +452,6 @@ export async function initDb() {
         )
       `);
 
-    console.log("✅ Retailers table ready");
-
     await pool.query(`
       CREATE TABLE IF NOT EXISTS standard_warranty_durations (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -490,8 +466,6 @@ export async function initDb() {
           ON DELETE CASCADE
       )  
     `);
-
-    console.log("✅ standard warranty durations table ready");
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS product_standard_warranty_durations (
@@ -574,8 +548,6 @@ export async function initDb() {
       )
     `);
 
-    console.log("✅ Store settings table ready");
-
     /* -----------------------------
        EXTENDED WARRANTY DURATIONS
        (Shop-level configurable duration options)
@@ -597,8 +569,6 @@ export async function initDb() {
           ON DELETE CASCADE
       )
     `);
-
-    console.log("✅ Extended warranty durations table ready");
 
     /* -----------------------------
        EXTENDED WARRANTY PLANS
@@ -626,8 +596,6 @@ export async function initDb() {
       )
     `);
 
-    console.log("✅ Extended warranty plans table ready");
-
     /* -----------------------------
        EXTENDED WARRANTY SETTINGS
        (Per-store configuration: terms, coverage, branding)
@@ -648,8 +616,6 @@ export async function initDb() {
         FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
       )
     `);
-
-    console.log("✅ Extended warranty settings table ready");
 
     /* -----------------------------
        EXTENDED WARRANTY ENTITLEMENTS
@@ -690,8 +656,6 @@ export async function initDb() {
       )
     `);
 
-    console.log("✅ Extended warranty entitlements table ready");
-
     await pool.query(`
       CREATE TABLE IF NOT EXISTS extended_warranty_refund_settings (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -708,8 +672,6 @@ export async function initDb() {
         FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
       )
     `);
-
-    console.log("✅ Extended warranty refund settings table ready");
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS extended_warranty_refund_records (
@@ -732,8 +694,6 @@ export async function initDb() {
         FOREIGN KEY (entitlement_id) REFERENCES extended_warranty_entitlements(id) ON DELETE CASCADE
       )
     `);
-
-    console.log("✅ Extended warranty refund records table ready");
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS email_settings (
@@ -758,8 +718,6 @@ export async function initDb() {
       )
     `);
 
-    console.log("✅ Email settings tables ready");
-
     await pool.query(`
       CREATE TABLE IF NOT EXISTS extended_warranty_product_overrides (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -777,8 +735,6 @@ export async function initDb() {
       )
     `);
 
-    console.log("✅ Extended warranty product overrides table ready");
-
     await pool.query(`
       CREATE TABLE IF NOT EXISTS extended_warranty_admin_audit (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -795,8 +751,6 @@ export async function initDb() {
         FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
       )
     `);
-
-    console.log("✅ Extended warranty admin audit table ready");
 
     await ensureSchemaUpdates();
 
