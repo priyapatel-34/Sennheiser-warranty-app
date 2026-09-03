@@ -6,6 +6,7 @@ import {
   buildMyProductsLoginUrl,
 } from "./emailLink.service.js";
 import WarrantyRegistrationSuccessTemplate from "../emailTemp/standard_warranty.js";
+import WarrantyRegistrationSuccessTemplateJA from "../emailTemp/standard_warranty_ja.js";
 import ExtendedWarrantyPurchaseTemplate from "../emailTemp/extended_warranty_purchase.js";
 import ExtendedWarrantyEligibilityReminderTemplate from "../emailTemp/extended_warranty_eligibility_reminder.js";
 import ExtendedWarrantyRefundApprovedTemplate from "../emailTemp/extended_warranty_refund_approved.js";
@@ -62,6 +63,7 @@ function renderBuiltInEmailHtml(templateKey, sampleData = {}) {
         customerName: data.customerName,
         productTitle: data.productName,
         orderNumber: data.orderNumber,
+        serialNumber:data.serialNumber,
         purchaseDate: data.purchaseDate,
         warrantyPeriod: data.warrantyDuration,
         productDetailsHtml,
@@ -198,6 +200,62 @@ export const EMAIL_TEMPLATE_DEFINITIONS = {
     },
   },
 };
+
+/**
+ * Normalizes and validates a locale string, returning a supported base code.
+ * Supported: 'en', 'ja'. Falls back to 'en'.
+ */
+export function normalizeLocale(locale) {
+  const raw = String(locale || "").trim().toLowerCase().replace(/_/g, "-");
+  if (!raw) return "en";
+  if (raw.startsWith("ja")) return "ja";
+  if (raw.startsWith("en")) return "en";
+  return "en";
+}
+
+/**
+ * Returns a renderer function for a built-in templateKey and locale. The
+ * renderer returns an object { subject, html } when called with template data.
+ */
+export function getWarrantyEmailTemplate(templateKey, locale) {
+  const lang = normalizeLocale(locale);
+
+  switch (templateKey) {
+    case "standard_warranty":
+      if (lang === "ja") {
+        return (data = {}) => ({
+          subject: "保証登録が完了しました",
+          html: WarrantyRegistrationSuccessTemplateJA({
+            customerName: data.customerName,
+            productTitle: data.productTitle || data.productName,
+            orderNumber: data.orderNumber,
+            purchaseDate: data.purchaseDate,
+            warrantyPeriod: data.warrantyPeriod || data.warrantyDuration,
+            serialNumber: data.serialNumber,
+          }),
+        });
+      }
+
+      // default English renderer
+      return (data = {}) => ({
+        subject: EMAIL_TEMPLATE_DEFINITIONS.standard_warranty.defaultSubject,
+        html: WarrantyRegistrationSuccessTemplate({
+          customerName: data.customerName,
+          productTitle: data.productTitle || data.productName,
+          orderNumber: data.orderNumber,
+          purchaseDate: data.purchaseDate,
+          warrantyPeriod: data.warrantyPeriod || data.warrantyDuration,
+          serialNumber: data.serialNumber,
+          productDetailsHtml: data.productDetailsHtml || "",
+        }),
+      });
+    default:
+      return (data = {}) => ({
+        subject: EMAIL_TEMPLATE_DEFINITIONS[templateKey]?.defaultSubject || "",
+        html: renderBuiltInEmailHtml(templateKey, data),
+      });
+  }
+}
 
 const PLACEHOLDER_PATTERN = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
 

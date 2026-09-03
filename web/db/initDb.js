@@ -84,6 +84,23 @@ async function ensureSchemaUpdates() {
   const entitlementColumns = [
     ["refund_amount", "DECIMAL(10, 2) NULL AFTER expiry_date"],
     ["refunded_at", "TIMESTAMP NULL AFTER refund_amount"],
+    [
+      "shopify_parent_line_item_id",
+      "VARCHAR(100) NULL AFTER shopify_order_id",
+    ],
+    [
+      "shopify_product_id",
+      "VARCHAR(100) NULL AFTER shopify_parent_line_item_id",
+    ],
+    [
+      "shopify_variant_id",
+      "VARCHAR(100) NULL AFTER shopify_product_id",
+    ],
+    ["customer_email", "VARCHAR(255) NULL AFTER shopify_variant_id"],
+    [
+      "source",
+      "VARCHAR(50) NULL DEFAULT 'registration' AFTER customer_email",
+    ],
   ];
 
   for (const [col, definition] of entitlementColumns) {
@@ -92,6 +109,47 @@ async function ensureSchemaUpdates() {
         `ALTER TABLE extended_warranty_entitlements ADD COLUMN ${col} ${definition}`
       );
     }
+  }
+
+  const [entitlementRegisterCol] = await pool.query(`
+    SELECT IS_NULLABLE
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'extended_warranty_entitlements'
+      AND COLUMN_NAME = 'registered_product_id'
+  `);
+  if (entitlementRegisterCol[0]?.IS_NULLABLE === "NO") {
+    const [fks] = await pool.query(`
+      SELECT CONSTRAINT_NAME
+      FROM information_schema.KEY_COLUMN_USAGE
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'extended_warranty_entitlements'
+        AND COLUMN_NAME = 'registered_product_id'
+        AND REFERENCED_TABLE_NAME IS NOT NULL
+    `);
+    for (const fk of fks) {
+      await pool.query(
+        `ALTER TABLE extended_warranty_entitlements DROP FOREIGN KEY ${fk.CONSTRAINT_NAME}`
+      );
+    }
+    await pool.query(`
+      ALTER TABLE extended_warranty_entitlements
+      MODIFY registered_product_id BIGINT NULL
+    `);
+    await pool.query(`
+      ALTER TABLE extended_warranty_entitlements
+      ADD CONSTRAINT fk_ew_ent_registered_product
+      FOREIGN KEY (registered_product_id) REFERENCES registered_products(id)
+      ON DELETE CASCADE
+    `);
+    console.log("✅ extended_warranty_entitlements.registered_product_id is now optional");
+  }
+
+  if (!(await indexExists("extended_warranty_entitlements", "idx_ew_ent_shop_parent_line"))) {
+    await pool.query(`
+      CREATE INDEX idx_ew_ent_shop_parent_line
+      ON extended_warranty_entitlements (shop_id, shopify_order_id, shopify_parent_line_item_id)
+    `);
   }
 
   const searchIndexes = [
@@ -625,9 +683,14 @@ export async function initDb() {
       CREATE TABLE IF NOT EXISTS extended_warranty_entitlements (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         shop_id BIGINT UNSIGNED NOT NULL,
-        registered_product_id BIGINT NOT NULL,
+        registered_product_id BIGINT NULL,
         extended_warranty_plan_id BIGINT UNSIGNED NOT NULL,
         shopify_order_id VARCHAR(100) NULL,
+        shopify_parent_line_item_id VARCHAR(100) NULL,
+        shopify_product_id VARCHAR(100) NULL,
+        shopify_variant_id VARCHAR(100) NULL,
+        customer_email VARCHAR(255) NULL,
+        source VARCHAR(50) NULL DEFAULT 'registration',
         shopify_draft_order_id VARCHAR(100) NULL,
         status ENUM(
           'pending_payment',

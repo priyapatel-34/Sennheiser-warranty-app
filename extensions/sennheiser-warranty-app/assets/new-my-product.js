@@ -95,6 +95,7 @@ function canShowExtendWarrantyButton(product) {
 }
 
 function getProductCardAction(product) {
+  if (!product.is_registered && hasExtendedWarranty(product)) return "complete_warranty";
   if (!product.is_registered) return "register";
   if (hasExtendedWarranty(product)) return "view_details";
   if (canShowExtendWarrantyButton(product)) return "extend_warranty";
@@ -337,7 +338,11 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
               ? `<button type="button" class="btn mp-extend-warranty-btn" data-register-id="${p.register_id}" data-source="${p.source || "shopify"}">Extend Warranty</button>`
               : action === "view_details"
                 ? `<button type="button" class="btn bordered-btn mp-view-details-btn" data-product-id="${p.product_id}">View Details</button>`
-                : `<div class="btn mp-web-register-btn" data-product-id="${p.product_id}" data-order-id="${p.order_id || ""}" data-source="${p.source || "shopify"}">${web_register_label}</div>`;
+                : `<div class="btn mp-web-register-btn" data-product-id="${p.product_id}" data-order-id="${p.order_id || ""}" data-line-item-id="${p.line_item_id || ""}" data-source="${p.source || "shopify"}">${action === "complete_warranty" ? "Complete Warranty" : web_register_label}</div>`;
+
+          const unregisteredEw = !p.is_registered && hasExtendedWarranty(p)
+            ? `<p class="warranty-gray-text">Extended Warranty: ${p.extended_warranty?.planName || "Purchased"}</p>`
+            : "";
 
           const registeredInfo = p.is_registered
             ? `
@@ -376,7 +381,7 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
           <h3>${p.title}</h3>
           ${p.is_registered
               ? ""
-              : `<p class="warranty-gray-text">Purchased on: ${formatDate(p.purchase_date)}</p>`
+              : `${unregisteredEw || `<p class="warranty-gray-text">Purchased on: ${formatDate(p.purchase_date)}</p>`}`
             }
         </div>
         <div class="mp-card-body">
@@ -436,6 +441,7 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
         flow: "shopify",
         order_id: orderId,
         product_id: productId,
+        line_item_id: btn.dataset.lineItemId || "",
       };
 
 
@@ -606,20 +612,51 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
 
       if (ewSection && ew && hasExtendedWarranty(product)) {
         ewSection.classList.remove("hidden");
-        document.getElementById("mp-detail-extended-status").innerText =
-          `Status: ${ew.displayStatus || ew.status || "Unknown"}`;
-        document.getElementById("mp-detail-extended-plan").innerText =
-          ew.planName ? `Plan: ${ew.planName}` : "";
-        document.getElementById("mp-detail-extended-dates").innerText = [
-          ew.extendedWarrantyStartDate || ew.startDate
-            ? `Coverage start: ${formatDate(ew.extendedWarrantyStartDate || ew.startDate)}`
-            : "",
-          ew.extendedWarrantyEndDate || ew.endDate
-            ? `Coverage end: ${formatDate(ew.extendedWarrantyEndDate || ew.endDate)}`
-            : "",
-        ]
-          .filter(Boolean)
-          .join(" · ");
+        const setText = (id, value) => {
+          const el = document.getElementById(id);
+          if (el) el.innerText = value || "";
+        };
+        setText(
+          "mp-detail-extended-status",
+          `Status: ${ew.displayStatus || ew.status || "Unknown"}`
+        );
+        setText("mp-detail-extended-plan", ew.planName ? `Plan: ${ew.planName}` : "");
+        setText(
+          "mp-detail-extended-purchase",
+          ew.purchaseDate ? `Purchase Date: ${formatDate(ew.purchaseDate)}` : ""
+        );
+        setText(
+          "mp-detail-extended-activation",
+          ew.activationDate ? `Activation Date: ${formatDate(ew.activationDate)}` : ""
+        );
+        setText(
+          "mp-detail-extended-dates",
+          [
+            ew.extendedWarrantyStartDate || ew.startDate
+              ? `Start Date: ${formatDate(ew.extendedWarrantyStartDate || ew.startDate)}`
+              : "",
+            ew.extendedWarrantyEndDate || ew.endDate
+              ? `End Date: ${formatDate(ew.extendedWarrantyEndDate || ew.endDate)}`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        );
+        const durationYears = ew.durationYears || (ew.durationMonths ? ew.durationMonths / 12 : null);
+        setText(
+          "mp-detail-extended-duration",
+          durationYears
+            ? `Duration: ${durationYears} Year${Number(durationYears) === 1 ? "" : "s"}`
+            : ew.durationMonths
+              ? `Duration: ${ew.durationMonths} Months`
+              : ""
+        );
+        setText(
+          "mp-detail-extended-price",
+          ew.price != null
+            ? `Price: ${ew.price} ${ew.currency || ""}${ew.pricingType ? ` · ${ew.pricingType}` : ""}`.trim()
+            : ""
+        );
 
         const refundEl = document.getElementById("mp-detail-extended-refund");
         if (refundEl) {
@@ -682,12 +719,27 @@ function savePostRegistrationForExtendWarranty(registerId, myProductsLink) {
       ).innerText =
         `Purchase date: ${formatDate(product.purchase_date)}`;
 
+      const unregisteredEwEl = document.getElementById("mp-detail-ew-unregistered");
+      if (unregisteredEwEl) {
+        if (hasExtendedWarranty(product)) {
+          unregisteredEwEl.classList.remove("hidden");
+          unregisteredEwEl.innerText = `Extended Warranty: ${product.extended_warranty?.planName || "Purchased"}`;
+        } else {
+          unregisteredEwEl.classList.add("hidden");
+          unregisteredEwEl.innerText = "";
+        }
+      }
+
       const registerBtn =
         document.getElementById("mp-detail-web-register-btn");
 
       registerBtn.dataset.productId = product.product_id;
       registerBtn.dataset.orderId = product.order_id || "";
+      registerBtn.dataset.lineItemId = product.line_item_id || "";
       registerBtn.dataset.source = product.source || "shopify";
+      registerBtn.textContent = hasExtendedWarranty(product)
+        ? "Complete Warranty"
+        : web_register_label;
     }
 
     document.getElementById("breadcrumb-my-products")?.addEventListener(

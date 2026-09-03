@@ -130,27 +130,50 @@
     }
 
     async function purchasePlan(registerId, planId, customerEmail, customerName) {
-        const res = await fetch("/apps/warranty/extended-warranty/checkout", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                register_id: registerId,
-                plan_id: planId,
-                customer_email: customerEmail,
-                customer_name: customerName,
-            }),
-        });
+    const payload = {
+        register_id: Number(registerId),
+        plan_id: Number(planId),
+        customer_email: String(customerEmail || "").trim(),
+        customer_name: String(customerName || "").trim(),
+    };
 
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-            throw new Error(data.error || "Checkout failed");
-        }
-        if (data.checkoutUrl) {
-            window.location.replace(data.checkoutUrl);
-            return;
-        }
+    const res = await fetch("/apps/warranty/extended-warranty/checkout", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        credentials: "same-origin",
+        body: JSON.stringify(payload),
+    });
+
+    const contentType = res.headers.get("content-type") || "";
+    const raw = await res.text();
+
+    if (!contentType.includes("application/json")) {
+        throw new Error(
+            `Checkout endpoint returned HTML instead of JSON (HTTP ${res.status})`
+        );
+    }
+
+    let data;
+
+    try {
+        data = JSON.parse(raw);
+    } catch {
+        throw new Error("Checkout endpoint returned invalid JSON");
+    }
+
+    if (!res.ok || !data.success) {
+        throw new Error(data.error || "Checkout failed");
+    }
+
+    if (!data.checkoutUrl) {
         throw new Error("No checkout URL returned");
     }
+
+    window.location.replace(data.checkoutUrl);
+}
 
     function sortPlansByDuration(plans) {
         return [...plans].sort(

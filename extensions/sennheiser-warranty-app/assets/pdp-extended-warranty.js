@@ -5,6 +5,8 @@
   const PROXY_OFFER = "/apps/warranty/extended-warranty/pdp-offer";
   const PROXY_CART = "/apps/warranty/extended-warranty/pdp-cart-payload";
   const NONE_PLAN_ID = "none";
+  const WARRANTY_CART_ERROR =
+    "We couldn't add the selected extended warranty to your cart. Please try again or select another warranty option.";
 
   const widgets = new Map();
   let cartHookInstalled = false;
@@ -194,6 +196,11 @@
         ${providerMarkup(state, "ew-pdp__brand")}
       </div>
       <div class="ew-pdp__plans">${cards}</div>
+      ${
+        state.cartError
+          ? `<p class="ew-pdp__status is-error" data-ew-cart-error>${escapeHtml(state.cartError)}</p>`
+          : ""
+      }
     `;
   }
 
@@ -934,6 +941,65 @@
     return cart;
   }
 
+  function warrantySelectionActive() {
+    return [...widgets.values()].some((state) => Boolean(selectedPlan(state)));
+  }
+
+  function showWarrantyCartError(message) {
+    const text = message || WARRANTY_CART_ERROR;
+    widgets.forEach((state) => {
+      if (!selectedPlan(state)) return;
+      state.cartError = text;
+      renderWidget(state);
+    });
+  }
+
+  function clearWarrantyCartErrors() {
+    widgets.forEach((state) => {
+      if (!state.cartError) return;
+      state.cartError = "";
+      renderWidget(state);
+    });
+  }
+
+  function failedCartResponse(message, sourceResponse) {
+    return new Response(
+      JSON.stringify({
+        status: 422,
+        message,
+        description: message,
+      }),
+      {
+        status: sourceResponse?.status || 422,
+        statusText: sourceResponse?.statusText || "Unprocessable Entity",
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
+
+  async function logWarrantyCartFailure(response, nestedBody) {
+    let bodyText = "";
+    try {
+      bodyText = await response.clone().text();
+    } catch {
+      bodyText = "";
+    }
+    const warrantyItem = (nestedBody?.items || []).find(
+      (item) => item?.parent_id || item?.properties?._ew_type === "extended_warranty"
+    );
+    const parentItem = (nestedBody?.items || []).find(
+      (item) => !item?.parent_id && item?.properties?._ew_type !== "extended_warranty"
+    );
+    console.error("[EW PDP] Warranty cart add failed", {
+      mainProductVariantId: parentItem?.id || null,
+      extendedWarrantyVariantId: warrantyItem?.id || null,
+      selectedWarrantyPlan: warrantyItem?.properties?._ew_plan_id || null,
+      cartRequestPayload: nestedBody,
+      shopifyResponseStatus: response?.status || null,
+      shopifyResponseBody: bodyText,
+    });
+  }
+
   function jsonResponse(data, sourceResponse) {
     return new Response(JSON.stringify(data), {
       status: sourceResponse.status,
@@ -969,6 +1035,7 @@
       if (ewInternal) return nativeFetch(input, init);
 
       if (isCartAddRequest(input, init)) {
+        const wantsWarranty = warrantySelectionActive();
         try {
           const nestedBody = await interceptCartAdd(input, init);
           if (nestedBody) {
@@ -976,17 +1043,29 @@
             const url = requestUrl(input);
             const rewrittenInit = buildFetchInit(input, init, nestedBody);
             const nestedResponse = await nativeFetch(url, rewrittenInit);
-            if (nestedResponse.ok) return nestedResponse;
-            console.warn(
-              "[EW PDP] Nested cart add failed; adding product without warranty",
-              await nestedResponse.clone().text().catch(() => "")
-            );
+            if (nestedResponse.ok) {
+              clearWarrantyCartErrors();
+              return nestedResponse;
+            }
+            await logWarrantyCartFailure(nestedResponse, nestedBody);
+            showWarrantyCartError(WARRANTY_CART_ERROR);
+            return nestedResponse;
+          }
+          if (wantsWarranty) {
+            const requestBody = await parseCartRequest(input, init);
+            const items = getRequestItems(requestBody || {});
+            if (!items.some(isWarrantyLine)) {
+              console.error("[EW PDP] Warranty was selected but nested cart payload was not built");
+              showWarrantyCartError(WARRANTY_CART_ERROR);
+              return failedCartResponse(WARRANTY_CART_ERROR);
+            }
           }
         } catch (error) {
-          console.warn(
-            "[EW PDP] Warranty cart preparation failed; adding product normally.",
-            error
-          );
+          console.error("[EW PDP] Warranty cart preparation failed", error);
+          if (wantsWarranty) {
+            showWarrantyCartError(WARRANTY_CART_ERROR);
+            return failedCartResponse(WARRANTY_CART_ERROR);
+          }
         }
         return nativeFetch(input, init);
       }
@@ -1048,16 +1127,44 @@
           .then((nestedBody) => {
             if (nestedBody) {
               ewLog("[EW PDP] Sending product + warranty as nested cart lines");
+              xhr.addEventListener("load", () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                  clearWarrantyCartErrors();
+                  return;
+                }
+                console.error("[EW PDP] XHR warranty cart add failed", {
+                  status: xhr.status,
+                  response: xhr.responseText,
+                  cartRequestPayload: nestedBody,
+                });
+                showWarrantyCartError(WARRANTY_CART_ERROR);
+              });
               finishWithBody(nestedBody, true);
+              return;
+            }
+            if (warrantySelectionActive()) {
+              console.error("[EW PDP] Warranty was selected but nested XHR payload was not built");
+              showWarrantyCartError(WARRANTY_CART_ERROR);
+              try {
+                xhr.abort();
+              } catch {
+                // Theme should not receive a product-only add.
+              }
               return;
             }
             originalSend.call(xhr, body);
           })
           .catch((error) => {
-            console.warn(
-              "[EW PDP] Warranty cart preparation failed; adding product normally.",
-              error
-            );
+            console.error("[EW PDP] Warranty cart preparation failed", error);
+            if (warrantySelectionActive()) {
+              showWarrantyCartError(WARRANTY_CART_ERROR);
+              try {
+                xhr.abort();
+              } catch {
+                // Theme should not receive a product-only add.
+              }
+              return;
+            }
             originalSend.call(xhr, body);
           });
         return;
@@ -1088,6 +1195,7 @@
     const planButton = event.target.closest("[data-ew-plan-id]");
     if (planButton) {
       state.selectedPlanId = planButton.getAttribute("data-ew-plan-id");
+      state.cartError = "";
       renderWidget(state);
       return;
     }

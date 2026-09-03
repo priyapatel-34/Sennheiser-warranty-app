@@ -17,20 +17,19 @@ export default function WarrantyRegistrationSuccessTemplate({
     <p>Dear ${customerName || "Customer"},</p>
 
     <p>
-      Thank you for registering your product with us. We are pleased to confirm
-      that your warranty has been successfully activated.
+      Thank you for registering your product with us. We are pleased to confirm that your product is now registered successfully.
     </p>
-    </br>
+    <br />
     <p>
-      <strong>Product:</strong> ${productTitle}<br/>
-      ${orderNumber && orderNumber !== "N/A" ? `<strong>Order Number:</strong> ${orderNumber}<br/>` : ""}
-      ${purchaseDate ? `<strong>Purchase Date:</strong> ${purchaseDate}<br/>` : ""}
-      ${serialNumber ? `<strong>Serial Number:</strong> ${serialNumber}<br/>` : ""}
-      <strong>Warranty Period:</strong> ${warrantyPeriod}<br/>
+      <strong>Product:</strong> ${productTitle}<br />
+      ${orderNumber && orderNumber !== "N/A" ? `<strong>Order Number:</strong> ${orderNumber}<br />` : ""}
+      ${purchaseDate ? `<strong>Purchase Date:</strong> ${purchaseDate}<br />` : ""}
+      ${serialNumber ? `<strong>Serial Number:</strong> ${serialNumber}<br />` : ""}
+      <strong>Warranty Period:</strong> ${warrantyPeriod}<br />
     </p>
 
     ${productDetailsHtml}
- <br/>
+ <br />
   `;
 
   return renderEmailLayout({

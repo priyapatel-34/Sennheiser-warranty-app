@@ -1,6 +1,6 @@
 import shopify from "../shopify.js";
 import { pool } from "../db/mysql.js";
-import { sendShopEmail } from "../services/emailSettings.service.js";
+import { sendShopEmail, getWarrantyEmailTemplate, normalizeLocale } from "../services/emailSettings.service.js";
 import WarrantyRegistrationSuccessTemplate from "../emailTemp/standard_warranty.js";
 import { renderViewProductDetailsButton, resolveCustomerFacingShopDomain, formatEmailDate } from "../services/emailLink.service.js";
 import {
@@ -23,6 +23,17 @@ import {
   WARRANTY_TAG_TYPES,
 } from "../services/shopifyOrderTags.service.js";
 import { retailerSearchColumn } from "../services/retailerLocale.utils.js";
+import {
+  attachPdpEntitlementToRegistration,
+  getEntitlementForShopifyLine,
+  getUnattachedPdpEntitlements,
+  healPdpEntitlementsFromOrders,
+} from "../services/pdpExtendedWarrantyOrder.service.js";
+import {
+  assignEntitlementToProduct,
+  isWarrantyCatalogLine,
+  numericShopifyId,
+} from "../services/pdpExtendedWarranty.utils.js";
 
 /**
  * Normalizes customer email input so ownership checks and comparisons use a
@@ -386,6 +397,17 @@ async function enrichProductWarrantyFields(
   }
 
   return product;
+}
+
+async function loadRefundMapForEntitlements(shopId, entitlements = []) {
+  const entitlementIds = entitlements.map((row) => row?.id).filter(Boolean);
+  if (!entitlementIds.length) return new Map();
+  try {
+    return await getLatestRefundForEntitlements(shopId, entitlementIds);
+  } catch (refundErr) {
+    console.warn("⚠️ Refund lookup skipped:", refundErr.message);
+    return new Map();
+  }
 }
 
 /**
@@ -879,6 +901,10 @@ export async function getMyProducts(req, res) {
                     id
                     title
                     sku
+                    customAttributes {
+                      key
+                      value
+                    }
                     variant {
                       id
                       title
@@ -889,9 +915,22 @@ export async function getMyProducts(req, res) {
                     }
                     product {
                       id
+                      handle
                       title
                       featuredImage {
                         url
+                      }
+                    }
+                    discountedUnitPriceSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    originalUnitPriceSet {
+                      shopMoney {
+                        amount
+                        currencyCode
                       }
                     }
                   }
@@ -931,6 +970,7 @@ export async function getMyProducts(req, res) {
         const variant = item.variant;
         //const product = itemEdge.node.product;
         if (!product) continue;
+        if (isWarrantyCatalogLine(item)) continue;
 
         const numericProductId = product.id.split("/").pop();
         //const registered = registeredMap.get(numericProductId);
@@ -1027,18 +1067,45 @@ export async function getMyProducts(req, res) {
 
     const registerIds = products.map(p => p.register_id).filter(Boolean);
     const entitlementMap = await getEntitlementsForRegistrations(shopId, registerIds);
+    const ewSettings = await getExtendedWarrantySettings(shopId);
+    const paidOrders = (ordersResult.data?.orders?.edges || [])
+      .map((edge) => edge.node)
+      .filter((order) => paidOrderIds.has(String(order.id).split("/").pop()));
 
-    const entitlementIds = [...entitlementMap.values()]
-      .map(e => e.id)
-      .filter(Boolean);
+    try {
+      await healPdpEntitlementsFromOrders({
+        shopId,
+        customerEmail: normalizedCustomerEmail,
+        orders: paidOrders,
+        pricingType: ewSettings?.warranty_pricing_type,
+      });
+    } catch (healErr) {
+      console.error("⚠️ PDP entitlement heal skipped:", healErr.message);
+    }
+
+    let unattachedEntitlements = [];
+    try {
+      unattachedEntitlements = (
+        await getUnattachedPdpEntitlements(shopId, {
+          customerEmail: normalizedCustomerEmail,
+          orderIds: [...paidOrderIds],
+        })
+      ).filter((row) => row.status === "active");
+    } catch (unattachedErr) {
+      console.error("⚠️ Unattached PDP entitlement lookup failed:", unattachedErr.message);
+    }
+
+    const entitlementRows = [
+      ...entitlementMap.values(),
+      ...unattachedEntitlements,
+    ].filter(Boolean);
     let refundMap = new Map();
     try {
-      refundMap = await getLatestRefundForEntitlements(shopId, entitlementIds);
+      refundMap = await loadRefundMapForEntitlements(shopId, entitlementRows);
     } catch (refundErr) {
       console.warn("⚠️ Refund lookup skipped:", refundErr.message);
     }
 
-    const ewSettings = await getExtendedWarrantySettings(shopId);
     const planIndex = await buildPlanAvailabilityIndex(shopId, [
       ...products.map(p => p.product_id),
       ...registeredRows.map(r => r.shopify_product_id),
@@ -1046,10 +1113,18 @@ export async function getMyProducts(req, res) {
     const registeredById = new Map(registeredRows.map(r => [r.id, r]));
     const listContext = { ewSettings, planIndex, registeredById };
 
+    const usedUnattachedIds = new Set();
     for (const product of products) {
-      const entitlement = product.register_id
+      let entitlement = product.register_id
         ? entitlementMap.get(product.register_id)
         : null;
+      if (!entitlement) {
+        entitlement = assignEntitlementToProduct(
+          product,
+          unattachedEntitlements,
+          usedUnattachedIds
+        );
+      }
       const refundRecord = entitlement ? refundMap.get(entitlement.id) : null;
       try {
         await enrichProductWarrantyFields(
@@ -1235,6 +1310,10 @@ export async function getProductDetail(req, res) {
                   id
                   name
                   sku
+                  customAttributes {
+                    key
+                    value
+                  }
                   variant {
                     id
                     title
@@ -1242,6 +1321,7 @@ export async function getProductDetail(req, res) {
                   }
                   product {
                     id
+                    handle
                     title
                     featuredImage { url }
                   }
@@ -1317,9 +1397,30 @@ export async function getProductDetail(req, res) {
       const entitlementMap = registered
         ? await getEntitlementsForRegistrations(shopId, [registered.id])
         : new Map();
-      const entitlement = registered
+      let entitlement = registered
         ? entitlementMap.get(registered.id) || null
         : null;
+      if (!entitlement) {
+        try {
+          if (detailCustomerEmail) {
+            await healPdpEntitlementsFromOrders({
+              shopId,
+              customerEmail: detailCustomerEmail,
+              orders: [order],
+              pricingType: (await getExtendedWarrantySettings(shopId))?.warranty_pricing_type,
+            });
+          }
+          entitlement = await getEntitlementForShopifyLine(shopId, {
+            orderId: numericOrderId,
+            lineItemId: line_item_id,
+          });
+        } catch (pdpEntitlementErr) {
+          console.warn(
+            "⚠️ PDP entitlement lookup failed for product detail:",
+            pdpEntitlementErr.message
+          );
+        }
+      }
       const refundMap =
         entitlement?.id
           ? await getLatestRefundForEntitlements(shopId, [entitlement.id])
@@ -1334,6 +1435,7 @@ export async function getProductDetail(req, res) {
         order_number: order.name,
         product_id: product?.id?.split("/").pop(),
         variant_id: variant?.id?.split("/").pop() || null,
+        line_item_id: numericShopifyId(node.id),
         title: node.name,
         base_product_title: product?.title,
         variant_title: variant?.title || null,
@@ -1619,7 +1721,7 @@ export async function getOrdersDetails(req, res) {
      1️⃣ BASIC APP PROXY VALIDATION
     ------------------------------------------------- */
     const { shop, logged_in_customer_id } = req.query;
-    const { order_id, product_id } = req.body;
+    const { order_id, product_id, line_item_id } = req.body;
 
     const productId = "gid://shopify/Product/" + product_id;
 
@@ -1664,6 +1766,10 @@ export async function getOrdersDetails(req, res) {
                 id
                 title
                 sku
+                customAttributes {
+                  key
+                  value
+                }
                 variant {
                   id
                   title
@@ -1671,6 +1777,7 @@ export async function getOrdersDetails(req, res) {
                 }
                 product {
                   id
+                  handle
                   title
                 }
               }
@@ -1708,9 +1815,15 @@ export async function getOrdersDetails(req, res) {
     /* -------------------------------------------------
      5️⃣ FIND REQUESTED PRODUCT IN ORDER
     ------------------------------------------------- */
-    const lineItemEdge = order.lineItems.edges.find(
-      (edge) => edge.node.product?.id === productId,
-    );
+    const requestedLineId = numericShopifyId(line_item_id);
+    const requestedProductId = numericShopifyId(product_id);
+    const lineItemEdge = order.lineItems.edges.find((edge) => {
+      if (isWarrantyCatalogLine(edge.node)) return false;
+      const edgeLineId = numericShopifyId(edge.node.id);
+      const edgeProductId = numericShopifyId(edge.node.product?.id);
+      if (requestedLineId) return edgeLineId === requestedLineId;
+      return Boolean(requestedProductId && edgeProductId === requestedProductId);
+    });
 
     if (!lineItemEdge) {
       return res.status(404).json({
@@ -3284,6 +3397,18 @@ export async function registerProducts(req, res) {
           warrantyStart,
           warrantyEnd,
         });
+
+        if (flow === "shopify") {
+          await attachPdpEntitlementToRegistration(conn, {
+            shopId,
+            registerId: insertResult.insertId,
+            orderId: p.shopify_order_id,
+            lineItemId: shopifyLineItemId,
+            productId: numericPId,
+            variantId: variantNumericId,
+            registeredProduct: { warranty_end: warrantyEnd },
+          });
+        }
       }
 
       await conn.commit();
@@ -3325,6 +3450,10 @@ export async function registerProducts(req, res) {
         firstProduct.registerId
       );
 
+      const language = normalizeLocale(req.body?.locale || req.query?.locale);
+
+      const renderer = getWarrantyEmailTemplate("standard_warranty", language);
+
       const emailResult = await sendShopEmail({
         shopId,
         templateKey: "standard_warranty",
@@ -3339,17 +3468,19 @@ export async function registerProducts(req, res) {
           registrationDate: firstProduct.warrantyStart.toISOString().split("T")[0],
           warrantyNumber: String(firstProduct.registerId),
         },
-        renderDefault: async () => ({
-          subject: "Your Product Warranty Registration is Completed.",
-          html: WarrantyRegistrationSuccessTemplate({
+        renderDefault: async () =>
+          renderer({
             customerName: customerName || "Customer",
             productTitle: firstProduct.productName,
+            productName: firstProduct.productName,
             orderNumber: firstProduct.orderNumber || "N/A",
             purchaseDate: purchaseDateText,
             warrantyPeriod: warrantyPeriodText,
+            warrantyDuration: warrantyPeriodText,
+            warrantyNumber: String(firstProduct.registerId),
+            serialNumber: firstProduct.serialNumber,
             productDetailsHtml,
           }),
-        }),
       });
 
       if (!emailResult.success) {
@@ -3398,8 +3529,14 @@ export async function registerProducts(req, res) {
         };
       }
 
+      const alreadyPurchased = extendedWarrantyOffer?.reason === "already_purchased";
+      const showOffer =
+        extendedWarrantyOfferEnabled &&
+        Boolean(extendedWarrantyOffer?.eligible) &&
+        !alreadyPurchased;
+
       const postRegistrationNavigation = {
-        next: extendedWarrantyOfferEnabled ? "extended_warranty" : "my_products",
+        next: showOffer ? "extended_warranty" : "my_products",
         reason: extendedWarrantyOffer?.reason || null,
         purchaseWindow: extendedWarrantyOffer?.purchaseWindow || null,
       };
@@ -3407,8 +3544,8 @@ export async function registerProducts(req, res) {
       return res.json({
         success: true,
         registrations: createdProducts,
-        extendedWarrantyOfferEnabled,
-        showExtendedWarrantyOffer: extendedWarrantyOfferEnabled,
+        extendedWarrantyOfferEnabled: showOffer,
+        showExtendedWarrantyOffer: showOffer,
         extendedWarrantyOfferEligible: Boolean(extendedWarrantyOffer?.eligible),
         extendedWarrantyOffer,
         postRegistrationNavigation,

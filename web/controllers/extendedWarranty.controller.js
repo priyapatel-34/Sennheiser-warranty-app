@@ -74,6 +74,19 @@ function getShopifyProductSearchQueryForScope(searchTerm, statusFilter, scope = 
     return baseQuery;
 }
 
+async function loadDisabledProductOverrides(shopId) {
+    const [rows] = await pool.query(
+        `
+        SELECT shopify_product_id
+        FROM extended_warranty_product_overrides
+        WHERE shop_id = ? AND enabled = 0
+        `,
+        [shopId]
+    );
+
+    return rows.map((row) => Number(row.shopify_product_id));
+}
+
 async function loadProductOverrides(shopId) {
     const [rows] = await pool.query(
         `
@@ -584,6 +597,9 @@ export async function getWarrantyProducts(req, res) {
         );
         const overrideIds = await listEnabledOverrideProductIds(pool, shopId);
         const overrideSet = new Set(overrideIds.map(Number));
+        const disabledProductIds = await loadDisabledProductOverrides(shopId);
+        const disabledProductSet = new Set(disabledProductIds);
+
         const productQuery = buildEligibleProductsShopifyQuery({
             searchTerm,
             statusFilter,
@@ -667,7 +683,13 @@ export async function getWarrantyProducts(req, res) {
 
             const productNode = edge.node;
             const numericId = getNumericIdFromGid(productNode.id);
-            const isOverride = numericId && overrideSet.has(Number(numericId));
+
+            if (disabledProductSet.has(Number(numericId))) {
+                return false;
+            }
+
+            const isOverride =
+                numericId && overrideSet.has(Number(numericId));
 
             if (allowedSlugSet.size) {
                 const nodeSlug = slugifyProductType(productNode.productType || "");
@@ -1836,7 +1858,7 @@ export async function deleteEWVariantPricing(req, res) {
     }
 }
 
-const EXCLUDED_SEARCH_MAX_PAGES = 8;
+const EXCLUDED_SEARCH_MAX_PAGES = 40;
 
 /**
  * Searches Shopify products that are excluded from the default eligible list
@@ -1861,8 +1883,23 @@ export async function searchExcludedWarrantyProducts(req, res) {
             50,
             Math.max(1, parseInt(req.query.limit, 10) || 25)
         );
-        const currentPage = Math.max(1, parseInt(req.query.page, 10) || 1);
-        const overrideIds = await listEnabledOverrideProductIds(pool, shopId);
+        const currentPage = Math.max(
+            1,
+            parseInt(req.query.page, 10) || 1
+        );
+
+        const overrideIds = await listEnabledOverrideProductIds(
+            pool,
+            shopId
+        );
+
+        // Load products that were manually removed/disabled.
+        const disabledProductIds =
+            await loadDisabledProductOverrides(shopId);
+
+        const disabledProductSet =
+            new Set(disabledProductIds);
+
         const productQuery = buildExcludedProductsShopifyQuery({
             searchTerm,
             statusFilter,
@@ -1897,7 +1934,15 @@ export async function searchExcludedWarrantyProducts(req, res) {
                 if (searchTerm && !productMatchesSearchTerm(node, searchTerm)) {
                     continue;
                 }
-                if (!isExcludedFromDefaultList(node, overrideIds)) {
+                const numericId = getNumericIdFromGid(node.id);
+
+                const isManuallyExcluded =
+                    disabledProductSet.has(Number(numericId));
+
+                if (
+                    !isManuallyExcluded &&
+                    !isExcludedFromDefaultList(node, overrideIds)
+                ) {
                     continue;
                 }
                 collected.push(edge);
@@ -1983,6 +2028,13 @@ export async function addWarrantyProductOverrides(req, res) {
             nodes.map(node => [getNumericIdFromGid(node.id), node])
         );
         const overrideIds = await listEnabledOverrideProductIds(pool, shopId);
+
+        const disabledProductIds =
+            await loadDisabledProductOverrides(shopId);
+
+        const disabledProductSet =
+            new Set(disabledProductIds);
+
         const actor = getAdminActor(session);
         const added = [];
         const skipped = [];
@@ -1993,7 +2045,13 @@ export async function addWarrantyProductOverrides(req, res) {
             for (const gid of gids) {
                 const numericId = getNumericIdFromGid(gid);
                 const product = foundById.get(numericId) || null;
-                const skip = getOverrideSkipReason(product, overrideIds);
+
+                const wasManuallyExcluded =
+                    disabledProductSet.has(Number(numericId));
+
+                const skip = wasManuallyExcluded
+                    ? null
+                    : getOverrideSkipReason(product, overrideIds);
                 if (skip) {
                     skipped.push({
                         productId: gid,
@@ -2066,51 +2124,69 @@ export async function addWarrantyProductOverrides(req, res) {
 export async function removeWarrantyProductOverride(req, res) {
     try {
         const session = res.locals.shopify.session;
+
         if (!session?.shop) {
             return res.status(401).json({ error: "Unauthorized" });
         }
 
         const shopId = await resolveShopId(session);
+
         if (!shopId) {
             return res.status(404).json({ error: "Shop not registered" });
         }
 
         const { productId } = req.params;
+
         const numericId = getNumericIdFromGid(
             productId?.startsWith("gid://")
                 ? productId
                 : `gid://shopify/Product/${productId}`
         );
+
         if (!numericId) {
             return res.status(400).json({ error: "Invalid product ID" });
         }
 
         const connection = await pool.getConnection();
+
         try {
             await connection.beginTransaction();
-            const affected = await deleteProductOverride(
-                connection,
-                shopId,
-                numericId
+
+            // Instead of deleting the override, explicitly exclude the product.
+            await connection.query(
+                `
+                INSERT INTO extended_warranty_product_overrides (
+                    shop_id,
+                    shopify_product_id,
+                    enabled
+                )
+                VALUES (?, ?, 0)
+                ON DUPLICATE KEY UPDATE
+                    enabled = 0,
+                    updated_at = CURRENT_TIMESTAMP
+                `,
+                [shopId, numericId]
             );
-            if (!affected) {
-                await connection.rollback();
-                return res.status(404).json({ error: "Override not found" });
-            }
+
             await writeAdminAudit(connection, {
                 shopId,
                 actionType: "product_override_remove",
                 entityType: "extended_warranty_product_override",
                 entityId: numericId,
-                beforeValue: {
+                beforeValue: null,
+                afterValue: {
                     shopifyProductId: numericId,
-                    enabled: true,
+                    enabled: false,
                 },
-                afterValue: null,
                 actor: getAdminActor(session),
             });
+
             await connection.commit();
-            return res.json({ success: true });
+
+            return res.json({
+                success: true,
+                productId: numericId,
+            });
         } catch (err) {
             await connection.rollback();
             throw err;
@@ -2119,6 +2195,9 @@ export async function removeWarrantyProductOverride(req, res) {
         }
     } catch (err) {
         console.error("❌ removeWarrantyProductOverride error:", err);
-        return res.status(500).json({ error: "Failed to remove product" });
+
+        return res.status(500).json({
+            error: "Failed to remove product",
+        });
     }
 }

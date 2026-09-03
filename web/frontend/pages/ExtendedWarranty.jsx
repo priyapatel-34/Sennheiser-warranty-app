@@ -277,6 +277,22 @@ export default function ExtendedWarrantyAdmin() {
         }
     };
 
+    const removeSelectedProducts = useCallback(() => {
+    if (!selectedResources.length) {
+        toast.showError("Select at least one product to remove");
+        return;
+    }
+
+    const selectedProducts = products.filter((product) =>
+        selectedResources.includes(product.id)
+    );
+
+    setConfirmAction({
+        kind: "overrideBulk",
+        products: selectedProducts,
+    });
+    }, [selectedResources, products, toast]);
+
     /**
      * Loads the shop-level extended-warranty settings and reminder-day config.
      */
@@ -701,15 +717,69 @@ export default function ExtendedWarrantyAdmin() {
         }
     };
 
-    const confirmModalCopy = confirmAction
-        ? buildRemovePricingModalContent(confirmAction)
-        : null;
+    const confirmModalCopy =
+    confirmAction?.kind === "overrideBulk"
+        ? {
+              title:
+                  confirmAction.products.length === 1
+                      ? "Remove product?"
+                      : "Remove products?",
+              body:
+                  confirmAction.products.length === 1
+                      ? `Are you sure you want to remove "${confirmAction.products[0].title}" from the warranty product list?`
+                      : `Are you sure you want to remove ${confirmAction.products.length} selected products from the warranty product list?`,
+              confirmLabel:
+                  confirmAction.products.length === 1
+                      ? "Remove product"
+                      : "Remove products",
+          }
+        : confirmAction
+          ? buildRemovePricingModalContent(confirmAction)
+          : null;
 
     const executeConfirmedAction = async () => {
         if (!confirmAction || confirmLoading || confirmInFlightRef.current) return;
         confirmInFlightRef.current = true;
         setConfirmLoading(true);
         try {
+            if (confirmAction.kind === "overrideBulk") {
+            await Promise.all(
+                confirmAction.products.map((product) =>
+                    fetch(
+                        `${API_BASE}/products/overrides/${toNumericShopifyId(product.id)}`,
+                        {
+                            method: "DELETE",
+                        }
+                    ).then(async (r) => {
+                        const data = await r.json().catch(() => ({}));
+
+                        if (!r.ok) {
+                            throw new Error(
+                                data.error || `Failed to remove ${product.title}`
+                            );
+                        }
+                    })
+                )
+            );
+
+            toast.showSuccess(
+                confirmAction.products.length === 1
+                    ? "Product removed from the eligible list"
+                    : `${confirmAction.products.length} products removed from the eligible list`
+            );
+
+            setConfirmAction(null);
+            clearSelection();
+
+            await loadProducts({
+                targetPage: page,
+                search: productSearchQuery,
+                status: productStatusFilter,
+            });
+
+            return;
+            }
+
             if (confirmAction.kind === "override") {
                 const productId = toNumericShopifyId(confirmAction.product?.id);
                 const r = await fetch(
@@ -1005,6 +1075,17 @@ export default function ExtendedWarrantyAdmin() {
                             onAction: openAddProductsModal,
                         }
                         : undefined
+            }
+            secondaryActions={
+                tab === 1
+                    ? [
+                        {
+                            content: "Remove products",                            
+                            disabled: selectedResources.length === 0,
+                            onAction: removeSelectedProducts,
+                        },
+                    ]
+                    : undefined
             }
         >
             <Tabs

@@ -17,6 +17,8 @@ const SORT_COLUMNS = {
   warranty_end: "rp.warranty_end",
 };
 
+const ORDER_NAME_CACHE = new Map();
+
 /**
  * Resolves Shopify order names in bulk so the registered-products table can
  * display merchant-friendly order numbers instead of raw numeric ids.
@@ -32,7 +34,24 @@ async function fetchShopifyOrderNames(client, orderIds) {
   ];
   if (!uniqueIds.length) return map;
 
-  const gids = uniqueIds.map(id => `gid://shopify/Order/${id}`);
+  const idsToFetch = uniqueIds.filter((id) => {
+    const cachedName = ORDER_NAME_CACHE.get(id);
+
+    if (cachedName) {
+      map.set(id, cachedName);
+      return false;
+    }
+
+    return true;
+  });
+
+  if (!idsToFetch.length) return map;
+
+  const gids = idsToFetch.map(id =>
+    id.startsWith("gid://shopify/Order/")
+      ? id
+      : `gid://shopify/Order/${id}`,
+  );
 
   for (let offset = 0; offset < gids.length; offset += 50) {
     const chunk = gids.slice(offset, offset + 50);
@@ -53,11 +72,18 @@ async function fetchShopifyOrderNames(client, orderIds) {
 
       for (const node of result.data?.nodes || []) {
         if (!node?.id) continue;
+
         const numericId = node.id.split("/").pop();
-        map.set(numericId, node.name);
+        const name = node.name || null;
+
+        map.set(numericId, name);
+
+        if (name) {
+          ORDER_NAME_CACHE.set(numericId, name);
+        }
       }
     } catch (err) {
-      console.warn("⚠️ Batch order name fetch failed:", err.message);
+      console.warn("Batch order name fetch failed:", err.message);
     }
   }
 
@@ -86,7 +112,7 @@ async function fetchShopifyVariantTitle(client, variantId) {
     if (!title || title === "Default Title") return null;
     return title;
   } catch (err) {
-    console.warn("⚠️ Variant title fetch failed:", err.message);
+    console.warn("Variant title fetch failed:", err.message);
     return null;
   }
 }
@@ -111,7 +137,7 @@ async function fetchShopifyCustomerPhone(client, customerId) {
     );
     return result?.data?.customer?.phone || null;
   } catch (err) {
-    console.warn("⚠️ Customer phone fetch failed:", err.message);
+    console.warn("Customer phone fetch failed:", err.message);
     return null;
   }
 }
@@ -332,66 +358,84 @@ export async function registeredProducts(req, res) {
       return res.status(404).json({ error: "Shop not registered" });
     }
 
-    // If the search query looks like a Shopify order name (e.g. #1082), resolve
-    // it to a numeric shopify_order_id so we can match the DB field exactly.
+    // Resolve order-name searches such as "#264" only when requested.
     const resolvedOrderIds = [];
     const rawQ = String(req.query.q || "").trim();
+
     if (/^#\S+$/.test(rawQ)) {
       try {
         const lookupClient = new shopify.api.clients.Graphql({ session });
+        const orderName = rawQ.startsWith("#") ? rawQ : `#${rawQ}`;
+        const orderNumber = orderName.slice(1);
 
-        // Step 1: Shopify orders search API (fast path).
-        try {
+        // Try the two common Shopify search formats. This keeps the normal
+        // registered-products request as a single DB request and only calls
+        // Shopify when the user explicitly searches by "#order-number".
+        const searchTerms = [orderName, orderNumber];
+
+        for (const searchTerm of searchTerms) {
           const apiResult = await lookupClient.request(
             `query ($q: String!) {
               orders(first: 5, query: $q) {
-                edges { node { id name } }
+                edges {
+                  node {
+                    id
+                    name
+                  }
+                }
               }
             }`,
-            { variables: { q: `name:${rawQ}` } }
+            { variables: { q: `name:${searchTerm}` } },
           );
+
           for (const edge of apiResult?.data?.orders?.edges || []) {
-            if (edge.node.name === rawQ) {
-              const numericId = edge.node.id.split("/").pop();
-              if (numericId && !resolvedOrderIds.includes(numericId)) {
-                resolvedOrderIds.push(numericId);
-              }
+            const name = String(edge?.node?.name || "").trim();
+            const numericId = String(edge?.node?.id || "").split("/").pop();
+
+            if (
+              numericId &&
+              (name === orderName || name === `#${orderNumber}`)
+            ) {
+              resolvedOrderIds.push(numericId);
             }
           }
-        } catch (apiErr) {
-          console.warn("⚠️ orders() search failed, will try fallback:", apiErr.message);
+
+          if (resolvedOrderIds.length) {
+            break;
+          }
         }
 
-        // Step 2: Fallback — reverse-map stored shopify_order_ids via nodes query
-        // (the nodes query is the same mechanism that renders order names in the table,
-        //  so it is guaranteed to work when the table already shows names).
+        // Keep the existing DB/Shopify fallback for stores where Shopify's
+        // order search does not return the order.
         if (!resolvedOrderIds.length) {
           const [dbRows] = await pool.query(
-            `SELECT DISTINCT shopify_order_id
-             FROM registered_products
-             WHERE shop_id = ? AND shopify_order_id IS NOT NULL
-             ORDER BY created_at DESC
-             LIMIT 300`,
-            [shopId]
+            `SELECT shopify_order_id
+              FROM registered_products
+              WHERE shop_id = ?
+                AND shopify_order_id IS NOT NULL
+              GROUP BY shopify_order_id
+              ORDER BY MAX(created_at) DESC
+              LIMIT 300`,
+            [shopId],
           );
-          const dbOrderIds = dbRows.map(r => String(r.shopify_order_id));
+
+          const dbOrderIds = dbRows.map(row => String(row.shopify_order_id));
+
           if (dbOrderIds.length) {
-            const nameMap = await fetchShopifyOrderNames(lookupClient, dbOrderIds);
+            const nameMap = await fetchShopifyOrderNames(
+              lookupClient,
+              dbOrderIds,
+            );
+
             for (const [id, name] of nameMap.entries()) {
-              if (name === rawQ && !resolvedOrderIds.includes(id)) {
+              if (String(name).trim() === orderName) {
                 resolvedOrderIds.push(id);
               }
             }
           }
         }
-
-        console.log(
-          resolvedOrderIds.length
-            ? `✅ Order name "${rawQ}" resolved to shopify_order_id(s): ${resolvedOrderIds.join(", ")}`
-            : `ℹ️ No Shopify order found with name "${rawQ}"`
-        );
       } catch (err) {
-        console.warn("⚠️ Order name resolution error:", err.message);
+        console.warn("Order name resolution error:", err.message);
       }
     }
 
@@ -451,7 +495,7 @@ export async function registeredProducts(req, res) {
         const client = new shopify.api.clients.Graphql({ session });
         orderNameMap = await fetchShopifyOrderNames(client, orderIds);
       } catch (err) {
-        console.warn("⚠️ Order number enrichment skipped:", err.message);
+        console.warn("Order number enrichment skipped:", err.message);
       }
     }
 

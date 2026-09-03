@@ -6,7 +6,11 @@ import {
   activateEntitlementFromPayment,
   cancelEntitlementFromRefund,
   getNumericIdFromGid,
+  getExtendedWarrantySettings,
+  // normalizeWarrantyPricingType,
 } from "./services/extendedWarranty.service.js";
+import { normalizeWarrantyPricingType } from "./services/extendedWarrantyPricing.js";
+import { activatePdpEntitlementsFromOrder, collectPdpWarrantyTargets } from "./services/pdpExtendedWarrantyOrder.service.js";
 
 /**
  * Extracts extended-warranty registration metadata from a Shopify line item.
@@ -112,9 +116,31 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
             node {
               id
               title
+              quantity
+              sku
               customAttributes {
                 key
                 value
+              }
+              variant {
+                id
+              }
+              product {
+                id
+                handle
+                title
+              }
+              discountedUnitPriceSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+              originalUnitPriceSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
               }
             }
           }
@@ -137,8 +163,12 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
 
   const shopName = response.data?.shop?.name;
   const customerName = order.customer?.displayName || null;
-  const customerEmail = order.email;
+  const customerEmail = order.email || orderPayload.email || null;
   const targets = collectActivationTargets(
+    orderPayload,
+    order.lineItems?.edges || []
+  );
+  const pdpTargets = collectPdpWarrantyTargets(
     orderPayload,
     order.lineItems?.edges || []
   );
@@ -147,15 +177,35 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
     orderId,
     orderName: order.name,
     targetCount: targets.size,
+    pdpTargetCount: pdpTargets.length,
     targets: [...targets.entries()],
   });
 
-  if (targets.size === 0) {
+  if (targets.size === 0 && !pdpTargets.length) {
     console.warn("[EW Webhook] Paid order has no EW line-item metadata", {
       orderId,
       orderName: order.name,
     });
     return;
+  }
+
+  if (pdpTargets.length) {
+    try {
+      const settings = await getExtendedWarrantySettings(shopId);
+      const created = await activatePdpEntitlementsFromOrder({
+        shopId,
+        shopifyOrderId: String(orderId),
+        customerEmail,
+        pricingType: normalizeWarrantyPricingType(settings?.warranty_pricing_type),
+        targets: pdpTargets,
+      });
+      console.log("[EW Webhook] PDP entitlements processed", {
+        orderId,
+        created: (created || []).map((row) => row?.id).filter(Boolean),
+      });
+    } catch (err) {
+      console.error("[EW Webhook] PDP entitlement activation failed:", err.message);
+    }
   }
 
   for (const [registerId, planIdFromPayload] of targets) {

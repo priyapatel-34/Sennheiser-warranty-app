@@ -522,6 +522,16 @@
       products: [],
     };
 
+    // include storefront locale for server-side email language selection
+    const storefrontLocale =
+      document.getElementById("storefrontLocale")?.value?.trim() ||
+      document.documentElement.lang ||
+      window.Shopify?.locale ||
+      navigator.language ||
+      "en";
+
+    payload.locale = storefrontLocale;
+
     if (submitBtn) submitBtn.disabled = true;
     window.ExtendedWarrantyOffer?.showPageLoader?.("Registering your product...");
 

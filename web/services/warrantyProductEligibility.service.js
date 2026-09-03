@@ -1,56 +1,77 @@
-/**
- * Centralized extended-warranty product eligibility.
- *
- * Default-eligible Shopify product types (normalized):
- *   - audiophile-headphones
- *   - soundbar
- *
- * Default exclusions, based on Shopify `productType` and `tags` after the same
- * normalization (lowercase, trim, non-alphanumeric → hyphen). No title matching.
- *   - accessory / accessories
- *   - spare-part / spare-parts
- *   - empty / null / undefined product type
- *
- * Effective eligibility for a shop:
- *   isDefaultEligible(product) OR hasAdminOverride(product, shop)
- */
-
 export const DEFAULT_ELIGIBLE_TYPE_SLUGS = Object.freeze([
+  // Headphones
   "audiophile-headphones",
-  "soundbar",
   "headphones",
-  "Soundbars & Sub",
   "Audiophile Headphones",
+  "Wired Headphones",
   "product-type--audiophile-headphones",
-  "product-type--soundbar",
+  "product-type--wired-headphones",
   "product-type--wireless-headphones",
+  "ワイヤレスヘッドホン",
+
+  // Soundbars
+  "soundbar",
+  "Soundbar",
+  "Soundbars & Sub",
+  "AMBEO Soundbar",
+  "product-type--soundbar",
+
+  // TV listening / hearing
+  "TV Listener",
+  "TV Hearing",
+  "product-type--tv-hearing",
+
+  // Other eligible categories
+  "Earplugs",
+  "Bluetooth Transmitters",
+  "Microphone",
 ]);
 
 const DEFAULT_ELIGIBLE_COMPACT = new Set(
-  DEFAULT_ELIGIBLE_TYPE_SLUGS.map((slug) => slug.replace(/-/g, ""))
+  DEFAULT_ELIGIBLE_TYPE_SLUGS.map((slug) => slugifyProductTypeStatic(slug).replace(/-/g, ""))
 );
 
-const DEFAULT_ELIGIBLE_SLUG_SET = new Set(DEFAULT_ELIGIBLE_TYPE_SLUGS);
+const DEFAULT_ELIGIBLE_SLUG_SET = new Set(
+  DEFAULT_ELIGIBLE_TYPE_SLUGS.map((slug) => slugifyProductTypeStatic(slug))
+);
 
 /**
  * Shopify search tokens used to pre-filter the Admin catalog. Local eligibility
  * remains the source of truth after the query returns.
  */
 export const DEFAULT_ELIGIBLE_SHOPIFY_TYPE_QUERIES = Object.freeze([
+  // Headphones
   "product_type:audiophile-headphones",
   'product_type:"audiophile headphones"',
-  "product_type:soundbar",
-  'product_type:"sound bar"',
   "product_type:headphones",
   'product_type:"headphones"',
+  'product_type:"wired headphones"',
+  "product_type:wired-headphones",
+  'product_type:"wireless headphones"',
+  "product_type:wireless-headphones",
+  'product_type:"ワイヤレスヘッドホン"',
+
+  // Soundbars
+  "product_type:soundbar",
+  'product_type:"sound bar"',
+  'product_type:"soundbars & sub"',
+  'product_type:"ambeo soundbar"',
+
+  // TV listening / hearing
+  'product_type:"tv listener"',
+  'product_type:"tv hearing"',
+  "product_type:tv-hearing",
+
+  // Other
+  "product_type:earplugs",
+  'product_type:"bluetooth transmitters"',
+  "product_type:microphone",
 ]);
 
 const EXCLUDED_TYPE_SLUGS = new Set([
-  "accessory",
   "accessories",
   "spare-part",
   "spare-parts",
-  "sparepart",
   "spareparts",
 ]);
 
@@ -71,16 +92,36 @@ export function getNumericIdFromGid(gid) {
 
 /**
  * Converts a Shopify product type or tag into a stable slug for comparisons.
+ * Handles non-Latin scripts (e.g. Japanese) by only stripping ASCII
+ * punctuation/whitespace rather than dropping non-alphanumeric characters
+ * outright, so labels like "ワイヤレスヘッドホン" still normalize to a
+ * comparable, non-empty slug instead of being wiped out.
  */
 export function slugifyProductType(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
+  const trimmed = String(value || "").trim().toLowerCase();
+  if (!trimmed) return "";
+  // If the value is pure ASCII, keep the original strict behavior.
+  if (/^[\x00-\x7F]*$/.test(trimmed)) {
+    return trimmed
+      .replace(/[_/]+/g, "-")
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-]+/g, "")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "");
+  }
+  // Non-ASCII (e.g. Japanese) labels: normalize whitespace/underscores only,
+  // preserve the script so it still matches itself consistently.
+  return trimmed
     .replace(/[_/]+/g, "-")
     .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]+/g, "")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+// Internal helper usable before `slugifyProductType` is hoisted/exported,
+// kept in sync with the exported implementation above.
+function slugifyProductTypeStatic(value) {
+  return slugifyProductType(value);
 }
 
 /**
@@ -149,7 +190,9 @@ export function isExcludedClassification(product) {
 
 /**
  * Default (non-override) eligibility: approved type, defined type, and not an
- * accessory/spare-part classification.
+ * accessory/spare-part classification. Any product type outside
+ * DEFAULT_ELIGIBLE_TYPE_SLUGS is treated as ineligible (i.e. bucketed with
+ * accessories) unless the shop has an explicit override for that product.
  */
 export function isDefaultEligible(product) {
   const productType =
@@ -177,9 +220,12 @@ export function isEffectivelyEligible(product, overrideProductIds = []) {
 
 /**
  * Variant of `isEffectivelyEligible` that accepts an admin-configured
- * allowed product-type list (raw strings). When `allowedTypesRaw` is
- * non-empty, only products matching those types or explicit overrides are
- * considered eligible. Otherwise falls back to standard effective logic.
+ * allowed product-type list (raw strings pulled from the store's own catalog,
+ * e.g. via a settings screen). When `allowedTypesRaw` is non-empty, only
+ * products matching those types or explicit overrides are considered
+ * eligible — this lets a shop scope eligibility to exactly the product types
+ * that exist in their store rather than relying solely on the hardcoded
+ * defaults above. Otherwise falls back to standard effective logic.
  */
 export function isEffectivelyEligibleWithAllowed(
   product,

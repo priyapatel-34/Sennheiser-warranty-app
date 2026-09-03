@@ -16,26 +16,31 @@ import {
   Grid,
   Spinner,
 } from "@shopify/polaris";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import LoadingPanel from "../components/LoadingPanel.jsx";
 import { useToast } from "../hooks/useToast.js";
 import { formatDate } from "../utils/formatDate.js";
 
 const PAGE_SIZE = 25;
+const ALL_FILTER = "all";
+const SHOPIFY_PURCHASE = "shopify";
+const EXTERNAL_PURCHASE = "external";
+const EXTERNAL_PURCHASE_LABEL = "External Purchase";
+const REGISTERED_PRODUCTS_URL = "/app/registered-products";
 
 const WARRANTY_TYPE_OPTIONS = [
-  { label: "All statuses", value: "all" },
+  { label: "All statuses", value: ALL_FILTER },
   { label: "Standard warranty", value: "standard" },
-  { label: "Extended warranty", value: "extended" }
+  { label: "Extended warranty", value: "extended" },
 ];
 
 const PURCHASE_TYPE_OPTIONS = [
-  { label: "All purchase types", value: "all" },
-  { label: "Shopify Purchase", value: "shopify" },
-  { label: "External Purchase", value: "external" },
+  { label: "All purchase types", value: ALL_FILTER },
+  { label: "Shopify Purchase", value: SHOPIFY_PURCHASE },
+  { label: EXTERNAL_PURCHASE_LABEL, value: EXTERNAL_PURCHASE },
 ];
 
-const sectionLabelStyle = {
+const SECTION_LABEL_STYLE = {
   fontSize: 11,
   fontWeight: 600,
   color: "#6d7175",
@@ -44,8 +49,47 @@ const sectionLabelStyle = {
   marginBottom: 4,
 };
 
+const DETAIL_CELL_SPAN = {
+  xs: 6,
+  sm: 3,
+  md: 3,
+  lg: 4,
+  xl: 4,
+};
+
+const CSV_HEADERS = [
+  "Warranty Record ID",
+  "Customer",
+  "Product",
+  "Serial Number",
+  "Purchase Type",
+  "Order Number",
+  "SKU",
+  "Email",
+  "Warranty Type",
+  "Warranty End",
+  "Extended Warranty End",
+];
+
+const WARRANTY_STATUS_LABELS = {
+  active: "Extended (Active)",
+  refunded: "Extended (Refunded)",
+  cancelled: "Extended (Cancelled)",
+  expired: "Extended (Expired)",
+};
+
+const WARRANTY_STATUS_TONES = {
+  active: "success",
+  refunded: "critical",
+  cancelled: "critical",
+  expired: "critical",
+};
+
 function TruncatedText({ value, maxWidth = "180px", bold = false }) {
-  if (!value) return "—";
+  if (!value) {
+    return "—";
+  }
+
   return (
     <span
       title={value}
@@ -58,7 +102,9 @@ function TruncatedText({ value, maxWidth = "180px", bold = false }) {
       }}
     >
       {bold ? (
-        <Text as="span" fontWeight="semibold">{value}</Text>
+        <Text as="span" fontWeight="semibold">
+          {value}
+        </Text>
       ) : (
         value
       )}
@@ -67,34 +113,41 @@ function TruncatedText({ value, maxWidth = "180px", bold = false }) {
 }
 
 function DetailField({ label, value, isDate = false }) {
-  const display = isDate ? formatDate(value) : (value || "—");
+  const displayValue = isDate ? formatDate(value) : value || "—";
+
   return (
     <div>
-      <div style={sectionLabelStyle}>{label}</div>
-      <Text as="p">{display}</Text>
+      <div style={SECTION_LABEL_STYLE}>{label}</div>
+      <Text as="p">{displayValue}</Text>
     </div>
   );
 }
 
-function formatWarrantyType(item) {
-  const status = item.extended_warranty_status;
-  if (status === "active") return "Extended (Active)";
-  if (status === "refunded") return "Extended (Refunded)";
-  if (status === "cancelled") return "Extended (Cancelled)";
-  if (status === "expired") return "Extended (Expired)";
-  return "Standard";
+function getWarrantyStatus(item) {
+  return item.extended_warranty_status || "";
 }
 
-function warrantyTone(item) {
-  const status = item.extended_warranty_status;
-  if (status === "active") return "success";
-  if (status === "refunded" || status === "cancelled" || status === "expired") {
-    return "critical";
-  }
-  return "info";
+function getWarrantyLabel(item) {
+  const status = getWarrantyStatus(item);
+  return WARRANTY_STATUS_LABELS[status] || "Standard";
 }
 
-function formatOrderNo(item) {
+function getWarrantyTone(item) {
+  const status = getWarrantyStatus(item);
+  return WARRANTY_STATUS_TONES[status] || "info";
+}
+
+function getPurchaseLabel(purchaseType) {
+  return purchaseType === SHOPIFY_PURCHASE
+    ? "Shopify Purchase"
+    : EXTERNAL_PURCHASE_LABEL;
+}
+
+function getPurchaseTone(purchaseType) {
+  return purchaseType === SHOPIFY_PURCHASE ? "success" : "info";
+}
+
+function getOrderNumber(item) {
   return item.order_number || "—";
 }
 
@@ -103,46 +156,102 @@ function csvEscape(value) {
   return `"${stringValue.replace(/"/g, '""')}"`;
 }
 
+function buildQueryParams({
+  page,
+  searchQuery = "",
+  warrantyTypeFilter = ALL_FILTER,
+  purchaseTypeFilter = ALL_FILTER,
+}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(PAGE_SIZE),
+    sort: "created_at",
+    order: "desc",
+  });
+
+  if (searchQuery) {
+    params.set("q", searchQuery);
+  }
+
+  if (warrantyTypeFilter !== ALL_FILTER) {
+    params.set("warrantyType", warrantyTypeFilter);
+  }
+
+  if (purchaseTypeFilter !== ALL_FILTER) {
+    params.set("purchaseType", purchaseTypeFilter);
+  }
+
+  return params;
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  const json = await response.json();
+
+  if (!response.ok) {
+    throw new Error(json.error || "Request failed");
+  }
+
+  return json;
+}
+
+function getPaginationMeta(pagination = {}) {
+  return {
+    total: pagination.total || 0,
+    totalPages: pagination.totalPages || 1,
+    hasNextPage: Boolean(pagination.hasNextPage),
+    hasPreviousPage: Boolean(pagination.hasPreviousPage),
+  };
+}
+
+async function fetchRegisteredProducts(filters) {
+  const params = buildQueryParams(filters);
+  return fetchJson(`${REGISTERED_PRODUCTS_URL}?${params.toString()}`);
+}
+
+async function fetchAllRegisteredProducts(filters) {
+  const allProducts = [];
+  let currentPage = 1;
+  let totalPages = 1;
+
+  while (currentPage <= totalPages) {
+    const response = await fetchRegisteredProducts({
+      ...filters,
+      page: currentPage,
+    });
+
+    allProducts.push(...(response.data || []));
+    totalPages = response.pagination?.totalPages || 1;
+    currentPage += 1;
+  }
+
+  return allProducts;
+}
+
 function downloadCsv(filename, rows) {
-  if (!rows.length) return;
+  if (!rows.length) {
+    return;
+  }
 
-  const headers = [
-    "Warranty Record ID",
-    "Customer",
-    "Product",
-    "Serial Number",
-    "Purchase Type",
-    "Order Number",
-    "SKU",
-    "Email",
-    "Warranty Type",
-    "Warranty End",
-    "Extended Warranty End",
-  ];
+  const csvRows = rows.map((item) =>
+    [
+      item.id,
+      item.customer_name,
+      item.product_name,
+      item.serial_number,
+      getPurchaseLabel(item.purchase_type),
+      getOrderNumber(item),
+      item.sku,
+      item.customer_email,
+      getWarrantyLabel(item),
+      formatDate(item.warranty_end),
+      formatDate(item.extended_warranty_end),
+    ]
+      .map(csvEscape)
+      .join(","),
+  );
 
-  const csv = [
-    headers.map(csvEscape).join(","),
-    ...rows.map(item =>
-      [
-        item.id,
-        item.customer_name,
-        item.product_name,
-        item.serial_number,
-        item.purchase_type === "shopify"
-          ? "Shopify Purchase"
-          : "External Purchase",
-        formatOrderNo(item),
-        item.sku,
-        item.customer_email,
-        formatWarrantyType(item),
-        formatDate(item.warranty_end),
-        formatDate(item.extended_warranty_end),
-      ]
-        .map(csvEscape)
-        .join(",")
-    ),
-  ].join("\r\n");
-
+  const csv = [CSV_HEADERS.map(csvEscape).join(","), ...csvRows].join("\r\n");
   const blob = new Blob(["\uFEFF", csv], {
     type: "text/csv;charset=utf-8;",
   });
@@ -157,6 +266,151 @@ function downloadCsv(filename, rows) {
   URL.revokeObjectURL(url);
 }
 
+function hasActiveFilters(searchQuery, warrantyTypeFilter, purchaseTypeFilter) {
+  return (
+    Boolean(searchQuery) ||
+    warrantyTypeFilter !== ALL_FILTER ||
+    purchaseTypeFilter !== ALL_FILTER
+  );
+}
+
+function DetailGrid({ fields }) {
+  return (
+    <Grid>
+      {fields
+        .filter(({ show = true }) => show)
+        .map(({ label, value, isDate = false }) => (
+          <Grid.Cell key={label} columnSpan={DETAIL_CELL_SPAN}>
+            <DetailField label={label} value={value} isDate={isDate} />
+          </Grid.Cell>
+        ))}
+    </Grid>
+  );
+}
+
+function ProductRow({ item, index, onView, onDelete }) {
+  const purchaseLabel = getPurchaseLabel(item.purchase_type);
+
+  return (
+    <IndexTable.Row
+      id={String(item.id)}
+      key={item.id}
+      position={index}
+      onClick={() => onView(item)}
+    >
+      <IndexTable.Cell>{item.id}</IndexTable.Cell>
+      <IndexTable.Cell>
+        <TruncatedText value={item.customer_name} maxWidth="160px" />
+      </IndexTable.Cell>
+      <IndexTable.Cell>
+        <TruncatedText value={item.product_name} maxWidth="220px" bold />
+      </IndexTable.Cell>
+      <IndexTable.Cell>{item.serial_number}</IndexTable.Cell>
+      <IndexTable.Cell>
+        <Badge tone={getPurchaseTone(item.purchase_type)}>
+          {purchaseLabel}
+        </Badge>
+      </IndexTable.Cell>
+      <IndexTable.Cell>{getOrderNumber(item)}</IndexTable.Cell>
+      <IndexTable.Cell>{item.sku || "—"}</IndexTable.Cell>
+      <IndexTable.Cell>{item.customer_email}</IndexTable.Cell>
+      <IndexTable.Cell>
+        <Badge tone={getWarrantyTone(item)}>{getWarrantyLabel(item)}</Badge>
+      </IndexTable.Cell>
+      <IndexTable.Cell>{formatDate(item.warranty_end)}</IndexTable.Cell>
+      <IndexTable.Cell>
+        {formatDate(item.extended_warranty_end)}
+      </IndexTable.Cell>
+      <IndexTable.Cell>
+        <div
+          className="wa-row-actions"
+          style={{ display: "flex", gap: 8 }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <Button size="micro" onClick={() => onView(item)}>
+            View
+          </Button>
+          <Button tone="critical" size="micro" onClick={() => onDelete(item)}>
+            Delete
+          </Button>
+        </div>
+      </IndexTable.Cell>
+    </IndexTable.Row>
+  );
+}
+
+function ProductDetails({ product }) {
+  const registrationFields = [
+    { label: "Warranty Record ID", value: String(product.id) },
+    {
+      label: "Order Number",
+      value: product.order_number,
+      show: product.purchase_type !== EXTERNAL_PURCHASE_LABEL,
+    },
+    { label: "Serial Number", value: product.serial_number },
+    { label: "SKU", value: product.sku },
+    { label: "Product Name", value: product.product_name },
+    { label: "Product Variant", value: product.product_variant },
+    { label: "Purchase Type", value: product.purchase_type },
+    {
+      label: "Retailer Name",
+      value: product.retailer_name,
+      show: product.purchase_type === EXTERNAL_PURCHASE_LABEL,
+    },
+    { label: "Warranty Type", value: product.warranty_type },
+    { label: "Purchase Date", value: product.purchase_date, isDate: true },
+    {
+      label: "Registration Date",
+      value: product.registration_date,
+      isDate: true,
+    },
+  ];
+
+  const customerFields = [
+    { label: "Customer Name", value: product.customer_name },
+    { label: "Email", value: product.customer_email },
+    { label: "Shopify Customer ID", value: product.shopify_customer_id },
+  ];
+
+  const warrantyFields = [
+    {
+      label: "Standard Warranty Start",
+      value: product.warranty_start,
+      isDate: true,
+    },
+    {
+      label: "Standard Warranty End",
+      value: product.warranty_end,
+      isDate: true,
+    },
+    {
+      label: "Extended Warranty Start",
+      value: product.extended_warranty_start,
+      isDate: true,
+    },
+    {
+      label: "Extended Warranty End",
+      value: product.extended_warranty_end,
+      isDate: true,
+    },
+    { label: "Refund Status", value: product.refund_status },
+  ];
+
+  return (
+    <LegacyStack vertical spacing="loose">
+      <Card title="Registration Information" sectioned>
+        <DetailGrid fields={registrationFields} />
+      </Card>
+      <Card title="Customer Information" sectioned>
+        <DetailGrid fields={customerFields} />
+      </Card>
+      <Card title="Warranty Information" sectioned>
+        <DetailGrid fields={warrantyFields} />
+      </Card>
+    </LegacyStack>
+  );
+}
+
 /**
  * Renders the registered-products table and detail modal used to review each
  * customer's warranty registration history.
@@ -166,11 +420,10 @@ export default function RegisteredProductsTable() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [warrantyTypeFilter, setWarrantyTypeFilter] = useState("all");
-  const [purchaseTypeFilter, setPurchaseTypeFilter] = useState("all");
+  const [warrantyTypeFilter, setWarrantyTypeFilter] = useState(ALL_FILTER);
+  const [purchaseTypeFilter, setPurchaseTypeFilter] = useState(ALL_FILTER);
   const [page, setPage] = useState(1);
   const [paginationMeta, setPaginationMeta] = useState({
     total: 0,
@@ -178,75 +431,72 @@ export default function RegisteredProductsTable() {
     hasNextPage: false,
     hasPreviousPage: false,
   });
-
   const [refreshKey, setRefreshKey] = useState(0);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
-
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [productDetail, setProductDetail] = useState(null);
 
+  const closeDeleteModal = useCallback(() => {
+    setDeleteModalOpen(false);
+    setSelectedProduct(null);
+  }, []);
+
+  const closeDetailModal = useCallback(() => {
+    setDetailOpen(false);
+    setProductDetail(null);
+  }, []);
+
+  const refreshProducts = useCallback(() => {
+    setRefreshKey((key) => key + 1);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
-    async function load() {
+    const loadProducts = async () => {
       setLoading(true);
       setError(null);
 
       try {
-        const params = new URLSearchParams({
-          page: String(page),
-          limit: String(PAGE_SIZE),
-          sort: "created_at",
-          order: "desc",
+        const response = await fetchRegisteredProducts({
+          page,
+          searchQuery,
+          warrantyTypeFilter,
+          purchaseTypeFilter,
         });
 
-        if (searchQuery) {
-          params.set("q", searchQuery);
-        }
-        if (warrantyTypeFilter !== "all") {
-          params.set("warrantyType", warrantyTypeFilter);
-        }
-        if (purchaseTypeFilter !== "all") {
-          params.set("purchaseType", purchaseTypeFilter);
+        if (cancelled) {
+          return;
         }
 
-        const res = await fetch(`/app/registered-products?${params.toString()}`);
-        const json = await res.json();
+        setProducts(response.data || []);
+        setPaginationMeta(getPaginationMeta(response.pagination));
 
-        if (!res.ok) {
-          throw new Error(json.error || "Failed to load registered products");
+        if (response.pagination?.page && response.pagination.page !== page) {
+          setPage(response.pagination.page);
+        }
+      } catch (requestError) {
+        if (cancelled) {
+          return;
         }
 
-        if (cancelled) return;
-
-        setProducts(json.data || []);
-
-        const meta = json.pagination || {};
-        setPaginationMeta({
-          total: meta.total || 0,
-          totalPages: meta.totalPages || 1,
-          hasNextPage: Boolean(meta.hasNextPage),
-          hasPreviousPage: Boolean(meta.hasPreviousPage),
-        });
-
-        if (meta.page && meta.page !== page) {
-          setPage(meta.page);
-        }
-      } catch (err) {
-        if (cancelled) return;
-        const message = err.message || "Failed to load registered products";
+        const message =
+          requestError.message || "Failed to load registered products";
         setError(message);
         setProducts([]);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-    }
+    };
 
-    load();
+    loadProducts();
+
     return () => {
       cancelled = true;
     };
@@ -260,8 +510,8 @@ export default function RegisteredProductsTable() {
   const clearFilters = () => {
     setSearchInput("");
     setSearchQuery("");
-    setWarrantyTypeFilter("all");
-    setPurchaseTypeFilter("all");
+    setWarrantyTypeFilter(ALL_FILTER);
+    setPurchaseTypeFilter(ALL_FILTER);
     setPage(1);
   };
 
@@ -271,37 +521,38 @@ export default function RegisteredProductsTable() {
     setPage(1);
   };
 
-  const handleDeleteClick = (product, event) => {
-    event.stopPropagation();
+  const handleDeleteClick = (product) => {
     setSelectedProduct(product);
     setDeleteModalOpen(true);
   };
 
   const handleDeleteProduct = async () => {
-    if (!selectedProduct) return;
+    if (!selectedProduct) {
+      return;
+    }
 
     try {
       setDeleteLoading(true);
-      const response = await fetch(
-        `/app/registered-products/${selectedProduct.id}`,
-        { method: "DELETE" }
-      );
-      const data = await response.json();
 
-      if (!response.ok || !data.success) {
+      const data = await fetchJson(
+        `${REGISTERED_PRODUCTS_URL}/${selectedProduct.id}`,
+        { method: "DELETE" },
+      );
+
+      if (!data.success) {
         throw new Error(data.error || "Failed to delete product");
       }
 
       toast.showSuccess("Registered product deleted");
-      setDeleteModalOpen(false);
-      setSelectedProduct(null);
+      closeDeleteModal();
+
       if (detailOpen && productDetail?.id === selectedProduct.id) {
-        setDetailOpen(false);
-        setProductDetail(null);
+        closeDetailModal();
       }
-      setRefreshKey(k => k + 1);
-    } catch (err) {
-      toast.showError(err.message || "Failed to delete product");
+
+      refreshProducts();
+    } catch (requestError) {
+      toast.showError(requestError.message || "Failed to delete product");
     } finally {
       setDeleteLoading(false);
     }
@@ -311,43 +562,12 @@ export default function RegisteredProductsTable() {
     try {
       setExporting(true);
 
-      const allProducts = [];
-      let currentPage = 1;
-      let totalPages = 1;
-
-      // Fetch every page so the CSV contains all products matching the
-      // current search and filters, not only the 25 rows on screen.
-      do {
-        const params = new URLSearchParams({
-          page: String(currentPage),
-          limit: String(PAGE_SIZE),
-          sort: "created_at",
-          order: "desc",
-        });
-
-        if (searchQuery) {
-          params.set("q", searchQuery);
-        }
-        if (warrantyTypeFilter !== "all") {
-          params.set("warrantyType", warrantyTypeFilter);
-        }
-        if (purchaseTypeFilter !== "all") {
-          params.set("purchaseType", purchaseTypeFilter);
-        }
-
-        const res = await fetch(`/app/registered-products?${params.toString()}`);
-        const json = await res.json();
-
-        if (!res.ok) {
-          throw new Error(json.error || "Failed to export registered products");
-        }
-
-        allProducts.push(...(json.data || []));
-
-        const meta = json.pagination || {};
-        totalPages = meta.totalPages || 1;
-        currentPage += 1;
-      } while (currentPage <= totalPages);
+      const allProducts = await fetchAllRegisteredProducts({
+        page: 1,
+        searchQuery,
+        warrantyTypeFilter,
+        purchaseTypeFilter,
+      });
 
       if (!allProducts.length) {
         toast.showError("No registered products to export");
@@ -357,66 +577,77 @@ export default function RegisteredProductsTable() {
       const date = new Date().toISOString().slice(0, 10);
       downloadCsv(`registered-products-${date}.csv`, allProducts);
       toast.showSuccess(`${allProducts.length} registered product(s) exported`);
-    } catch (err) {
-      toast.showError(err.message || "Failed to export registered products");
+    } catch (requestError) {
+      toast.showError(
+        requestError.message || "Failed to export registered products",
+      );
     } finally {
       setExporting(false);
     }
   };
 
-  const openRegistrationDetails = async product => {
+  const openRegistrationDetails = async (product) => {
     setDetailOpen(true);
     setDetailLoading(true);
     setProductDetail(null);
 
     try {
-      const res = await fetch(`/app/registered-products/${product.id}`);
-      const json = await res.json();
+      const response = await fetchJson(
+        `${REGISTERED_PRODUCTS_URL}/${product.id}`,
+      );
 
-      if (!res.ok || !json.success) {
-        throw new Error(json.error || "Failed to load product details");
+      if (!response.success) {
+        throw new Error(response.error || "Failed to load product details");
       }
 
-      setProductDetail(json.data);
-    } catch (err) {
-      toast.showError(err.message || "Failed to load product details");
-      setDetailOpen(false);
+      setProductDetail(response.data);
+    } catch (requestError) {
+      toast.showError(
+        requestError.message || "Failed to load product details",
+      );
+      closeDetailModal();
     } finally {
       setDetailLoading(false);
     }
   };
 
-  const handleViewClick = (product, event) => {
-    event.stopPropagation();
-    openRegistrationDetails(product);
-  };
-
-  const closeDetailModal = () => {
-    setDetailOpen(false);
-    setProductDetail(null);
-  };
-
   const showPagination =
     !loading && !error && paginationMeta.totalPages > 1;
+  const filtersActive = hasActiveFilters(
+    searchQuery,
+    warrantyTypeFilter,
+    purchaseTypeFilter,
+  );
 
   return (
     <>
-      <Page title="Registered Products" fullWidth
-      primaryAction={{
-        content: "Export CSV",
-        onAction: handleExportCsv,
-        loading: exporting,
-        disabled: loading || Boolean(error) || paginationMeta.total === 0,
-      }}>
+      <Page
+        title="Registered Products"
+        fullWidth
+        primaryAction={{
+          content: "Export CSV",
+          onAction: handleExportCsv,
+          loading: exporting,
+          disabled: loading || Boolean(error) || paginationMeta.total === 0,
+        }}
+      >
         <Layout>
           <Layout.Section>
             <LegacyCard sectioned>
               <Text as="p" variant="bodySm" tone="subdued">
-                Search by name, email, serial no., SKU, product name, or warranty record ID.
-                {" "}To search by order number, use the <strong>#</strong> prefix — e.g.{" "}
-                <strong>#1082</strong>.
+                Search by name, email, serial no., SKU, product name, or
+                warranty record ID. To search by order number, use the{" "}
+                <strong>#</strong> prefix — e.g. <strong>#1082</strong>.
               </Text>
-              <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
+
+              <div
+                style={{
+                  marginTop: 16,
+                  display: "flex",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+              >
                 <div style={{ flex: 1, minWidth: 240 }}>
                   <TextField
                     label="Search"
@@ -425,8 +656,10 @@ export default function RegisteredProductsTable() {
                     onChange={setSearchInput}
                     placeholder="Search registered products..."
                     autoComplete="off"
-                    onKeyDown={e => {
-                      if (e.key === "Enter") runSearch();
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        runSearch();
+                      }
                     }}
                     clearButton
                     onClearButtonClick={clearSearch}
@@ -437,33 +670,34 @@ export default function RegisteredProductsTable() {
                     }
                   />
                 </div>
+
                 <div style={{ minWidth: 190 }}>
                   <Select
                     label="Warranty status"
                     labelHidden
                     options={WARRANTY_TYPE_OPTIONS}
                     value={warrantyTypeFilter}
-                    onChange={(v) => {
-                      setWarrantyTypeFilter(v);
+                    onChange={(value) => {
+                      setWarrantyTypeFilter(value);
                       setPage(1);
                     }}
                   />
                 </div>
+
                 <div style={{ minWidth: 180 }}>
                   <Select
                     label="Purchase type"
                     labelHidden
                     options={PURCHASE_TYPE_OPTIONS}
                     value={purchaseTypeFilter}
-                    onChange={(v) => {
-                      setPurchaseTypeFilter(v);
+                    onChange={(value) => {
+                      setPurchaseTypeFilter(value);
                       setPage(1);
                     }}
                   />
                 </div>
-                {searchQuery ||
-                  warrantyTypeFilter !== "all" ||
-                  purchaseTypeFilter !== "all" ? (
+
+                {filtersActive ? (
                   <Button onClick={clearFilters}>Clear all</Button>
                 ) : null}
               </div>
@@ -475,9 +709,7 @@ export default function RegisteredProductsTable() {
               ) : error ? (
                 <EmptyState heading="Unable to load products" image="">
                   <p>{error}</p>
-                  <Button onClick={() => setRefreshKey(k => k + 1)}>
-                    Retry
-                  </Button>
+                  <Button onClick={refreshProducts}>Retry</Button>
                 </EmptyState>
               ) : products.length === 0 ? (
                 <EmptyState heading="No registered products found" image="">
@@ -488,9 +720,15 @@ export default function RegisteredProductsTable() {
                   </p>
                 </EmptyState>
               ) : (
-                <div className="wa-registered-products-table" style={{ overflowX: "auto" }}>
+                <div
+                  className="wa-registered-products-table"
+                  style={{ overflowX: "auto" }}
+                >
                   <IndexTable
-                    resourceName={{ singular: "product", plural: "products" }}
+                    resourceName={{
+                      singular: "product",
+                      plural: "products",
+                    }}
                     itemCount={products.length}
                     selectable={false}
                     headings={[
@@ -509,73 +747,35 @@ export default function RegisteredProductsTable() {
                     ]}
                   >
                     {products.map((item, index) => (
-                      <IndexTable.Row
-                        id={String(item.id)}
+                      <ProductRow
                         key={item.id}
-                        position={index}
-                        onClick={() => openRegistrationDetails(item)}
-                      >
-                        <IndexTable.Cell>{item.id}</IndexTable.Cell>
-                        <IndexTable.Cell>
-                          <TruncatedText value={item.customer_name} maxWidth="160px" />
-                        </IndexTable.Cell>
-                        <IndexTable.Cell>
-                          <TruncatedText value={item.product_name} maxWidth="220px" bold />
-                        </IndexTable.Cell>
-                        <IndexTable.Cell>{item.serial_number}</IndexTable.Cell>
-                        <IndexTable.Cell>
-                          <Badge tone={item.purchase_type === "shopify" ? "success" : "info"}>
-                            {item.purchase_type === "shopify"
-                              ? "Shopify Purchase"
-                              : "External Purchase"}
-                          </Badge>
-                        </IndexTable.Cell>
-                        <IndexTable.Cell>{formatOrderNo(item)}</IndexTable.Cell>
-                        <IndexTable.Cell>{item.sku || "—"}</IndexTable.Cell>
-                        <IndexTable.Cell>{item.customer_email}</IndexTable.Cell>
-                        <IndexTable.Cell>
-                          <Badge tone={warrantyTone(item)}>
-                            {formatWarrantyType(item)}
-                          </Badge>
-                        </IndexTable.Cell>
-                        <IndexTable.Cell>{formatDate(item.warranty_end)}</IndexTable.Cell>
-                        <IndexTable.Cell>{formatDate(item.extended_warranty_end)}</IndexTable.Cell>
-                        <IndexTable.Cell>
-                          <div
-                            className="wa-row-actions"
-                            style={{ display: "flex", gap: 8 }}
-                            onClick={e => e.stopPropagation()}
-                          >
-                            <Button
-                              size="micro"
-                              onClick={e => handleViewClick(item, e)}
-                            >
-                              View
-                            </Button>
-                            <Button
-                              tone="critical"
-                              size="micro"
-                              onClick={e => handleDeleteClick(item, e)}
-                            >
-                              Delete
-                            </Button>
-                          </div>
-                        </IndexTable.Cell>
-                      </IndexTable.Row>
+                        item={item}
+                        index={index}
+                        onView={openRegistrationDetails}
+                        onDelete={handleDeleteClick}
+                      />
                     ))}
                   </IndexTable>
 
-                  <div className="wa-pagination-bar" style={{ padding: 16 }}>
+                  <div
+                    className="wa-pagination-bar"
+                    style={{ padding: 16 }}
+                  >
                     <Text as="p" tone="subdued">
                       {paginationMeta.total} result
                       {paginationMeta.total === 1 ? "" : "s"}
                     </Text>
+
                     {showPagination ? (
                       <Pagination
                         hasPrevious={paginationMeta.hasPreviousPage}
-                        onPrevious={() => setPage(p => Math.max(1, p - 1))}
+                        onPrevious={() =>
+                          setPage((currentPage) =>
+                            Math.max(1, currentPage - 1),
+                          )
+                        }
                         hasNext={paginationMeta.hasNextPage}
-                        onNext={() => setPage(p => p + 1)}
+                        onNext={() => setPage((currentPage) => currentPage + 1)}
                         label={`Page ${page} of ${paginationMeta.totalPages}`}
                       />
                     ) : null}
@@ -602,97 +802,27 @@ export default function RegisteredProductsTable() {
       >
         <Modal.Section>
           {detailLoading ? (
-            <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
-              <Spinner accessibilityLabel="Loading registration details" size="large" />
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                padding: 40,
+              }}
+            >
+              <Spinner
+                accessibilityLabel="Loading registration details"
+                size="large"
+              />
             </div>
           ) : productDetail ? (
-            <LegacyStack vertical spacing="loose">
-              <Card title="Registration Information" sectioned>
-                <Grid>
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Warranty Record ID" value={String(productDetail.id)} />
-                  </Grid.Cell>
-                  {productDetail.purchase_type !== "External Purchase" && (
-                    <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                      <DetailField label="Order Number" value={productDetail.order_number} />
-                    </Grid.Cell>
-                  )}
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Serial Number" value={productDetail.serial_number} />
-                  </Grid.Cell>
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="SKU" value={productDetail.sku} />
-                  </Grid.Cell>
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Product Name" value={productDetail.product_name} />
-                  </Grid.Cell>
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Product Variant" value={productDetail.product_variant} />
-                  </Grid.Cell>
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Purchase Type" value={productDetail.purchase_type} />
-                  </Grid.Cell>
-                  {productDetail.purchase_type === "External Purchase" && (
-                    <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                      <DetailField label="Retailer Name" value={productDetail.retailer_name} />
-                    </Grid.Cell>
-                  )}
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Warranty Type" value={productDetail.warranty_type} />
-                  </Grid.Cell>
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Purchase Date" value={productDetail.purchase_date} isDate />
-                  </Grid.Cell>
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Registration Date" value={productDetail.registration_date} isDate />
-                  </Grid.Cell>
-                </Grid>
-              </Card>
-
-              <Card title="Customer Information" sectioned>
-                <Grid>
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Customer Name" value={productDetail.customer_name} />
-                  </Grid.Cell>
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Email" value={productDetail.customer_email} />
-                  </Grid.Cell>
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Shopify Customer ID" value={productDetail.shopify_customer_id} />
-                  </Grid.Cell>
-                </Grid>
-              </Card>
-
-              <Card title="Warranty Information" sectioned>
-                <Grid>
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Standard Warranty Start" value={productDetail.warranty_start} isDate />
-                  </Grid.Cell>
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Standard Warranty End" value={productDetail.warranty_end} isDate />
-                  </Grid.Cell>
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Extended Warranty Start" value={productDetail.extended_warranty_start} isDate />
-                  </Grid.Cell>
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Extended Warranty End" value={productDetail.extended_warranty_end} isDate />
-                  </Grid.Cell>
-                  <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 4, xl: 4 }}>
-                    <DetailField label="Refund Status" value={productDetail.refund_status} />
-                  </Grid.Cell>
-                </Grid>
-              </Card>
-            </LegacyStack>
+            <ProductDetails product={productDetail} />
           ) : null}
         </Modal.Section>
       </Modal>
 
       <Modal
         open={deleteModalOpen}
-        onClose={() => {
-          setDeleteModalOpen(false);
-          setSelectedProduct(null);
-        }}
+        onClose={closeDeleteModal}
         title="Delete Registered Product"
         primaryAction={{
           content: "Delete",
@@ -701,13 +831,7 @@ export default function RegisteredProductsTable() {
           onAction: handleDeleteProduct,
         }}
         secondaryActions={[
-          {
-            content: "Cancel",
-            onAction: () => {
-              setDeleteModalOpen(false);
-              setSelectedProduct(null);
-            },
-          },
+          { content: "Cancel", onAction: closeDeleteModal },
         ]}
       >
         <Modal.Section>

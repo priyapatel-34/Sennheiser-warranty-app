@@ -461,6 +461,15 @@ export async function ensurePlanCheckoutVariant({
     variantNumericId: variant.id,
   });
 
+  try {
+    await ensureWarrantyVariantPurchasable({
+      session: writeSession,
+      variantId: variant.id,
+    });
+  } catch (err) {
+    console.warn("⚠️ Could not force warranty variant purchasable during provision:", err.message);
+  }
+
   console.log("✅ Provisioned warranty checkout variant", {
     planId,
     sku,
@@ -469,6 +478,92 @@ export async function ensurePlanCheckoutVariant({
   });
 
   return variant.id;
+}
+
+/**
+ * Extended warranty variants are not physical inventory. Force CONTINUE +
+ * untracked so Shopify does not return 422 "already sold out".
+ */
+export async function ensureWarrantyVariantPurchasable({ session, variantId } = {}) {
+  const numericId = toNumericId(variantId);
+  if (!session?.shop || !numericId) return null;
+
+  const writeSession = await getOfflineSession(session);
+  const admin = new shopify.api.clients.Graphql({ session: writeSession });
+  const variantGid = String(variantId).startsWith("gid://")
+    ? variantId
+    : `gid://shopify/ProductVariant/${numericId}`;
+
+  const data = await adminRequest(
+    admin,
+    `
+    query WarrantyVariantAvailability($id: ID!) {
+      productVariant(id: $id) {
+        id
+        inventoryPolicy
+        availableForSale
+        product { id }
+        inventoryItem { id tracked }
+      }
+    }
+    `,
+    { id: variantGid }
+  );
+
+  const variant = data?.productVariant;
+  if (!variant?.id) {
+    throw new Error(`Warranty checkout variant ${numericId} was not found`);
+  }
+
+  const tracked = Boolean(variant.inventoryItem?.tracked);
+  const policy = String(variant.inventoryPolicy || "").toUpperCase();
+  if (!tracked && policy === "CONTINUE") {
+    return numericId;
+  }
+
+  console.warn("[EW Checkout] Warranty variant is not freely purchasable; updating inventory settings", {
+    variantId: numericId,
+    inventoryPolicy: variant.inventoryPolicy,
+    tracked,
+    availableForSale: variant.availableForSale,
+  });
+
+  if (variant.inventoryItem?.id && tracked) {
+    const itemData = await adminRequest(
+      admin,
+      `
+      mutation UntrackWarrantyInventory($id: ID!, $input: InventoryItemInput!) {
+        inventoryItemUpdate(id: $id, input: $input) {
+          inventoryItem { id tracked }
+          userErrors { field message }
+        }
+      }
+      `,
+      { id: variant.inventoryItem.id, input: { tracked: false } }
+    );
+    assertUserErrors(itemData?.inventoryItemUpdate, "inventoryItemUpdate");
+  }
+
+  if (variant.product?.id && policy !== "CONTINUE") {
+    const policyData = await adminRequest(
+      admin,
+      `
+      mutation ContinueWarrantySales($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+          productVariants { id inventoryPolicy }
+          userErrors { field message }
+        }
+      }
+      `,
+      {
+        productId: variant.product.id,
+        variants: [{ id: variant.id, inventoryPolicy: "CONTINUE" }],
+      }
+    );
+    assertUserErrors(policyData?.productVariantsBulkUpdate, "productVariantsBulkUpdate");
+  }
+
+  return numericId;
 }
 
 export { isUsableCheckoutVariant };

@@ -29,11 +29,12 @@
     if (!contextRaw)
       return console.error("Missing warranty registration context");
 
-    const { order_id, product_id } = JSON.parse(contextRaw);
+    const { order_id, product_id, line_item_id } = JSON.parse(contextRaw);
     if (!order_id || !product_id)
       return console.error("Invalid registration context");
 
     const payload = new URLSearchParams({ order_id, product_id });
+    if (line_item_id) payload.set("line_item_id", line_item_id);
 
     const response = await fetch("/apps/warranty/orders", {
       method: "POST",
@@ -275,6 +276,16 @@
 
       products: [],
     };
+
+    // include storefront locale for server-side email language selection
+    const storefrontLocale =
+      document.getElementById("storefrontLocale")?.value?.trim() ||
+      document.documentElement.lang ||
+      window.Shopify?.locale ||
+      navigator.language ||
+      "en";
+
+    payload.locale = storefrontLocale;
 
     const purchaseDate = orderDate.value;
 

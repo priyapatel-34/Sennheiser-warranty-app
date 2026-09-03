@@ -14,7 +14,7 @@ import {
     fetchProductPricing,
     resolvePlanRowForCheckout,
 } from "../services/extendedWarranty.service.js";
-import { ensurePlanCheckoutVariant } from "../services/extendedWarrantyCheckoutVariant.service.js";
+import { ensurePlanCheckoutVariant, ensureWarrantyVariantPurchasable } from "../services/extendedWarrantyCheckoutVariant.service.js";
 import { normalizeWarrantyPricingType } from "../services/extendedWarrantyPricing.js";
 
 function buildCartCheckoutUrl({ variantId, properties = {} }) {
@@ -51,11 +51,11 @@ async function resolveExtendedWarrantyCheckoutData({
 
     const [ rows ] = await pool.query(
     `SELECT *
-     FROM extended_warranty_plans
-     WHERE shop_id = $1
-       AND id = $2
-       AND status = 'active'
-     LIMIT 1`,
+    FROM extended_warranty_plans
+    WHERE shop_id = ?
+    AND id = ?
+    AND status = 'active'
+    LIMIT 1`,
     [shopId, planId]
 );
 
@@ -145,9 +145,16 @@ if (!resolvedPlanRow.shopify_checkout_variant_id) {
             _ew_serial: registered.serial_number,
             _parent_product_id: String(registered.shopify_product_id || ""),
         },
-        customerEmail: customerEmail || registered.customer_email,
+        customerEmail:
+            String(customerEmail || "").trim() ||
+            String(registered.customer_email || "").trim(),
+
         customerGid,
-        customerName: customerName || registered.customer_name || null,
+
+        customerName:
+            String(customerName || "").trim() ||
+            String(registered.customer_name || "").trim() ||
+            null,
         settings,
         pricingType,
     };
@@ -412,6 +419,15 @@ export async function getPdpCartPayload(req, res) {
             return res.status(400).json({
                 error: "Checkout variant not configured for this plan",
             });
+        }
+
+        try {
+            await ensureWarrantyVariantPurchasable({
+                session,
+                variantId: warrantyVariantId,
+            });
+        } catch (availabilityErr) {
+            console.error("❌ Warranty variant availability update failed:", availabilityErr);
         }
 
         return res.json({
