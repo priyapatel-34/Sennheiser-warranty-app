@@ -69,9 +69,11 @@ export const DEFAULT_ELIGIBLE_SHOPIFY_TYPE_QUERIES = Object.freeze([
 ]);
 
 const EXCLUDED_TYPE_SLUGS = new Set([
+  "accessory",
   "accessories",
   "spare-part",
   "spare-parts",
+  "sparepart",
   "spareparts",
 ]);
 
@@ -311,6 +313,7 @@ export function buildEligibleProductsShopifyQuery({
   searchTerm = "",
   statusFilter = "",
   overrideProductIds = [],
+  disabledProductIds = [],
 } = {}) {
   const statusQuery = buildStatusQuery(statusFilter);
   const typeQuery = DEFAULT_ELIGIBLE_SHOPIFY_TYPE_QUERIES.join(" OR ");
@@ -318,6 +321,13 @@ export function buildEligibleProductsShopifyQuery({
     .filter((id) => Number.isFinite(id) && id > 0)
     .slice(0, MAX_OVERRIDE_IDS_IN_SEARCH_QUERY);
   const idQuery = overrideIds.map((id) => `id:${id}`).join(" OR ");
+
+  const disabledIds = [...new Set((disabledProductIds || []).map(Number))]
+    .filter((id) => Number.isFinite(id) && id > 0)
+    .slice(0, MAX_OVERRIDE_IDS_IN_SEARCH_QUERY);
+  const disabledExclusion = disabledIds.length
+    ? ` AND NOT (${disabledIds.map((id) => `id:${id}`).join(" OR ")})`
+    : "";
 
   const hasStatusFilter = Boolean(String(statusFilter || "").trim());
   let eligibilityQuery;
@@ -329,6 +339,8 @@ export function buildEligibleProductsShopifyQuery({
     eligibilityQuery = `(${typeQuery}) AND ${statusQuery}`;
   }
 
+  eligibilityQuery = `(${eligibilityQuery})${disabledExclusion}`;
+
   const sanitized = sanitizeSearchTerm(searchTerm);
   if (!sanitized) return eligibilityQuery;
   return `(title:*${sanitized}* OR sku:*${sanitized}*) AND (${eligibilityQuery})`;
@@ -336,16 +348,48 @@ export function buildEligibleProductsShopifyQuery({
 
 /**
  * Builds a Shopify product search string for the excluded-product picker.
- * Local eligibility filtering remains authoritative after results return.
+ * Filters by product type server-side (instead of fetching the whole catalog
+ * and filtering locally) so the "Add products" modal loads quickly:
+ *   - Only products whose type is NOT one of the default-eligible types are
+ *     candidates (accessories, spare parts, custom categories, empty type).
+ *   - Products that were manually removed (disabled) are re-included by id
+ *     even if their type IS eligible, so they can be re-added.
+ *   - Products already on the eligible list via an enabled override are
+ *     excluded so they don't show up twice.
+ * Local eligibility filtering (tags-based accessory/spare-part detection)
+ * remains authoritative after results return.
  */
 export function buildExcludedProductsShopifyQuery({
   searchTerm = "",
   statusFilter = "",
+  overrideProductIds = [],
+  disabledProductIds = [],
 } = {}) {
   const statusQuery = buildStatusQuery(statusFilter);
+  const typeQuery = DEFAULT_ELIGIBLE_SHOPIFY_TYPE_QUERIES.join(" OR ");
+
+  const overrideIds = [...new Set((overrideProductIds || []).map(Number))]
+    .filter((id) => Number.isFinite(id) && id > 0)
+    .slice(0, MAX_OVERRIDE_IDS_IN_SEARCH_QUERY);
+  const disabledIds = [...new Set((disabledProductIds || []).map(Number))]
+    .filter((id) => Number.isFinite(id) && id > 0)
+    .slice(0, MAX_OVERRIDE_IDS_IN_SEARCH_QUERY);
+
+  const notEligibleType = `NOT (${typeQuery})`;
+  const disabledIdQuery = disabledIds.map((id) => `id:${id}`).join(" OR ");
+  const candidateQuery = disabledIdQuery
+    ? `(${notEligibleType}) OR (${disabledIdQuery})`
+    : notEligibleType;
+
+  const overrideExclusion = overrideIds.length
+    ? ` AND NOT (${overrideIds.map((id) => `id:${id}`).join(" OR ")})`
+    : "";
+
+  const query = `(${candidateQuery}) AND ${statusQuery}${overrideExclusion}`;
+
   const sanitized = sanitizeSearchTerm(searchTerm);
-  if (!sanitized) return statusQuery;
-  return `(title:*${sanitized}* OR sku:*${sanitized}*) AND ${statusQuery}`;
+  if (!sanitized) return query;
+  return `(title:*${sanitized}* OR sku:*${sanitized}*) AND (${query})`;
 }
 
 /**

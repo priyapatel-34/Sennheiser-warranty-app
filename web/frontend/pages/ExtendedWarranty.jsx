@@ -128,6 +128,9 @@ export default function ExtendedWarrantyAdmin() {
     const [productsLoaded, setProductsLoaded] = useState(false);
     const [page, setPage] = useState(1);
     const [pageCursorHistory, setPageCursorHistory] = useState([null]);
+    const productRequestIdRef = useRef(0);
+    const addProductRequestIdRef = useRef(0);
+    const addProductsFirstPageCacheRef = useRef(null);
     const [paginationMeta, setPaginationMeta] = useState({
         total: 0,
         totalPages: 1,
@@ -225,7 +228,8 @@ export default function ExtendedWarrantyAdmin() {
         search = productSearchQuery,
         status = productStatusFilter,
         jumpLast = false,
-    } = {}) => {
+        } = {}) => {
+        const requestId = ++productRequestIdRef.current;
         setProductsLoading(true);
         try {
             const params = new URLSearchParams({
@@ -244,6 +248,7 @@ export default function ExtendedWarrantyAdmin() {
             const r = await fetch(`${API_BASE}/products?${params.toString()}`);
             if (!r.ok) throw new Error();
             const data = await r.json();
+            if (requestId !== productRequestIdRef.current) return data;
 
             setProducts(Array.isArray(data.products) ? data.products : []);
             if (data.currency) setCurrency(data.currency);
@@ -252,9 +257,16 @@ export default function ExtendedWarrantyAdmin() {
             }
 
             const meta = data.pagination || {};
+            const serverTotal = Number(meta.total) || 0;
+
+            const serverTotalPages = Math.max(
+                1,
+                Number(meta.totalPages) || Math.ceil(serverTotal / PAGE_SIZE)
+            );
+
             setPaginationMeta({
-                total: meta.total || 0,
-                totalPages: meta.totalPages || 1,
+                total: serverTotal,
+                totalPages: serverTotalPages,
                 hasNextPage: Boolean(meta.hasNextPage),
             });
 
@@ -390,11 +402,30 @@ export default function ExtendedWarrantyAdmin() {
         setPageCursorHistory([null]);
     };
 
-    const goToFirstPage = () => setPage(1);
-    const goToPreviousPage = () => setPage((p) => Math.max(1, p - 1));
-    const goToNextPage = () => setPage((p) => p + 1);
-    const goToLastPage = () =>
+    const goToFirstPage = () => {
+        if (productsLoading) return;
+        setPage(1);
+        loadProducts({ targetPage: 1, search: productSearchQuery, status: productStatusFilter });
+    };
+
+    const goToPreviousPage = () => {
+        if (productsLoading || page <= 1) return;
+        const nextPage = page - 1;
+        setPage(nextPage);
+        loadProducts({ targetPage: nextPage, search: productSearchQuery, status: productStatusFilter });
+    };
+
+    const goToNextPage = () => {
+        if (productsLoading || !paginationMeta.hasNextPage) return;
+        const nextPage = page + 1;
+        setPage(nextPage);
+        loadProducts({ targetPage: nextPage, search: productSearchQuery, status: productStatusFilter });
+    };
+
+    const goToLastPage = () => {
+        if (productsLoading) return;
         loadProducts({ jumpLast: true, search: productSearchQuery, status: productStatusFilter });
+    };
 
     const addDuration = async () => {
         const duration = Number(newDuration);
@@ -617,6 +648,7 @@ export default function ExtendedWarrantyAdmin() {
         targetPage = addPage,
         search = addSearchQuery,
     } = {}) => {
+        const requestId = ++addProductRequestIdRef.current;
         setAddProductsLoading(true);
         try {
             const params = new URLSearchParams({
@@ -630,9 +662,18 @@ export default function ExtendedWarrantyAdmin() {
             const r = await fetch(`${API_BASE}/products/excluded?${params.toString()}`);
             if (!r.ok) throw new Error();
             const data = await r.json();
-            setAddProducts(Array.isArray(data.products) ? data.products : []);
+            if (requestId !== addProductRequestIdRef.current) return data;
+            const loadedProducts = Array.isArray(data.products) ? data.products : [];
+            setAddProducts(loadedProducts);
             const meta = data.pagination || {};
-            setAddHasNextPage(Boolean(meta.hasNextPage || data.hasNextPage));
+            const hasNextPage = Boolean(meta.hasNextPage || data.hasNextPage);
+            setAddHasNextPage(hasNextPage);
+            if (targetPage === 1 && !search) {
+                addProductsFirstPageCacheRef.current = {
+                    products: loadedProducts,
+                    hasNextPage,
+                };
+            }
             if (data.nextCursor && (meta.page || targetPage)) {
                 const pageNumber = meta.page || targetPage;
                 setAddPageCursorHistory((prev) => {
@@ -658,10 +699,20 @@ export default function ExtendedWarrantyAdmin() {
         setAddHasNextPage(false);
         clearAddSelection();
         setAddProductsOpen(true);
-        loadExcludedProducts({ targetPage: 1, search: "" });
+        const cached = addProductsFirstPageCacheRef.current;
+        if (cached) {
+            setAddProducts(cached.products);
+            setAddHasNextPage(cached.hasNextPage);
+        } else {
+            requestAnimationFrame(() => {
+                loadExcludedProducts({ targetPage: 1, search: "" });
+            });
+        }
     };
 
     const runAddProductSearch = () => {
+        addProductsFirstPageCacheRef.current = null;
+        addProductRequestIdRef.current += 1;
         setAddPage(1);
         setAddPageCursorHistory([null]);
         const term = addSearchInput.trim();
@@ -670,6 +721,7 @@ export default function ExtendedWarrantyAdmin() {
     };
 
     const addSelectedExcludedProducts = async () => {
+        addProductsFirstPageCacheRef.current = null;
         if (!addSelectedResources.length) {
             toast.showError("Select at least one product");
             return;
@@ -717,7 +769,7 @@ export default function ExtendedWarrantyAdmin() {
         }
     };
 
-    const confirmModalCopy =
+    const confirmModal =
     confirmAction?.kind === "overrideBulk"
         ? {
               title:
@@ -743,31 +795,25 @@ export default function ExtendedWarrantyAdmin() {
         setConfirmLoading(true);
         try {
             if (confirmAction.kind === "overrideBulk") {
-            await Promise.all(
-                confirmAction.products.map((product) =>
-                    fetch(
-                        `${API_BASE}/products/overrides/${toNumericShopifyId(product.id)}`,
-                        {
-                            method: "DELETE",
-                        }
-                    ).then(async (r) => {
-                        const data = await r.json().catch(() => ({}));
+                const productIds = confirmAction.products
+                    .map((product) => toNumericShopifyId(product.id))
+                    .filter(Boolean);
 
-                        if (!r.ok) {
-                            throw new Error(
-                                data.error || `Failed to remove ${product.title}`
-                            );
-                        }
-                    })
-                )
-            );
+                const r = await fetch(`${API_BASE}/products/overrides/bulk`, {
+                    method: "DELETE",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ productIds }),
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    throw new Error(data.error || "Failed to remove products");
+                }
 
-            toast.showSuccess(
-                confirmAction.products.length === 1
-                    ? "Product removed from the eligible list"
-                    : `${confirmAction.products.length} products removed from the eligible list`
-            );
-
+                toast.showSuccess(
+                    productIds.length === 1
+                        ? "Product removed from the eligible list"
+                        : `${productIds.length} products removed from the eligible list`
+                );
             setConfirmAction(null);
             clearSelection();
 
@@ -1281,7 +1327,7 @@ export default function ExtendedWarrantyAdmin() {
                                             { title: "Product" },
                                             { title: "Status" },
                                             { title: "Inventory" },
-                                            { title: "Category" },
+                                            { title: "Product Type" },
                                             { title: "Variants" },
                                             { title: "Plans configured" },
                                             { title: "Pricing" },
@@ -1329,7 +1375,7 @@ export default function ExtendedWarrantyAdmin() {
                                                         {product.inventory ?? "—"}
                                                     </IndexTable.Cell>
                                                     <IndexTable.Cell>
-                                                        {product.category || "—"}
+                                                        {product.productType || "—"}
                                                     </IndexTable.Cell>
                                                     <IndexTable.Cell>
                                                         {(product.variants || []).length}
@@ -1404,9 +1450,9 @@ export default function ExtendedWarrantyAdmin() {
                                                     First
                                                 </Button>
                                                 <Pagination
-                                                    hasPrevious={page > 1}
+                                                    hasPrevious={page > 1 && !productsLoading}
                                                     onPrevious={goToPreviousPage}
-                                                    hasNext={paginationMeta.hasNextPage}
+                                                    hasNext={paginationMeta.hasNextPage && !productsLoading}
                                                     onNext={goToNextPage}
                                                     label={`Page ${page} of ${paginationMeta.totalPages}`}
                                                 />
@@ -2035,7 +2081,7 @@ export default function ExtendedWarrantyAdmin() {
                                                 </Badge>
                                             </IndexTable.Cell>
                                             <IndexTable.Cell>
-                                                {product.productType || product.category || "—"}
+                                                {product.productType || "—"}
                                             </IndexTable.Cell>
                                             <IndexTable.Cell>
                                                 {product.variantCount ??
@@ -2087,9 +2133,9 @@ export default function ExtendedWarrantyAdmin() {
                     if (confirmLoading) return;
                     setConfirmAction(null);
                 }}
-                title={confirmModalCopy?.title || "Remove pricing?"}
+                title={confirmModal?.title || "Remove pricing?"}
                 primaryAction={{
-                    content: confirmModalCopy?.confirmLabel || "Remove Pricing",
+                    content: confirmModal?.confirmLabel || "Remove Pricing",
                     destructive: true,
                     loading: confirmLoading,
                     onAction: executeConfirmedAction,
@@ -2107,8 +2153,8 @@ export default function ExtendedWarrantyAdmin() {
             >
                 <Modal.Section>
                     <div style={styles.stack(8)}>
-                        <Text as="p">{confirmModalCopy?.body}</Text>
-                        {(confirmModalCopy?.details || []).map((line) => (
+                        <Text as="p">{confirmModal?.body}</Text>
+                        {(confirmModal?.details || []).map((line) => (
                             <Text as="p" key={line} tone="subdued">
                                 {line}
                             </Text>

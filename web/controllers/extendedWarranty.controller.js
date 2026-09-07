@@ -604,6 +604,7 @@ export async function getWarrantyProducts(req, res) {
             searchTerm,
             statusFilter,
             overrideProductIds: overrideIds,
+            disabledProductIds,
         });
         const admin = new shopify.api.clients.Graphql({ session });
         // const overrideIds = await loadProductOverrides(shopId);
@@ -649,6 +650,11 @@ export async function getWarrantyProducts(req, res) {
         // Compute eligibleEdges depending on scope. For "excluded" we return
         // products that are not effectively eligible; otherwise use the
         // effective-eligibility / whitelist logic.
+        //
+        // NOTE: an override always wins regardless of status/type. Outside of
+        // an override, a product must be ACTIVE *and* match an approved type
+        // (either the hardcoded defaults, via isEffectivelyEligible, or the
+        // shop's allowed-type whitelist below) to count as eligible.
         let eligibleEdges;
         if (String(scope || "").toLowerCase() === "excluded") {
             eligibleEdges = edges.filter((edge) => {
@@ -666,8 +672,9 @@ export async function getWarrantyProducts(req, res) {
                 const numericId = getNumericIdFromGid(productNode.id);
                 const isOverride = numericId && overrideSet.has(Number(numericId));
                 if (allowedSlugSet.size) {
+                    if (isOverride) return true;
                     const nodeSlug = slugifyProductType(productNode.productType || "");
-                    return isOverride || allowedSlugSet.has(nodeSlug);
+                    return allowedSlugSet.has(nodeSlug);
                 }
                 return isEffectivelyEligible(edge.node, overrideIds);
             });
@@ -692,8 +699,9 @@ export async function getWarrantyProducts(req, res) {
                 numericId && overrideSet.has(Number(numericId));
 
             if (allowedSlugSet.size) {
+                if (isOverride) return true;
                 const nodeSlug = slugifyProductType(productNode.productType || "");
-                return isOverride || allowedSlugSet.has(nodeSlug);
+                return allowedSlugSet.has(nodeSlug);
             }
 
             return isEffectivelyEligible(edge.node, overrideIds);
@@ -729,9 +737,11 @@ export async function getWarrantyProducts(req, res) {
         }
 
         const currency = response.data?.shop?.currencyCode || "USD";
-        const totalCount = searchTerm
-            ? eligibleEdges.length
-            : response.data?.productsCount?.count ?? eligibleEdges.length;
+        // productsCount is evaluated against the exact same server-side query
+        // used for the product connection. Do not use eligibleEdges.length here:
+        // that is only the current Shopify page and causes totals to stay stale
+        // after adding/removing overrides (and makes search totals incorrect).
+        const totalCount = Number(response.data?.productsCount?.count ?? 0);
         const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
         const currentPage = jumpLast
             ? totalPages
@@ -1423,61 +1433,6 @@ export async function getEWSettings(req, res) {
 }
 
 /**
- * Fetch distinct product types from the store's Shopify catalog (paginated).
- */
-// export async function getShopProductTypes(req, res) {
-//         try {
-//                 const session = res.locals.shopify.session;
-//                 if (!session?.shop) return res.status(401).json({ error: "Unauthorized" });
-
-//                 const client = new shopify.api.clients.Graphql({ session });
-//                 const PRODUCT_TYPES_QUERY = `
-//                     query FetchProductTypes($cursor: String, $first: Int!) {
-//                         products(first: $first, after: $cursor) {
-//                             edges {
-//                                 cursor
-//                                 node { productType }
-//                             }
-//                             pageInfo { hasNextPage }
-//                         }
-//                     }
-//                 `;
-
-//                     let cursor = null;
-//                     let hasNext = true;
-//                     const map = new Map(); // slug -> Set(rawValues)
-
-//                     while (hasNext) {
-//                         const response = await client.request(PRODUCT_TYPES_QUERY, {
-//                             cursor,
-//                             first: 250,
-//                         });
-//                         const edges = (response?.products?.edges) || [];
-//                             for (const e of edges) {
-//                                 const pt = e?.node?.productType;
-//                                 if (!pt) continue;
-//                                 const slug = slugifyProductType(pt);
-//                             if (!slug) continue;
-//                             if (!map.has(slug)) map.set(slug, new Set());
-//                             map.get(slug).add(String(pt).trim());
-//                         }
-//                         hasNext = Boolean(response?.products?.pageInfo?.hasNextPage);
-//                         cursor = edges.length ? edges[edges.length - 1].cursor : null;
-//                     }
-
-//                     const productTypes = Array.from(map.entries()).map(([slug, rawSet]) => ({
-//                         slug,
-//                         raw: Array.from(rawSet)[0] || slug,
-//                     })).sort((a, b) => a.raw.localeCompare(b.raw));
-
-//                     return res.json({ success: true, productTypes });
-//         } catch (err) {
-//                 console.error("❌ getShopProductTypes error:", err);
-//                 return res.status(500).json({ error: "Failed to fetch product types" });
-//         }
-// }
-
-/**
  * Persists the shop-level extended-warranty settings and reminder-day rules.
  */
 export async function saveEWSettings(req, res) {
@@ -1903,6 +1858,8 @@ export async function searchExcludedWarrantyProducts(req, res) {
         const productQuery = buildExcludedProductsShopifyQuery({
             searchTerm,
             statusFilter,
+            overrideProductIds: overrideIds,
+            disabledProductIds,
         });
         const admin = new shopify.api.clients.Graphql({ session });
 
@@ -1962,6 +1919,13 @@ export async function searchExcludedWarrantyProducts(req, res) {
             variantCount: (edge.node.variants?.edges || []).length,
         }));
 
+        const countResponse = await admin.request(
+            `query ProductCount($query: String!) { productsCount(query: $query) { count } }`,
+            { variables: { query: productQuery } }
+        );
+        const totalCount = Number(countResponse.data?.productsCount?.count ?? 0);
+        const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
         return res.json({
             success: true,
             currency: response?.data?.shop?.currencyCode || "USD",
@@ -1969,6 +1933,8 @@ export async function searchExcludedWarrantyProducts(req, res) {
             nextCursor: walkCursor,
             hasNextPage,
             pagination: {
+                total: totalCount,
+                totalPages,
                 pageSize,
                 page: currentPage,
                 hasNextPage,
@@ -2142,6 +2108,79 @@ export async function removeWarrantyProductOverride(req, res) {
                 ? productId
                 : `gid://shopify/Product/${productId}`
         );
+
+        // The existing DELETE /products/overrides/:productId route also supports
+        // /products/overrides/bulk, so no additional router registration is needed.
+        if (String(productId).toLowerCase() === "bulk") {
+            const rawIds = req.body?.productIds;
+            if (!Array.isArray(rawIds) || !rawIds.length) {
+                return res.status(400).json({ error: "productIds array is required" });
+            }
+            if (rawIds.length > 50) {
+                return res.status(400).json({
+                    error: "A maximum of 50 products can be removed at once",
+                });
+            }
+
+            const numericIds = [...new Set(
+                rawIds
+                    .map((id) => parseAdminProductId(id))
+                    .filter((id) => Number.isFinite(id) && id > 0)
+            )];
+
+            if (!numericIds.length) {
+                return res.status(400).json({ error: "No valid product IDs provided" });
+            }
+
+            const connection = await pool.getConnection();
+            try {
+                await connection.beginTransaction();
+                const placeholders = numericIds.map(() => "?").join(",");
+
+                // Keep the row as a disabled override instead of deleting it.
+                // This is what allows a manually removed product to appear again
+                // in the Add Products picker.
+                await connection.query(
+                    `
+                    INSERT INTO extended_warranty_product_overrides
+                        (shop_id, shopify_product_id, enabled)
+                    VALUES ${numericIds.map(() => "(?, ?, 0)").join(", ")}
+                    ON DUPLICATE KEY UPDATE
+                        enabled = 0,
+                        updated_at = CURRENT_TIMESTAMP
+                    `,
+                    numericIds.flatMap((id) => [shopId, id])
+                );
+
+                const actor = getAdminActor(session);
+                for (const id of numericIds) {
+                    await writeAdminAudit(connection, {
+                        shopId,
+                        actionType: "product_override_remove",
+                        entityType: "extended_warranty_product_override",
+                        entityId: id,
+                        beforeValue: null,
+                        afterValue: {
+                            shopifyProductId: id,
+                            enabled: false,
+                        },
+                        actor,
+                    });
+                }
+
+                await connection.commit();
+                return res.json({
+                    success: true,
+                    productIds: numericIds,
+                    removed: numericIds.length,
+                });
+            } catch (err) {
+                await connection.rollback();
+                throw err;
+            } finally {
+                connection.release();
+            }
+        }
 
         if (!numericId) {
             return res.status(400).json({ error: "Invalid product ID" });
