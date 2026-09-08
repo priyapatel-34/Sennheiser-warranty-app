@@ -146,7 +146,7 @@ export default function ExtendedWarrantyAdmin() {
         expiryReminderConfigs: [],
     });
     const [warrantyPricingType, setWarrantyPricingType] = useState("amount");
-    const [settingsLoading, setSettingsLoading] = useState(false);
+    const [settingsLoading, setSettingsLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [modalOpen, setModalOpen] = useState(false);
     const [configureProducts, setConfigureProducts] = useState([]);
@@ -252,7 +252,7 @@ export default function ExtendedWarrantyAdmin() {
 
             setProducts(Array.isArray(data.products) ? data.products : []);
             if (data.currency) setCurrency(data.currency);
-            if (data.warrantyPricingType) {
+            if (data.warrantyPricingType === "percentage" || data.warrantyPricingType === "amount") {
                 setWarrantyPricingType(data.warrantyPricingType);
             }
 
@@ -324,7 +324,8 @@ export default function ExtendedWarrantyAdmin() {
                     s.extendedWarrantyPurchaseDays == null
                         ? ""
                         : String(s.extendedWarrantyPurchaseDays),
-                warrantyPricingType: s.warrantyPricingType || "amount",
+                warrantyPricingType:
+                    s.warrantyPricingType === "percentage" ? "percentage" : "amount",
                 extendedWarrantyOfferEnabled:
                     s.extendedWarrantyOfferEnabled === undefined
                         ? true
@@ -333,7 +334,9 @@ export default function ExtendedWarrantyAdmin() {
                     reminderDays: (entry.reminderDays || []).map(String),
                 })),
             });
-            setWarrantyPricingType(s.warrantyPricingType || "amount");
+            setWarrantyPricingType(
+                s.warrantyPricingType === "percentage" ? "percentage" : "amount"
+            );
         } catch {
             toast.showError("Unable to load settings");
         } finally {
@@ -343,6 +346,7 @@ export default function ExtendedWarrantyAdmin() {
 
     useEffect(() => {
         loadDurations();
+        loadSettings();
     }, []);
 
     useEffect(() => {
@@ -470,6 +474,10 @@ export default function ExtendedWarrantyAdmin() {
     };
 
     const openConfigureModal = (targets, mode) => {
+        if (settingsLoading) {
+            toast.showError("Warranty pricing settings are still loading. Try again in a moment.");
+            return;
+        }
         if (!durations.length) {
             toast.showError("Add durations first");
             return;
@@ -1036,7 +1044,9 @@ export default function ExtendedWarrantyAdmin() {
                             ? ""
                             : String(data.settings.extendedWarrantyPurchaseDays),
                     warrantyPricingType:
-                        data.settings.warrantyPricingType || "amount",
+                        data.settings.warrantyPricingType === "percentage"
+                            ? "percentage"
+                            : "amount",
                     extendedWarrantyOfferEnabled: Boolean(
                         data.settings.extendedWarrantyOfferEnabled
                     ),
@@ -1046,7 +1056,11 @@ export default function ExtendedWarrantyAdmin() {
                         reminderDays: (entry.reminderDays || []).map(String),
                     })),
                 });
-                setWarrantyPricingType(data.settings.warrantyPricingType || "amount");
+                setWarrantyPricingType(
+                    data.settings.warrantyPricingType === "percentage"
+                        ? "percentage"
+                        : "amount"
+                );
             }
             toast.showSuccess("Settings saved");
         } catch (err) {

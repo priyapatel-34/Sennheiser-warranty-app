@@ -6,9 +6,12 @@
   - Provides initial variant information through Liquid.
   - The JavaScript file is responsible for rendering the PDP warranty UI
     and the "What's Covered?" modal.
-  - On Add to Cart, the script adds the selected product and the configured
-    Shopify warranty variant as nested cart lines (parent_id = product variant,
-    child id = shopify_checkout_variant_id). Those two IDs must never be the same.
+  - A 2-year plan is preselected when available. The customer can choose
+    another plan or decline coverage before adding to cart.
+  - On Add to Cart with a selected plan, the script adds the product and the
+    configured Shopify warranty variant as nested cart lines
+    (parent_id = product variant, child id = shopify_checkout_variant_id).
+    Those two IDs must never be the same.
 
   IMPORTANT:
   Do not put the modal HTML directly in this Liquid file.

@@ -75,6 +75,8 @@ export function findParentProductLine(warrantyLine, allLines, usedParentIds = ne
   const productId = numericShopifyId(attrs._ew_product_id);
   const variantId = numericShopifyId(attrs._ew_variant_id);
   const planId = attrs._ew_plan_id ? String(attrs._ew_plan_id) : null;
+  const groupId = attrs._ew_group_id ? String(attrs._ew_group_id) : null;
+  const parentKey = attrs._ew_parent_key ? String(attrs._ew_parent_key) : null;
 
   const candidates = (allLines || []).filter((line) => {
     if (isExtendedWarrantyLine(line)) return false;
@@ -87,6 +89,18 @@ export function findParentProductLine(warrantyLine, allLines, usedParentIds = ne
     if (variantId && lineVariant && variantId !== lineVariant) return false;
     return true;
   });
+
+  if (groupId) {
+    const withGroup = candidates.filter(
+      (line) => String(attributesFromLineItem(line)._ew_group_id || "") === groupId
+    );
+    if (withGroup.length) return withGroup[0];
+  }
+
+  if (parentKey) {
+    const withKey = candidates.filter((line) => String(line.key || "") === parentKey);
+    if (withKey.length) return withKey[0];
+  }
 
   if (planId) {
     const withPlan = candidates.filter(

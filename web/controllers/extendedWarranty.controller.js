@@ -680,8 +680,9 @@ export async function getWarrantyProducts(req, res) {
             });
         }
 
-        const warrantyPricingType =
-            ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
+        const warrantyPricingType = normalizeWarrantyPricingType(
+            ewSettings.warranty_pricing_type
+        );
 
         const filteredEdges = edges.filter((edge) => {
             if (searchTerm && !productMatchesSearchTerm(edge.node, searchTerm)) {
@@ -908,8 +909,9 @@ export async function getProductVariants(req, res) {
             productId: productNumericId,
         });
         const ewSettings = await getExtendedWarrantySettings(shopId);
-        const warrantyPricingType =
-            ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
+        const warrantyPricingType = normalizeWarrantyPricingType(
+            ewSettings.warranty_pricing_type
+        );
         const currency = response.data?.shop?.currencyCode || "USD";
         const variantPricingById = {};
         for (const variantEdge of product.variants?.edges || []) {
@@ -999,8 +1001,9 @@ export async function getWarrantyPlans(req, res) {
         });
 
         const ewSettings = await getExtendedWarrantySettings(shopId);
-        const warrantyPricingType =
-            ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
+        const warrantyPricingType = normalizeWarrantyPricingType(
+            ewSettings.warranty_pricing_type
+        );
 
         return res.json({
             success: true,
@@ -1179,8 +1182,9 @@ export async function bulkSaveWarrantyPlanMapping(req, res) {
         const shopResponse = await admin.request(`query { shop { currencyCode } }`);
         const shopCurrency = shopResponse.data?.shop?.currencyCode || "USD";
         const ewSettings = await getExtendedWarrantySettings(shopId);
-        const warrantyPricingType =
-            ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
+        const warrantyPricingType = normalizeWarrantyPricingType(
+            ewSettings.warranty_pricing_type
+        );
         const actor = getAdminActor(session);
 
         const connection = await pool.getConnection();
@@ -1290,8 +1294,9 @@ export async function saveWarrantyPlanMapping(req, res) {
         const shopResponse = await admin.request(`query { shop { currencyCode } }`);
         const shopCurrency = shopResponse.data?.shop?.currencyCode || "USD";
         const ewSettings = await getExtendedWarrantySettings(shopId);
-        const warrantyPricingType =
-            ewSettings.warranty_pricing_type || DEFAULT_WARRANTY_PRICING_TYPE;
+        const warrantyPricingType = normalizeWarrantyPricingType(
+            ewSettings.warranty_pricing_type
+        );
         const actor = getAdminActor(session);
 
         const connection = await pool.getConnection();

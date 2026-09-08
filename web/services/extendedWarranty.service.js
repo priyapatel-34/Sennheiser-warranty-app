@@ -10,6 +10,7 @@ import {
 } from "./emailLink.service.js";
 import {
   DEFAULT_WARRANTY_PRICING_TYPE,
+  configuredWarrantyPricingType,
   normalizeWarrantyPricingType,
   resolvePlanPrice,
 } from "./extendedWarrantyPricing.js";
@@ -1403,33 +1404,40 @@ export async function buildPdpExtendedWarrantyOffer(
    * Product = ₹48,690
    * 5% warranty = ₹2,434.50
    */
-  const pricingType =
-    normalizeWarrantyPricingType(
-      settings.warranty_pricing_type
-    );
+  const explicitPricingType = configuredWarrantyPricingType(
+    settings.warranty_pricing_type
+  );
+  const pricingType = normalizeWarrantyPricingType(
+    explicitPricingType || settings.warranty_pricing_type
+  );
 
-  const variantPricing =
-    pricingType === "percentage" &&
-    session &&
-    productRef.shopify_variant_id
-      ? await fetchVariantPricing(
-          session,
-          productRef.shopify_variant_id,
-          productNumeric
-        )
-      : null;
+  let variantPricing = null;
+  if (pricingType === "percentage" && session && productRef.shopify_variant_id) {
+    variantPricing = await fetchVariantPricing(
+      session,
+      productRef.shopify_variant_id,
+      productNumeric
+    );
+    if (!variantPricing) {
+      variantPricing = await fetchVariantPricing(
+        session,
+        productRef.shopify_variant_id,
+        productNumeric
+      );
+    }
+  }
 
   /*
    * Percentage plans cannot be calculated without
-   * the selected variant price.
+   * the selected variant price. Do not treat a missing
+   * pricing-type setting as this failure — that is a
+   * separate configuration problem.
    */
-  if (
-    pricingType === "percentage" &&
-    !variantPricing
-  ) {
+  if (pricingType === "percentage" && !variantPricing) {
     return {
       eligible: false,
       reason: "pricing_unavailable",
+      message: "Warranty price could not be calculated for this product variant.",
     };
   }
 

@@ -430,6 +430,28 @@ export async function getPdpCartPayload(req, res) {
             console.error("❌ Warranty variant availability update failed:", availabilityErr);
         }
 
+        const groupId =
+            req.body?.group_id != null && String(req.body.group_id).trim()
+                ? String(req.body.group_id).trim().slice(0, 80)
+                : null;
+        const parentKey =
+            req.body?.parent_key != null && String(req.body.parent_key).trim()
+                ? String(req.body.parent_key).trim().slice(0, 255)
+                : null;
+        const source =
+            req.body?.source === "cart" ? "cart" : "pdp";
+
+        const properties = {
+            _ew_type: "extended_warranty",
+            _ew_source: source,
+            _ew_plan_id: String(plan.planId),
+            _ew_plan_name: String(plan.planName || ""),
+            _ew_product_id: String(productId),
+            _ew_variant_id: String(variantId),
+        };
+        if (groupId) properties._ew_group_id = groupId;
+        if (parentKey) properties._ew_parent_key = parentKey;
+
         return res.json({
             success: true,
             method: "cart",
@@ -437,13 +459,9 @@ export async function getPdpCartPayload(req, res) {
             parentVariantId: String(variantId),
             planId: String(plan.planId),
             planName: plan.planName || null,
-            properties: {
-                _ew_type: "extended_warranty",
-                _ew_source: "pdp",
-                _ew_plan_id: String(plan.planId),
-                _ew_product_id: String(productId),
-                _ew_variant_id: String(variantId),
-            },
+            price: plan.calculatedPrice ?? plan.price ?? null,
+            currency: plan.currency || offer.currency || null,
+            properties,
         });
     } catch (err) {
         console.error("❌ getPdpCartPayload error:", err);

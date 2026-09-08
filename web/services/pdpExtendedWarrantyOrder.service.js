@@ -231,12 +231,6 @@ export async function activatePdpEntitlementsFromOrder({
         [shopId, String(orderId), String(target.parentLineItemId)]
       );
       results.push(created);
-      console.log("[EW PDP Webhook] Created unattached PDP entitlement", {
-        entitlementId: created?.id,
-        orderId,
-        parentLineItemId: target.parentLineItemId,
-        planId: plan.id,
-      });
     }
 
     await conn.commit();
@@ -368,13 +362,6 @@ export async function attachPdpEntitlementToRegistration(conn, {
       entitlement.id,
     ]
   );
-
-  console.log("[EW PDP] Linked entitlement to registration", {
-    entitlementId: entitlement.id,
-    registerId,
-    orderId: numericOrder,
-    lineItemId: numericLine,
-  });
 
   return entitlement.id;
 }

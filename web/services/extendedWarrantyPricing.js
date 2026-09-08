@@ -23,6 +23,22 @@ export function normalizeWarrantyPricingType(value) {
 }
 
 /**
+ * Returns the configured pricing type only when it is an explicit known value.
+ * Empty or unknown values are not treated as a valid shop configuration.
+ */
+export function configuredWarrantyPricingType(value) {
+    if (value == null || value === "") return null;
+    const normalized = String(value).trim().toLowerCase();
+    if (normalized === WARRANTY_PRICING_TYPE.PERCENTAGE) {
+        return WARRANTY_PRICING_TYPE.PERCENTAGE;
+    }
+    if (normalized === WARRANTY_PRICING_TYPE.AMOUNT) {
+        return WARRANTY_PRICING_TYPE.AMOUNT;
+    }
+    return null;
+}
+
+/**
  * Converts a stored price value into a finite number or null when the source
  * value is empty or invalid.
  */
