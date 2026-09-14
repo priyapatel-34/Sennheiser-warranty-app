@@ -25,9 +25,13 @@
     }
 
     function shouldAttemptExtendedWarrantyPage(data, offer = null) {
+        if (offer?.reason === "feature_disabled" || offer?.reason === "already_purchased") {
+            return false;
+        }
+        if (data?.postRegistrationNavigation?.next === "extended_warranty") return true;
+        if (data?.showExtendedWarrantyOffer === true) return true;
         if (!isExtendedWarrantyOfferEnabledInResponse(data)) return false;
-        if (offer?.reason === "feature_disabled") return false;
-        return true;
+        return data?.postRegistrationNavigation?.reason !== "already_purchased";
     }
 
     function showEwTransitionLoader(message = EW_LOADER_MESSAGE) {
@@ -334,26 +338,27 @@
         },
 
         /**
-         * After standard registration:
-         * - admin EW setting ON → show offer page (fetch fresh offer data)
-         * - admin EW setting OFF → My Products
+         * After successful registration, stay on this page and show the
+         * extended-warranty offer. My Products is only used when the customer
+         * skips, the offer is disabled, or the warranty was already purchased.
          */
         async handlePostRegistrationNavigation(data, options = {}) {
             const {
                 myProductsLink = "/pages/my-products",
                 customerEmail = "",
                 customerName = "",
-                redirectDelayMs = 4500,
             } = options;
 
             const navigation = data?.postRegistrationNavigation || {};
             const inlineOffer = normalizeOfferResponse(data?.extendedWarrantyOffer);
             const shouldAttemptEw = shouldAttemptExtendedWarrantyPage(data, inlineOffer);
+            const registerId =
+                data?.registrations?.[0]?.registerId ||
+                inlineOffer?.registration?.registerId ||
+                null;
 
             if (!shouldAttemptEw) {
-                clearEwTransitionLoader();
-                this.clearPostRegistration();
-                this.clearCheckoutPending();
+                resetOfferFlowState();
                 navigateReplace(myProductsLink);
                 return {
                     redirected: true,
@@ -361,15 +366,20 @@
                 };
             }
 
+            if (registerId) {
+                this.savePostRegistration({
+                    registerId,
+                    customerEmail,
+                    customerName,
+                    myProductsLink,
+                });
+            }
+
             showEwTransitionLoader();
 
-            const registerId = data?.registrations?.[0]?.registerId;
             let offer = await this.resolveExtendedWarrantyOffer(data);
 
-            if (
-                registerId &&
-                (!offer?.registration || !offer?.plans?.length)
-            ) {
+            if (registerId && (!offer?.eligible || !offer?.plans?.length)) {
                 try {
                     offer = await fetchExtendedWarrantyOffer(registerId);
                 } catch (err) {
@@ -378,53 +388,22 @@
             }
 
             if (offer?.eligible) {
-                let rendered = await this.renderEligibleOffer(offer, {
+                const rendered = await this.renderEligibleOffer(offer, {
                     myProductsLink,
                     customerEmail,
                     customerName,
                 });
-
-                if (!rendered && data?.registrations?.[0]?.registerId) {
-                    try {
-                        const refreshed = await fetchExtendedWarrantyOffer(
-                            data.registrations[0].registerId
-                        );
-                        if (refreshed?.eligible) {
-                            offer = refreshed;
-                            rendered = await this.renderEligibleOffer(offer, {
-                                myProductsLink,
-                                customerEmail,
-                                customerName,
-                            });
-                        }
-                    } catch (err) {
-                        console.warn("Extended warranty offer retry failed:", err.message);
-                    }
-                }
-
                 if (rendered) {
                     return { shownOffer: true };
                 }
             }
 
-            const reason = offer?.reason || navigation.reason || null;
-            const purchaseWindowExpired = reason === "purchase_window_expired";
-            const alreadyPurchased = reason === "already_purchased";
-            const featureDisabled = reason === "feature_disabled";
-
-            this.clearPostRegistration();
-            this.clearCheckoutPending();
-
-            if (purchaseWindowExpired || alreadyPurchased || featureDisabled) {
-                navigateReplace(myProductsLink);
-                return { redirected: true, reason };
-            }
-
-            window.setTimeout(() => {
-                navigateReplace(myProductsLink);
-            }, redirectDelayMs);
-
-            return { redirected: true, delayed: true, reason: reason || "no_offer" };
+            resetOfferFlowState();
+            navigateReplace(myProductsLink);
+            return {
+                redirected: true,
+                reason: offer?.reason || navigation.reason || "no_offer",
+            };
         },
 
         async restoreExtendedWarrantyOffer(options = {}) {

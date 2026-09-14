@@ -340,10 +340,11 @@
 
       if (data.success === true) {
         const primary = data.registrations?.[0];
-        if (
-          primary?.registerId &&
-          window.WarrantyFlowState?.isExtendedWarrantyOfferEnabledInResponse?.(data)
-        ) {
+        const shouldShowEw =
+          window.WarrantyFlowState?.isExtendedWarrantyOfferEnabledInResponse?.(data) ||
+          data?.postRegistrationNavigation?.next === "extended_warranty";
+
+        if (primary?.registerId && shouldShowEw) {
           window.WarrantyFlowState?.savePostRegistration({
             registerId: primary.registerId,
             customerEmail: emailInput?.value?.trim() || "",
@@ -352,7 +353,7 @@
           });
         }
 
-        if (window.WarrantyFlowState?.isExtendedWarrantyOfferEnabledInResponse?.(data)) {
+        if (shouldShowEw) {
           window.ExtendedWarrantyOffer?.showPageLoader?.(
             "Loading extended warranty options..."
           );

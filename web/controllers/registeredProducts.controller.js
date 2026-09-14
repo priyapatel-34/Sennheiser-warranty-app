@@ -189,7 +189,7 @@ function formatPaymentStatus(entitlement) {
     case "expired":
       return "Expired";
     default:
-      return entitlement.status;
+      return null;
   }
 }
 
@@ -208,7 +208,7 @@ function formatExtendedWarrantyStatus(entitlement) {
     case "expired":
       return "Expired";
     default:
-      return entitlement.status;
+      return null;
   }
 }
 

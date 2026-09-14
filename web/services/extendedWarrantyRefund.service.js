@@ -472,7 +472,7 @@ export async function cancelEntitlementFromRefund({
     LEFT JOIN registered_products r
       ON r.id = e.registered_product_id AND r.shop_id = e.shop_id
     WHERE e.shop_id = ?
-      AND e.status IN ('active', 'pending_payment')
+      AND e.status = 'active'
       AND (
         CAST(e.shopify_order_id AS CHAR) = ?
         OR CAST(r.shopify_order_id AS CHAR) = ?
@@ -533,7 +533,7 @@ export async function createManualRefundRequest({
         throw new Error("Entitlement not found");
     }
 
-    if (!["active", "pending_payment"].includes(entitlement.status)) {
+    if (entitlement.status !== "active") {
         throw new Error("Entitlement is not eligible for refund");
     }
 

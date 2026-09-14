@@ -240,6 +240,7 @@ async function createWarrantyProduct(admin, optionValue) {
   }
 
   await publishToOnlineStore(admin, product.id);
+  await makeWarrantyProductPurchasable(admin, product.id);
   return product;
 }
 
@@ -446,7 +447,7 @@ export async function ensurePlanCheckoutVariant({
     variant = await updateVariant(admin, product.id, variants[0].gid, { price, sku });
   } else if (!variant) {
     variant = await createVariant(admin, product.id, { price, sku, optionValue });
-  } else if (String(variant.price) !== price) {
+  } else {
     variant = await updateVariant(admin, product.id, variant.gid, { price, sku });
   }
 
@@ -461,14 +462,7 @@ export async function ensurePlanCheckoutVariant({
     variantNumericId: variant.id,
   });
 
-  try {
-    await ensureWarrantyVariantPurchasable({
-      session: writeSession,
-      variantId: variant.id,
-    });
-  } catch (err) {
-    console.warn("⚠️ Could not force warranty variant purchasable during provision:", err.message);
-  }
+  await makeWarrantyProductPurchasable(admin, product.id);
 
   console.log("✅ Provisioned warranty checkout variant", {
     planId,
@@ -478,6 +472,147 @@ export async function ensurePlanCheckoutVariant({
   });
 
   return variant.id;
+}
+
+/**
+ * Extended warranty variants are service SKUs, not stocked goods.
+ * Track quantity OFF + continue selling prevents Shopify Sold Out / 422.
+ */
+async function makeWarrantyProductPurchasable(admin, productGid) {
+  if (!productGid) return;
+
+  const data = await adminRequest(
+    admin,
+    `
+    query WarrantyProductAvailability($id: ID!) {
+      product(id: $id) {
+        id
+        status
+        variants(first: 100) {
+          nodes {
+            id
+            inventoryPolicy
+            availableForSale
+            inventoryItem { id tracked }
+          }
+        }
+      }
+    }
+    `,
+    { id: productGid }
+  );
+
+  const product = data?.product;
+  if (!product?.id) {
+    throw new Error("Warranty catalog product was not found");
+  }
+
+  if (String(product.status || "").toUpperCase() !== "ACTIVE") {
+    const statusData = await adminRequest(
+      admin,
+      `
+      mutation ActivateWarrantyProduct($product: ProductUpdateInput!) {
+        productUpdate(product: $product) {
+          product { id status }
+          userErrors { field message }
+        }
+      }
+      `,
+      { product: { id: product.id, status: "ACTIVE" } }
+    );
+    assertUserErrors(statusData?.productUpdate, "productUpdate");
+  }
+
+  const variantNodes = product.variants?.nodes || [];
+  const needsInventoryRepair = variantNodes.some((node) => {
+    const tracked = Boolean(node.inventoryItem?.tracked);
+    const policy = String(node.inventoryPolicy || "").toUpperCase();
+    return tracked || policy !== "CONTINUE" || node.availableForSale === false;
+  });
+
+  if (!needsInventoryRepair) {
+    return;
+  }
+
+  for (const node of variantNodes) {
+    if (node.inventoryItem?.id && node.inventoryItem.tracked) {
+      const itemData = await adminRequest(
+        admin,
+        `
+        mutation UntrackWarrantyInventory($id: ID!, $input: InventoryItemInput!) {
+          inventoryItemUpdate(id: $id, input: $input) {
+            inventoryItem { id tracked }
+            userErrors { field message }
+          }
+        }
+        `,
+        { id: node.inventoryItem.id, input: { tracked: false } }
+      );
+      assertUserErrors(itemData?.inventoryItemUpdate, "inventoryItemUpdate");
+    }
+  }
+
+  if (variantNodes.length) {
+    const policyData = await adminRequest(
+      admin,
+      `
+      mutation ContinueWarrantySales($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+          productVariants { id inventoryPolicy }
+          userErrors { field message }
+        }
+      }
+      `,
+      {
+        productId: product.id,
+        variants: variantNodes.map((node) => ({
+          id: node.id,
+          inventoryPolicy: "CONTINUE",
+          inventoryItem: {
+            tracked: false,
+            requiresShipping: false,
+          },
+        })),
+      }
+    );
+    assertUserErrors(policyData?.productVariantsBulkUpdate, "productVariantsBulkUpdate");
+  }
+}
+
+async function resolveWarrantyCatalogProductGid(admin, storedProductId) {
+  const loaded = await findWarrantyProduct(admin, storedProductId);
+  return loaded.product?.id || null;
+}
+
+/**
+ * Repairs inventory on the shop's warranty catalog product so existing
+ * variants are not shown as Sold Out. Safe to call from offer endpoints.
+ */
+export async function repairStoredWarrantyCatalog({ session, shopId } = {}) {
+  if (!session?.shop) return null;
+
+  const writeSession = await getOfflineSession(session);
+  const admin = new shopify.api.clients.Graphql({ session: writeSession });
+
+  let storedProductId = null;
+  if (shopId) {
+    const [[settings]] = await pool.query(
+      `
+      SELECT shopify_checkout_product_id
+      FROM extended_warranty_settings
+      WHERE shop_id = ?
+      `,
+      [shopId]
+    );
+    storedProductId = settings?.shopify_checkout_product_id || null;
+  }
+
+  const productGid = await resolveWarrantyCatalogProductGid(admin, storedProductId);
+  if (!productGid) return null;
+
+  await makeWarrantyProductPurchasable(admin, productGid);
+  await publishToOnlineStore(admin, productGid);
+  return toNumericId(productGid);
 }
 
 /**
@@ -500,10 +635,7 @@ export async function ensureWarrantyVariantPurchasable({ session, variantId } = 
     query WarrantyVariantAvailability($id: ID!) {
       productVariant(id: $id) {
         id
-        inventoryPolicy
-        availableForSale
         product { id }
-        inventoryItem { id tracked }
       }
     }
     `,
@@ -515,52 +647,8 @@ export async function ensureWarrantyVariantPurchasable({ session, variantId } = 
     throw new Error(`Warranty checkout variant ${numericId} was not found`);
   }
 
-  const tracked = Boolean(variant.inventoryItem?.tracked);
-  const policy = String(variant.inventoryPolicy || "").toUpperCase();
-  if (!tracked && policy === "CONTINUE") {
-    return numericId;
-  }
-
-  console.warn("[EW Checkout] Warranty variant is not freely purchasable; updating inventory settings", {
-    variantId: numericId,
-    inventoryPolicy: variant.inventoryPolicy,
-    tracked,
-    availableForSale: variant.availableForSale,
-  });
-
-  if (variant.inventoryItem?.id && tracked) {
-    const itemData = await adminRequest(
-      admin,
-      `
-      mutation UntrackWarrantyInventory($id: ID!, $input: InventoryItemInput!) {
-        inventoryItemUpdate(id: $id, input: $input) {
-          inventoryItem { id tracked }
-          userErrors { field message }
-        }
-      }
-      `,
-      { id: variant.inventoryItem.id, input: { tracked: false } }
-    );
-    assertUserErrors(itemData?.inventoryItemUpdate, "inventoryItemUpdate");
-  }
-
-  if (variant.product?.id && policy !== "CONTINUE") {
-    const policyData = await adminRequest(
-      admin,
-      `
-      mutation ContinueWarrantySales($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-          productVariants { id inventoryPolicy }
-          userErrors { field message }
-        }
-      }
-      `,
-      {
-        productId: variant.product.id,
-        variants: [{ id: variant.id, inventoryPolicy: "CONTINUE" }],
-      }
-    );
-    assertUserErrors(policyData?.productVariantsBulkUpdate, "productVariantsBulkUpdate");
+  if (variant.product?.id) {
+    await makeWarrantyProductPurchasable(admin, variant.product.id);
   }
 
   return numericId;

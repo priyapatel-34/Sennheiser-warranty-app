@@ -456,6 +456,41 @@ async function ensureSchemaUpdates() {
       ADD COLUMN retailer_name_ja VARCHAR(255) NULL AFTER retailer_name
     `);
   }
+
+  // Remove unpaid draft-order / pending-payment leftovers so they cannot
+  // appear as registered warranties. Paid active rows are left untouched.
+  try {
+    const [pendingResult] = await pool.query(`
+      DELETE FROM extended_warranty_entitlements
+      WHERE status = 'pending_payment'
+    `);
+    if (pendingResult?.affectedRows) {
+      console.log(
+        `✅ Removed ${pendingResult.affectedRows} pending_payment entitlement(s)`
+      );
+    }
+  } catch (err) {
+    console.warn("⚠️ pending_payment entitlement cleanup skipped:", err.message);
+  }
+
+  if (await columnExists("extended_warranty_entitlements", "shopify_draft_order_id")) {
+    try {
+      const [draftResult] = await pool.query(`
+        DELETE FROM extended_warranty_entitlements
+        WHERE status = 'active'
+          AND shopify_draft_order_id IS NOT NULL
+          AND TRIM(shopify_draft_order_id) != ''
+          AND (shopify_order_id IS NULL OR TRIM(shopify_order_id) = '')
+      `);
+      if (draftResult?.affectedRows) {
+        console.log(
+          `✅ Removed ${draftResult.affectedRows} unpaid draft-order entitlement(s)`
+        );
+      }
+    } catch (err) {
+      console.warn("⚠️ unpaid draft-order entitlement cleanup skipped:", err.message);
+    }
+  }
 }
 
 /**
@@ -698,7 +733,7 @@ export async function initDb() {
           'expired',
           'cancelled',
           'refunded'
-        ) NOT NULL DEFAULT 'pending_payment',
+        ) NOT NULL DEFAULT 'cancelled',
         plan_name VARCHAR(255) NOT NULL,
         duration_years INT NOT NULL,
         duration_months INT NOT NULL,

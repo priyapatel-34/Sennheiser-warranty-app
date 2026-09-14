@@ -13,7 +13,6 @@ import {
     getExtendedWarrantyOffer,
     initiateExtendedWarrantyCheckout,
     getCartCheckoutPayload,
-    cancelExtendedWarrantyPendingCheckout,
     getPdpExtendedWarrantyOffer,
     getPdpCartPayload,
 } from "../controllers/extendedWarrantyPurchase.controller.js";

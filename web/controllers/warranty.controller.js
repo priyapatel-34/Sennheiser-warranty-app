@@ -281,7 +281,7 @@ function getStandardWarrantyStatus(warrantyEnd) {
  * warranty label.
  */
 function getExtendedWarrantyDisplayStatus(entitlement, refundRecord = null) {
-  if (!entitlement) return null;
+  if (!entitlement || entitlement.status === "pending_payment") return null;
 
   const refundStatus = getCustomerFacingRefundStatus(entitlement, refundRecord);
   if (refundStatus) return refundStatus;
@@ -297,7 +297,7 @@ function getExtendedWarrantyDisplayStatus(entitlement, refundRecord = null) {
     if (end < today) return "Expired";
   }
   if (entitlement.status === "active") return "Active";
-  return entitlement.status;
+  return null;
 }
 
 /**
@@ -321,23 +321,27 @@ async function enrichProductWarrantyFields(
   };
 
   const hasActiveExtendedWarranty = entitlementRow?.status === "active";
+  const paidEntitlement =
+    entitlementRow && entitlementRow.status !== "pending_payment"
+      ? entitlementRow
+      : null;
 
-  if (entitlementRow) {
+  if (paidEntitlement) {
     const registeredProduct = {
       warranty_end: product.warranty_end,
     };
     const refundDateRaw =
       refundRecord?.completedAt ||
       refundRecord?.createdAt ||
-      entitlementRow.refunded_at ||
+      paidEntitlement.refunded_at ||
       null;
     product.extended_warranty = {
-      ...formatEntitlementForApiExport(entitlementRow, registeredProduct),
-      displayStatus: getExtendedWarrantyDisplayStatus(entitlementRow, refundRecord),
+      ...formatEntitlementForApiExport(paidEntitlement, registeredProduct),
+      displayStatus: getExtendedWarrantyDisplayStatus(paidEntitlement, refundRecord),
       refundStatus: refundRecord?.status || null,
       refundType: refundRecord?.refundType || null,
       refundAmount:
-        refundRecord?.netRefundAmount ?? entitlementRow.refund_amount ?? null,
+        refundRecord?.netRefundAmount ?? paidEntitlement.refund_amount ?? null,
       refundDate: refundDateRaw
         ? new Date(refundDateRaw).toISOString().split("T")[0]
         : null,
@@ -3530,22 +3534,22 @@ export async function registerProducts(req, res) {
       }
 
       const alreadyPurchased = extendedWarrantyOffer?.reason === "already_purchased";
-      const showOffer =
-        extendedWarrantyOfferEnabled &&
-        Boolean(extendedWarrantyOffer?.eligible) &&
-        !alreadyPurchased;
+      const featureDisabled = !extendedWarrantyOfferEnabled;
+      const goToExtendedWarranty = extendedWarrantyOfferEnabled && !alreadyPurchased;
 
       const postRegistrationNavigation = {
-        next: showOffer ? "extended_warranty" : "my_products",
-        reason: extendedWarrantyOffer?.reason || null,
+        next: goToExtendedWarranty ? "extended_warranty" : "my_products",
+        reason: featureDisabled
+          ? "feature_disabled"
+          : extendedWarrantyOffer?.reason || null,
         purchaseWindow: extendedWarrantyOffer?.purchaseWindow || null,
       };
 
       return res.json({
         success: true,
         registrations: createdProducts,
-        extendedWarrantyOfferEnabled: showOffer,
-        showExtendedWarrantyOffer: showOffer,
+        extendedWarrantyOfferEnabled: Boolean(extendedWarrantyOfferEnabled),
+        showExtendedWarrantyOffer: goToExtendedWarranty,
         extendedWarrantyOfferEligible: Boolean(extendedWarrantyOffer?.eligible),
         extendedWarrantyOffer,
         postRegistrationNavigation,

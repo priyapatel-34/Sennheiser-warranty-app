@@ -904,36 +904,7 @@ export async function activateEntitlementFromPayment({
       return existingActive;
     }
 
-    const [[pending]] = await conn.query(
-      `
-      SELECT *
-      FROM extended_warranty_entitlements
-      WHERE shop_id = ?
-        AND registered_product_id = ?
-        AND status = 'pending_payment'
-      ORDER BY created_at DESC
-      LIMIT 1
-      FOR UPDATE
-      `,
-      [shopId, registerId]
-    );
-
-    const resolvedPlanId = pending?.extended_warranty_plan_id || planId;
-    let planToUse = plan;
-    if (pending && resolvedPlanId !== planId) {
-      const [[pendingPlan]] = await conn.query(
-        `
-        SELECT *
-        FROM extended_warranty_plans
-        WHERE shop_id = ? AND id = ?
-        `,
-        [shopId, resolvedPlanId]
-      );
-      if (pendingPlan) {
-        planToUse = pendingPlan;
-      }
-    }
-
+    const planToUse = plan;
     const resolvedDates = computeExtendedWarrantyDates(registered, planToUse);
     const activationDate = resolvedDates.startDate;
     const expiryDate = resolvedDates.endDate;
@@ -961,74 +932,40 @@ export async function activateEntitlementFromPayment({
       }
     }
 
-    if (pending) {
-      await conn.query(
-        `
-        UPDATE extended_warranty_entitlements
-        SET
-          status = 'active',
-          shopify_order_id = ?,
-          purchase_date = CURDATE(),
-          activation_date = ?,
-          expiry_date = ?,
-          plan_name = ?,
-          duration_years = ?,
-          duration_months = ?,
-          price = ?,
-          currency = ?,
-          pricing_type = ?,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-        `,
-        [
-          shopifyOrderId || null,
-          resolvedDates.startDate,
-          resolvedDates.endDate,
-          planToUse.plan_name,
-          planToUse.duration_years,
-          planToUse.duration_months,
-          resolvedPrice,
-          planToUse.currency,
-          resolvedPricingType,
-          pending.id,
-        ]
-      );
-    } else {
-      await conn.query(
-        `
-        INSERT INTO extended_warranty_entitlements (
-          shop_id,
-          registered_product_id,
-          extended_warranty_plan_id,
-          shopify_order_id,
-          status,
-          plan_name,
-          duration_years,
-          duration_months,
-          price,
-          currency,
-          pricing_type,
-          purchase_date,
-          activation_date,
-          expiry_date
-        ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?)
-        `,
-        [
-          shopId,
-          registerId,
-          resolvedPlanId,
-          shopifyOrderId || null,
-          planToUse.plan_name,
-          planToUse.duration_years,
-          planToUse.duration_months,
-          resolvedPrice,
-          planToUse.currency,
-          resolvedPricingType,
-          resolvedDates.startDate,
-          resolvedDates.endDate,
-        ]
-      );
-    }
+    await conn.query(
+      `
+      INSERT INTO extended_warranty_entitlements (
+        shop_id,
+        registered_product_id,
+        extended_warranty_plan_id,
+        shopify_order_id,
+        status,
+        plan_name,
+        duration_years,
+        duration_months,
+        price,
+        currency,
+        pricing_type,
+        purchase_date,
+        activation_date,
+        expiry_date
+      ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?)
+      `,
+      [
+        shopId,
+        registerId,
+        planId,
+        shopifyOrderId || null,
+        planToUse.plan_name,
+        planToUse.duration_years,
+        planToUse.duration_months,
+        resolvedPrice,
+        planToUse.currency,
+        resolvedPricingType,
+        resolvedDates.startDate,
+        resolvedDates.endDate,
+      ]
+    );
 
     const [[entitlement]] = await conn.query(
       `
@@ -1119,7 +1056,7 @@ export async function activateEntitlementFromPayment({
       }),
     });
 
-    return { registerId, planId: resolvedPlanId, expiryDate };
+    return { registerId, planId, expiryDate };
   } catch (err) {
     await conn.rollback();
     throw err;
@@ -1449,9 +1386,8 @@ export async function buildPdpExtendedWarrantyOffer(
    * shopify_checkout_variant_id.
    *
    * A plan can be displayed even when it does not have
-   * a mapped Shopify checkout variant.
-   *
-   * checkoutMethod tells the frontend how to purchase it.
+   * a mapped Shopify checkout variant. Checkout always uses
+   * the Shopify cart; missing variants are provisioned later.
    */
   const basePlans = [];
 
@@ -1509,14 +1445,9 @@ export async function buildPdpExtendedWarrantyOffer(
       /*
        * Checkout information.
        *
-       * If a Shopify warranty variant exists:
-       *     cart checkout
-       *
-       * If it does not exist:
-       *     draft-order checkout
-       *
-       * IMPORTANT:
-       * Missing checkoutVariantId must NOT hide the plan.
+       * Purchase always goes through the Shopify cart.
+       * Missing checkoutVariantId must NOT hide the plan;
+       * the cart-payload endpoint provisions a variant if needed.
        */
       checkoutVariantId:
         planRow.shopify_checkout_variant_id
@@ -1525,10 +1456,7 @@ export async function buildPdpExtendedWarrantyOffer(
             )
           : null,
 
-      checkoutMethod:
-        planRow.shopify_checkout_variant_id
-          ? "cart"
-          : "draft_order",
+      checkoutMethod: "cart",
     });
   }
 

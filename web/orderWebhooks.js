@@ -14,8 +14,8 @@ import { activatePdpEntitlementsFromOrder, collectPdpWarrantyTargets } from "./s
 
 /**
  * Extracts extended-warranty registration metadata from a Shopify line item.
- * This allows webhook handlers to reconnect a paid order back to the pending
- * registration and plan record that was created earlier in the flow.
+ * This allows webhook handlers to reconnect a paid order back to the
+ * registration and plan selected at checkout.
  */
 function extractEwAttributesFromLineItem(lineItem) {
   const attrs = lineItem.customAttributes || lineItem.properties || [];

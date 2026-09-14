@@ -148,7 +148,7 @@ export async function activatePdpEntitlementsFromOrder({
         WHERE shop_id = ?
           AND shopify_order_id = ?
           AND shopify_parent_line_item_id = ?
-          AND status IN ('active', 'pending_payment')
+          AND status IN ('active', 'refunded', 'cancelled', 'expired')
         LIMIT 1
         FOR UPDATE
         `,

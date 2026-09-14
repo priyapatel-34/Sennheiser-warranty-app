@@ -100,7 +100,7 @@ async function loadReminderCandidates() {
       AND ews.extended_warranty_purchase_days IS NOT NULL
       AND ews.extended_warranty_purchase_days > 0
     LEFT JOIN extended_warranty_entitlements ew ON ew.registered_product_id = rp.id
-      AND ew.status IN ('active', 'pending_payment')
+      AND ew.status = 'active'
     WHERE ew.id IS NULL
       AND rp.customer_email IS NOT NULL
       AND TRIM(rp.customer_email) != ''
@@ -323,9 +323,6 @@ export async function sendExtendedWarrantyEligibilityReminders() {
       const outcome = await sendReminderForRegistration(row, purchaseWindow);
       if (outcome.sent) {
         summary.sent += 1;
-        console.log(
-          `📧 EW eligibility reminder (${daysRemaining}d) sent to ${row.customer_email} for registration ${row.id}`
-        );
       } else if (outcome.error && !outcome.skipped) {
         summary.errors += 1;
         summary.errorDetails.push({

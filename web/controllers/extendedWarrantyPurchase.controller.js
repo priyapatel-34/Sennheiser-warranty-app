@@ -5,16 +5,13 @@ import {
     loadEligiblePlans,
     buildExtendedWarrantyOffer,
     buildPdpExtendedWarrantyOffer,
-    // createDraftOrderCheckout,
-    // createPendingEntitlement,
-    // cancelPendingEntitlementForRegistration,
     getExtendedWarrantySettings,
     getNumericIdFromGid,
     canPurchaseExtendedWarranty,
     fetchProductPricing,
     resolvePlanRowForCheckout,
 } from "../services/extendedWarranty.service.js";
-import { ensurePlanCheckoutVariant, ensureWarrantyVariantPurchasable } from "../services/extendedWarrantyCheckoutVariant.service.js";
+import { ensurePlanCheckoutVariant, ensureWarrantyVariantPurchasable, repairStoredWarrantyCatalog } from "../services/extendedWarrantyCheckoutVariant.service.js";
 import { normalizeWarrantyPricingType } from "../services/extendedWarrantyPricing.js";
 
 function buildCartCheckoutUrl({ variantId, properties = {} }) {
@@ -124,6 +121,18 @@ if (!resolvedPlanRow.shopify_checkout_variant_id) {
     throw new Error("Checkout variant not configured for this plan");
 }
 
+    try {
+        await ensureWarrantyVariantPurchasable({
+            session,
+            variantId: resolvedPlanRow.shopify_checkout_variant_id,
+        });
+    } catch (availabilityErr) {
+        console.error("❌ Warranty variant availability update failed:", availabilityErr);
+        throw new Error(
+            "Warranty is currently unavailable for checkout. Please try again."
+        );
+    }
+
     return {
         shopId,
         registered,
@@ -184,6 +193,12 @@ export async function getExtendedWarrantyOffer(req, res) {
 
         const offer = await buildExtendedWarrantyOffer(shopId, registerId, { session });
 
+        if (offer.eligible) {
+            repairStoredWarrantyCatalog({ session, shopId }).catch((err) => {
+                console.warn("⚠️ Warranty catalog availability repair skipped:", err.message);
+            });
+        }
+
         return res.json({ success: true, ...offer });
     } catch (err) {
         console.error("❌ getExtendedWarrantyOffer error:", err);
@@ -233,8 +248,7 @@ export async function initiateExtendedWarrantyCheckout(req, res) {
 }
 
 /**
- * Builds the cart payload for stores that prefer checkout through a mapped
- * Shopify variant instead of the old invoice-style flow.
+ * Builds the cart payload for checkout through a mapped Shopify warranty variant.
  */
 export async function getCartCheckoutPayload(req, res) {
     try {
@@ -262,40 +276,6 @@ export async function getCartCheckoutPayload(req, res) {
     } catch (err) {
         console.error("❌ getCartCheckoutPayload error:", err);
         return res.status(500).json({ error: "Failed to build cart payload" });
-    }
-}
-
-/** Cancel abandoned draft checkout when customer skips the EW offer. */
-/**
- * Cancels any pending extended-warranty entitlement when the shopper skips the
- * offer so abandoned checkout state does not linger in the database.
- */
-export async function cancelExtendedWarrantyPendingCheckout(req, res) {
-    try {
-        const session = res.locals.shopifySession;
-        if (!session?.shop) {
-            return res.status(401).json({ error: "Unauthorized" });
-        }
-
-        const registerId = Number(req.body?.register_id);
-        if (!Number.isFinite(registerId) || registerId <= 0) {
-            return res.status(400).json({ error: "register_id is required" });
-        }
-
-        const shopId = await resolveShopId(session.shop);
-        if (!shopId) {
-            return res.status(404).json({ error: "Shop not registered" });
-        }
-
-        // const result = await cancelPendingEntitlementForRegistration(
-        //     shopId,
-        //     registerId
-        // );
-
-        return res.json({ success: true, ...result });
-    } catch (err) {
-        console.error("❌ cancelExtendedWarrantyPendingCheckout error:", err);
-        return res.status(500).json({ error: err.message || "Failed to cancel pending checkout" });
     }
 }
 
@@ -337,6 +317,12 @@ export async function getPdpExtendedWarrantyOffer(req, res) {
             sku,
             country,
         });
+
+        if (offer.eligible) {
+            repairStoredWarrantyCatalog({ session, shopId }).catch((err) => {
+                console.warn("⚠️ Warranty catalog availability repair skipped:", err.message);
+            });
+        }
 
         return res.json({ success: true, ...offer });
     } catch (err) {
@@ -428,6 +414,9 @@ export async function getPdpCartPayload(req, res) {
             });
         } catch (availabilityErr) {
             console.error("❌ Warranty variant availability update failed:", availabilityErr);
+            return res.status(400).json({
+                error: "Warranty is currently unavailable for checkout. Please try again.",
+            });
         }
 
         const groupId =
