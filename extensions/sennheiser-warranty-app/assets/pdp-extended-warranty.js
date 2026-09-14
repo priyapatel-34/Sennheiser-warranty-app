@@ -623,34 +623,106 @@
     return propertyMap(item)._ew_parent_key || null;
   }
 
-  function warrantyChildrenOf(cart, parent) {
-    const parentKey = parent?.key;
-    const parentGroup = propertyMap(parent)._ew_group_id;
-    return (cart?.items || []).filter((item) => {
-      if (!isWarrantyLine(item)) return false;
-      const props = propertyMap(item);
-      if (parentKey && (getParentKey(item) === parentKey || props._ew_parent_key === parentKey)) {
-        return true;
+  function lineProductId(item) {
+    const value = item?.product_id ?? item?.product?.id;
+    return value == null || value === "" ? null : String(value);
+  }
+
+  function lineVariantId(item) {
+    return normalizeVariantId(item?.variant_id ?? item?.id);
+  }
+
+  /**
+   * A warranty line always carries the product and variant of the line it was
+   * bought for. That identity outranks group ids and line keys, both of which
+   * go stale as soon as Shopify rewrites a line key.
+   */
+  function warrantyMatchesParentProduct(warranty, parent) {
+    const props = propertyMap(warranty);
+    const productId = props._ew_product_id ? String(props._ew_product_id) : null;
+    const variantId = normalizeVariantId(props._ew_variant_id);
+    if (!productId && !variantId) return true;
+    if (variantId && lineVariantId(parent) !== variantId) return false;
+    if (productId) {
+      const parentProduct = lineProductId(parent);
+      if (parentProduct && parentProduct !== productId) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Assigns every warranty line to exactly one parent product line, so a
+   * warranty can never be counted against two parents (or against the wrong
+   * one) when its group id or parent key no longer resolves.
+   */
+  function buildWarrantyIndex(cart) {
+    const items = cart?.items || [];
+    const parents = items.filter((item) => !isWarrantyLine(item));
+    const parentsByKey = new Map(parents.map((parent) => [parent.key, parent]));
+    const childrenByParent = new Map(parents.map((parent) => [parent.key, []]));
+    const parentByWarranty = new Map();
+
+    const claim = (parent, warranty) => {
+      childrenByParent.get(parent.key).push(warranty);
+      parentByWarranty.set(warranty.key, parent);
+    };
+
+    const unresolved = [];
+    for (const warranty of items) {
+      if (!isWarrantyLine(warranty)) continue;
+      const parentKey = getParentKey(warranty);
+      const parent = parentKey ? parentsByKey.get(parentKey) : null;
+      if (parent && warrantyMatchesParentProduct(warranty, parent)) {
+        claim(parent, warranty);
+        continue;
       }
-      return Boolean(parentGroup && props._ew_group_id && props._ew_group_id === parentGroup);
-    });
+      unresolved.push(warranty);
+    }
+
+    const freeCapacity = (parent) =>
+      Number(parent.quantity || 0) -
+      childrenByParent
+        .get(parent.key)
+        .reduce((sum, child) => sum + Number(child.quantity || 0), 0);
+
+    const pick = (candidates) =>
+      candidates.find((parent) => freeCapacity(parent) > 0) || candidates[0] || null;
+
+    for (const warranty of unresolved) {
+      const eligible = parents.filter((parent) => warrantyMatchesParentProduct(warranty, parent));
+      const groupId = propertyMap(warranty)._ew_group_id;
+      const sameGroup = groupId
+        ? eligible.filter((parent) => propertyMap(parent)._ew_group_id === groupId)
+        : [];
+      const parent = pick(sameGroup) || pick(eligible);
+      if (parent) claim(parent, warranty);
+    }
+
+    return { childrenByParent, parentByWarranty };
+  }
+
+  const warrantyIndexCache = new WeakMap();
+
+  function warrantyIndex(cart) {
+    if (!cart || typeof cart !== "object") {
+      return { childrenByParent: new Map(), parentByWarranty: new Map() };
+    }
+    let index = warrantyIndexCache.get(cart);
+    if (!index) {
+      index = buildWarrantyIndex(cart);
+      warrantyIndexCache.set(cart, index);
+    }
+    return index;
+  }
+
+  function warrantyChildrenOf(cart, parent) {
+    if (!parent?.key) return [];
+    return warrantyIndex(cart).childrenByParent.get(parent.key) || [];
   }
 
   function findWarrantyParent(cart, warranty) {
-    const parents = (cart?.items || []).filter((item) => !isWarrantyLine(item));
-    const props = propertyMap(warranty);
-    const parentKey = getParentKey(warranty) || props._ew_parent_key;
-    if (parentKey) {
-      const byKey = parents.find((item) => item.key === parentKey);
-      if (byKey) return byKey;
-    }
-    if (props._ew_group_id) {
-      const byGroup = parents.find(
-        (item) => propertyMap(item)._ew_group_id === props._ew_group_id
-      );
-      if (byGroup) return byGroup;
-    }
-    return null;
+    if (!warranty?.key) return null;
+    return warrantyIndex(cart).parentByWarranty.get(warranty.key) || null;
   }
 
   function getRequestItems(body) {
@@ -1500,25 +1572,29 @@
     };
   }
 
-  function findLineAnchor(item) {
-    const key = item?.key;
-    const variantId = String(item?.variant_id || item?.id || "");
-    if (key) {
-      const name = `updates[${key}]`;
-      const byKey =
-        document.querySelector(`[name="${quoteAttr(name)}"]`) ||
-        document.querySelector(`[data-cart-item-key="${quoteAttr(key)}"]`) ||
-        document.querySelector(`[data-line-key="${quoteAttr(key)}"]`) ||
-        document.querySelector(`[data-key="${quoteAttr(key)}"]`) ||
-        document.querySelector(`a[href*="${encodeURIComponent(key)}"]`);
-      if (byKey) return byKey;
-    }
-    if (!variantId) return null;
-    return (
-      document.querySelector(`[data-variant-id="${quoteAttr(variantId)}"]`) ||
-      document.querySelector(`[data-product-variant-id="${quoteAttr(variantId)}"]`) ||
-      document.querySelector(`[data-quantity-variant-id="${quoteAttr(variantId)}"]`)
-    );
+  function lineKeySelector(key) {
+    const escaped = quoteAttr(key);
+    return [
+      `[name="${quoteAttr(`updates[${key}]`)}"]`,
+      `[data-cart-item-key="${escaped}"]`,
+      `[data-line-key="${escaped}"]`,
+      `[data-key="${escaped}"]`,
+      `a[href*="${escaped}"]`,
+      `a[href*="${quoteAttr(encodeURIComponent(key))}"]`,
+    ].join(",");
+  }
+
+  function lineVariantSelector(variantId) {
+    const escaped = quoteAttr(variantId);
+    return [
+      `[data-variant-id="${escaped}"]`,
+      `[data-product-variant-id="${escaped}"]`,
+      `[data-quantity-variant-id="${escaped}"]`,
+    ].join(",");
+  }
+
+  function rootMatches(root, selector) {
+    return Boolean(root.matches(selector) || root.querySelector(selector));
   }
 
   function closestLineRoot(el) {
@@ -1548,14 +1624,62 @@
     });
   }
 
-  function findLineRoot(item, cart) {
-    const direct = closestLineRoot(findLineAnchor(item));
-    if (direct && !direct.classList.contains("ew-cart-line-hidden")) return direct;
+  /**
+   * Maps every cart line to the row that renders it. Warranty lines take part
+   * in the resolution and each row is claimed once, so a product line can never
+   * inherit the row of a warranty line or of a neighbouring product.
+   */
+  function resolveLineRoots(cart) {
+    const items = cart?.items || [];
+    const roots = productLineRoots();
+    const rootByLineKey = new Map();
+    const claimed = new Set();
 
-    const productItems = (cart?.items || []).filter((line) => !isWarrantyCatalogItem(line));
-    const index = productItems.findIndex((line) => line.key === item.key);
-    if (index < 0) return null;
-    return productLineRoots()[index] || null;
+    const claim = (item, root) => {
+      claimed.add(root);
+      rootByLineKey.set(item.key, root);
+    };
+
+    for (const item of items) {
+      if (!item.key) continue;
+      const selector = lineKeySelector(item.key);
+      const root = roots.find((candidate) => !claimed.has(candidate) && rootMatches(candidate, selector));
+      if (root) claim(item, root);
+    }
+
+    for (const item of items) {
+      if (!item.key || rootByLineKey.has(item.key)) continue;
+      const variantId = lineVariantId(item);
+      if (!variantId) continue;
+      const selector = lineVariantSelector(variantId);
+      const matches = roots.filter(
+        (candidate) => !claimed.has(candidate) && rootMatches(candidate, selector)
+      );
+      if (matches.length === 1) claim(item, matches[0]);
+    }
+
+    if (rootByLineKey.size === items.length) return rootByLineKey;
+
+    // Positional fallback for themes that expose neither line keys nor variant
+    // ids. It only holds when the row count matches one of the two ways a theme
+    // renders nested warranties: a row per cart line, or product rows only with
+    // the warranty drawn inside its parent row.
+    const productItems = items.filter((line) => !isWarrantyCatalogItem(line));
+    const ordered =
+      roots.length === items.length
+        ? items
+        : roots.length === productItems.length
+          ? productItems
+          : null;
+    if (!ordered) return rootByLineKey;
+
+    ordered.forEach((item, index) => {
+      const root = roots[index];
+      if (!root || claimed.has(root) || rootByLineKey.has(item.key)) return;
+      claim(item, root);
+    });
+
+    return rootByLineKey;
   }
 
   function cartImage(item) {
@@ -1609,6 +1733,11 @@
 
   function upsertSlot(container, item, cart) {
     const html = slotMarkup(item, warrantyChildrenOf(cart, item));
+    if (container.dataset.ewCartFallback !== "true") {
+      container.querySelectorAll(".ew-cart-slot").forEach((existing) => {
+        if (existing.dataset.ewParentKey !== item.key) existing.remove();
+      });
+    }
     let slot = container.querySelector(`.ew-cart-slot[data-ew-parent-key="${quoteAttr(item.key)}"]`);
     if (!html) {
       if (slot) slot.remove();
@@ -1657,10 +1786,11 @@
       el.classList.remove("ew-cart-line-hidden");
     });
 
+    const rootByLineKey = resolveLineRoots(cart);
     const missing = [];
     for (const item of cart.items || []) {
       if (isWarrantyCatalogItem(item)) continue;
-      const root = findLineRoot(item, cart);
+      const root = rootByLineKey.get(item.key);
       if (!root) {
         missing.push(item);
         continue;
@@ -1712,9 +1842,25 @@
     }
 
     const latest = (await readCart()) || cart;
-    const latestParent = (latest?.items || []).find((item) => item.key === current.key) || current;
-    const groupId = propertyMap(latestParent)._ew_group_id || createGroupId();
-    const variantId = normalizeVariantId(latestParent.variant_id || latestParent.id);
+    const initialParent = (latest?.items || []).find((item) => item.key === current.key) || current;
+    const groupId = propertyMap(initialParent)._ew_group_id || createGroupId();
+    const variantId = normalizeVariantId(initialParent.variant_id || initialParent.id);
+
+    // Stamp the parent before creating the child. /cart/change.js rewrites the
+    // line key, so doing it afterwards would leave the warranty pointing at a
+    // line that no longer exists.
+    const stamped = await updateLineProperties(initialParent, {
+      _ew_plan_id: String(plan.planId),
+      _ew_group_id: groupId,
+    });
+    const latestParent =
+      (stamped?.items || []).find(
+        (item) =>
+          !isWarrantyLine(item) &&
+          propertyMap(item)._ew_group_id === groupId &&
+          normalizeVariantId(item.variant_id || item.id) === variantId
+      ) || initialParent;
+
     const payload = await fetchWarrantyPayload(
       {
         productId: latestParent.product_id,
@@ -1764,17 +1910,6 @@
         throw new Error(errBody.description || errBody.message || "Failed to add warranty");
       }
       const next = await response.json();
-      const parentAfterAdd =
-        (next?.items || []).find((item) => item.key === latestParent.key) ||
-        (next?.items || []).find((item) => {
-          if (isWarrantyLine(item)) return false;
-          return normalizeVariantId(item.variant_id || item.id) === variantId;
-        }) ||
-        latestParent;
-      await updateLineProperties(parentAfterAdd, {
-        _ew_plan_id: String(plan.planId),
-        _ew_group_id: groupId,
-      });
       const refreshed = await readCart();
       const reconciled = await reconcileCart(refreshed || next);
       const withSections = await cartWithSections(reconciled);
@@ -1791,11 +1926,15 @@
     const warranty = (cart.items || []).find((item) => item.key === warrantyKey);
     if (!warranty) return;
     const parent = findWarrantyParent(cart, warranty);
-    await setLineQuantity(warrantyKey, 0);
-    if (parent) {
-      const props = { ...propertyMap(parent) };
+    const afterRemoval = (await setLineQuantity(warrantyKey, 0)) || cart;
+    const remainingParent = parent
+      ? (afterRemoval.items || []).find((item) => item.key === parent.key)
+      : null;
+    if (remainingParent && !warrantyChildrenOf(afterRemoval, remainingParent).length) {
+      const props = { ...propertyMap(remainingParent) };
       delete props._ew_plan_id;
-      await replaceLineProperties(parent, props);
+      delete props._ew_group_id;
+      await replaceLineProperties(remainingParent, props);
     }
     const refreshed = await readCart();
     const reconciled = await reconcileCart(refreshed || cart);
