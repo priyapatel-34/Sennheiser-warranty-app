@@ -5,7 +5,7 @@ import { pool } from "./mysql.js";
 // information_schema round-trips with two bulk queries (~1-2 s → ~100 ms).
 
 let _columnCache = null;   // Set<"table.column">
-let _indexCache  = null;   // Set<"table.indexName">
+let _indexCache = null;   // Set<"table.indexName">
 
 /**
  * Loads information_schema metadata once so schema checks can reuse cached
@@ -50,6 +50,19 @@ async function ensureSchemaUpdates() {
   // Pre-load all column/index metadata in two queries instead of 30+ individual
   // information_schema round-trips.  This is the main source of slow cold starts.
   await loadSchemaCache();
+  const emailSettingsUrlColumns = [
+    "store_url",
+    "privacy_policy_url",
+    "terms_conditions_url",
+    "support_url",
+  ];
+  for (const column of emailSettingsUrlColumns) {
+    if (!(await columnExists("email_settings", column))) {
+      await pool.query(
+        `ALTER TABLE email_settings ADD COLUMN ${column} VARCHAR(2048) NULL`
+      );
+    }
+  }
   if (!(await columnExists("registered_products", "shopify_variant_id"))) {
     await pool.query(`
       ALTER TABLE registered_products
@@ -142,7 +155,6 @@ async function ensureSchemaUpdates() {
       FOREIGN KEY (registered_product_id) REFERENCES registered_products(id)
       ON DELETE CASCADE
     `);
-    console.log("✅ extended_warranty_entitlements.registered_product_id is now optional");
   }
 
   if (!(await indexExists("extended_warranty_entitlements", "idx_ew_ent_shop_parent_line"))) {
@@ -290,28 +302,6 @@ async function ensureSchemaUpdates() {
     }
   }
 
-  // if (await columnExists("email_template_settings", "content_sections")) {
-  //   await pool.query(`
-  //     ALTER TABLE email_template_settings DROP COLUMN content_sections
-  //   `);
-  //   console.log("✅ Removed email_template_settings.content_sections");
-  // }
-
-  // try {
-  //   await pool.query(`DROP TABLE IF EXISTS email_branding_settings`);
-  //   console.log("✅ Removed email_branding_settings table (if existed)");
-  // } catch (err) {
-  //   console.warn("⚠️ email_branding_settings drop skipped:", err.message);
-  // }
-
-  // if (await columnExists("extended_warranty_settings", "reminder_coverage_benefits")) {
-  //   await pool.query(`
-  //     ALTER TABLE extended_warranty_settings
-  //     DROP COLUMN reminder_coverage_benefits
-  //   `);
-  //   console.log("✅ Removed extended_warranty_settings.reminder_coverage_benefits");
-  // }
-
   if (!(await columnExists("extended_warranty_durations", "merchandising_badge"))) {
     await pool.query(`
       ALTER TABLE extended_warranty_durations
@@ -332,6 +322,10 @@ async function ensureSchemaUpdates() {
     [
       "shopify_checkout_product_id",
       "BIGINT NULL AFTER extended_warranty_offer_enabled",
+    ],
+    [
+      "allowed_product_types",
+      "TEXT NULL AFTER shopify_checkout_product_id",
     ],
   ];
 
@@ -430,6 +424,21 @@ async function ensureSchemaUpdates() {
     `);
   }
 
+   // India-only free extended warranty metadata. Additive so existing
+  // registrations retain their current warranty state unchanged.
+  const freeWarrantyColumns = [
+    ["free_extended_warranty", "TINYINT(1) NOT NULL DEFAULT 0 AFTER warranty_end"],
+    ["free_extended_warranty_source", "VARCHAR(50) NULL AFTER free_extended_warranty"],
+    ["free_extended_warranty_start", "DATE NULL AFTER free_extended_warranty_source"],
+    ["free_extended_warranty_end", "DATE NULL AFTER free_extended_warranty_start"],
+    ["preorder_product", "TINYINT(1) NOT NULL DEFAULT 0 AFTER free_extended_warranty_end"],
+  ];
+  for (const [col, definition] of freeWarrantyColumns) {
+    if (!(await columnExists("registered_products", col))) {
+      await pool.query(`ALTER TABLE registered_products ADD COLUMN ${col} ${definition}`);
+    }
+  }
+
   if (
     !(await columnExists(
       "registered_products",
@@ -457,8 +466,9 @@ async function ensureSchemaUpdates() {
     `);
   }
 
-  // Remove unpaid draft-order / pending-payment leftovers so they cannot
-  // appear as registered warranties. Paid active rows are left untouched.
+  
+  // Remove unpaid pending-payment leftovers so they cannot appear as
+  // registered warranties. Paid active rows are left untouched.
   try {
     const [pendingResult] = await pool.query(`
       DELETE FROM extended_warranty_entitlements
@@ -490,6 +500,29 @@ async function ensureSchemaUpdates() {
     } catch (err) {
       console.warn("⚠️ unpaid draft-order entitlement cleanup skipped:", err.message);
     }
+
+    try {
+      await pool.query(`
+        ALTER TABLE extended_warranty_entitlements
+        DROP COLUMN shopify_draft_order_id
+      `);
+    } catch (err) {
+      console.warn("⚠️ shopify_draft_order_id drop skipped:", err.message);
+    }
+  }
+
+  try {
+    await pool.query(`
+      ALTER TABLE extended_warranty_entitlements
+      MODIFY COLUMN status ENUM(
+        'active',
+        'expired',
+        'cancelled',
+        'refunded'
+      ) NOT NULL DEFAULT 'cancelled'
+    `);
+  } catch (err) {
+    console.warn("⚠️ pending_payment status enum cleanup skipped:", err.message);
   }
 }
 
@@ -607,6 +640,11 @@ export async function initDb() {
         -- Warranty
         warranty_start DATE NOT NULL,
         warranty_end DATE NOT NULL,
+        free_extended_warranty BOOLEAN NOT NULL DEFAULT 0,
+        free_extended_warranty_source VARCHAR(50) NULL,
+        free_extended_warranty_start DATE NULL,
+        free_extended_warranty_end DATE NULL,
+        preorder_product BOOLEAN NOT NULL DEFAULT 0,
 
         -- Consent
         consent_terms BOOLEAN NOT NULL DEFAULT 0,
@@ -701,7 +739,7 @@ export async function initDb() {
         coverage_text TEXT NULL,
         extended_warranty_purchase_days INT NULL,
         warranty_pricing_type ENUM('amount', 'percentage') NOT NULL DEFAULT 'amount',
-        extended_warranty_offer_enabled TINYINT(1) NOT NULL DEFAULT 1,
+        extended_warranty_offer_enabled TINYINT(1) NOT NULL DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
           ON UPDATE CURRENT_TIMESTAMP,
@@ -726,9 +764,7 @@ export async function initDb() {
         shopify_variant_id VARCHAR(100) NULL,
         customer_email VARCHAR(255) NULL,
         source VARCHAR(50) NULL DEFAULT 'registration',
-        shopify_draft_order_id VARCHAR(100) NULL,
         status ENUM(
-          'pending_payment',
           'active',
           'expired',
           'cancelled',
@@ -758,8 +794,8 @@ export async function initDb() {
       CREATE TABLE IF NOT EXISTS extended_warranty_refund_settings (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         shop_id BIGINT UNSIGNED NOT NULL,
-        refund_enabled TINYINT(1) NOT NULL DEFAULT 1,
-        pro_rata_enabled TINYINT(1) NOT NULL DEFAULT 1,
+        refund_enabled TINYINT(1) NOT NULL DEFAULT 0,
+        pro_rata_enabled TINYINT(1) NOT NULL DEFAULT 0,
         refund_percentage DECIMAL(5, 2) NOT NULL DEFAULT 100.00,
         cancel_on_refund TINYINT(1) NOT NULL DEFAULT 1,
         minimum_used_days INT NOT NULL DEFAULT 0,
@@ -796,7 +832,11 @@ export async function initDb() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS email_settings (
         shop_id BIGINT UNSIGNED PRIMARY KEY,
-        global_enabled TINYINT(1) NOT NULL DEFAULT 1,
+        global_enabled TINYINT(1) NOT NULL DEFAULT 0,
+        store_url VARCHAR(2048) NULL,
+        privacy_policy_url VARCHAR(2048) NULL,
+        terms_conditions_url VARCHAR(2048) NULL,
+        support_url VARCHAR(2048) NULL,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
       )
@@ -829,23 +869,6 @@ export async function initDb() {
           ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uniq_shop_ew_product_override (shop_id, shopify_product_id),
         INDEX idx_ew_override_shop_enabled (shop_id, enabled),
-        FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
-      )
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS extended_warranty_admin_audit (
-        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        shop_id BIGINT UNSIGNED NOT NULL,
-        action_type VARCHAR(80) NOT NULL,
-        entity_type VARCHAR(80) NOT NULL,
-        entity_id VARCHAR(100) NULL,
-        before_value JSON NULL,
-        after_value JSON NULL,
-        actor VARCHAR(255) NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_ew_admin_audit_shop (shop_id, created_at),
-        INDEX idx_ew_admin_audit_entity (entity_type, entity_id),
         FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
       )
     `);

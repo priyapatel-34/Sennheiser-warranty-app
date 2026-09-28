@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Select, Text, Link } from "@shopify/polaris";
+import { Select, Text } from "@shopify/polaris";
+
+// Moves between admin pages in the current iframe and keeps the Shopify shop/host params.
+export function navigateInApp(navigate, location, path) {
+  navigate({ pathname: path, search: location.search });
+}
 
 export const APP_NAV_ITEMS = [
   { path: "/", label: "Dashboard", shortLabel: "Dashboard" },
@@ -67,7 +72,7 @@ export default function AppLayout({ children }) {
                 value: item.path,
               }))}
               value={activeItem.path}
-              onChange={(value) => navigate(value)}
+              onChange={(value) => navigateInApp(navigate, location, value)}
             />
           </div>
         ) : (
@@ -84,11 +89,11 @@ export default function AppLayout({ children }) {
               {APP_NAV_ITEMS.map((item) => {
                 const active = isNavItemActive(location.pathname, item.path);
                 return (
-                  <Link
+                  <button
                     key={item.path}
-                    url={item.path}
-                    removeUnderline
-                    monochrome
+                    type="button"
+                    className="wa-admin-nav__link"
+                    onClick={() => navigateInApp(navigate, location, item.path)}
                   >
                     <span
                       className={`wa-admin-nav__item${active ? " wa-admin-nav__item--active" : ""}`}
@@ -96,7 +101,7 @@ export default function AppLayout({ children }) {
                     >
                       {item.label}
                     </span>
-                  </Link>
+                  </button>
                 );
               })}
             </nav>

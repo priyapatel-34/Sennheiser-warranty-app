@@ -1,7 +1,26 @@
-import { renderEmailLayout } from "./_layout.js";
+import {
+  renderEmailLayout,
+  renderGreeting,
+  renderProductCard,
+  renderDetailsGrid,
+  renderCtaBlock,
+  emailSection,
+  formatEmailDisplayDate,
+} from "./_layout.js";
+
+function firstName(customerName) {
+  return String(customerName || "Customer")
+    .trim()
+    .split(/\s+/)[0];
+}
 
 /**
- * Renders the rejected-refund email sent when a refund request is denied.
+ * Rejected-refund email when a refund request is denied.
+ *
+ * IMPORTANT:
+ * - Shared _layout.js owns Continue Shopping / Additional Content /
+ *   Support / Team / Footer.
+ * - Do NOT render the Support / Team section here.
  */
 export default function ExtendedWarrantyRefundRejectedTemplate({
   customerName,
@@ -9,144 +28,113 @@ export default function ExtendedWarrantyRefundRejectedTemplate({
   planName,
   rejectionReason,
   productDetailsHtml = "",
+  storeUrl,
+  privacyUrl,
+  termsUrl,
+  supportUrl,
+  storeName,
+  serialNumber,
+  processedDate,
+  viewWarrantyUrl,
 }) {
-  const bodyHtml = `
-    <p>Dear ${customerName || "Customer"},</p><br/>
-    <p>We were unable to approve your extended warranty refund request at this time.</p><br/>
-    <p>
-      <strong>Product:</strong> ${productTitle}<br/>
-      <strong>Plan:</strong> ${planName}<br/>
-      ${rejectionReason ? `<strong>Reason:</strong> ${rejectionReason}<br/>` : ""}
-    </p>
-    ${productDetailsHtml}
-     <br/>
-  `;
+  const bodyHtml = [
+    renderGreeting({
+      name: firstName(customerName),
+
+      introHtml:
+        "We were unable to approve your extended warranty refund request at this time. Below are the details of our decision.",
+    }),
+
+    renderProductCard({
+      productTitle,
+      serialNumber,
+
+      badges: [
+        {
+          label: "Refund Not Approved",
+          tone: "warning",
+        },
+      ],
+    }),
+
+    emailSection(`
+      <table
+        width="100%"
+        cellspacing="0"
+        cellpadding="0"
+        style="width:100%;"
+      >
+        <tbody>
+          <tr>
+            <td
+              height="24"
+              style="height:24px;"
+            ></td>
+          </tr>
+
+          <tr>
+            <td>
+              ${renderDetailsGrid([
+                {
+                  label: "Plan",
+                  value: planName,
+                },
+                {
+                  label: "Status",
+                  value: "Not approved",
+                },
+                {
+                  label: "Decision date",
+                  value:
+                    formatEmailDisplayDate(
+                      processedDate
+                    ),
+                },
+                {
+                  label: "Reason",
+                  value:
+                    rejectionReason ||
+                    "Not specified",
+                },
+              ])}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    `),
+
+    viewWarrantyUrl
+      ? renderCtaBlock({
+          href: viewWarrantyUrl,
+          label: "View my warranty",
+        })
+      : productDetailsHtml
+        ? emailSection(productDetailsHtml)
+        : "",
+  ].join("");
 
   return renderEmailLayout({
     heading: "Extended Warranty Refund Request Update",
+
     bodyHtml,
-    storeName: "Sonova Team",
+
+    storeName: "Sennheiser Hearing",
+
+    storeUrl,
+    privacyUrl,
+    termsUrl,
+    supportUrl,
+    hero: {
+      badge: "Refund Update",
+
+      title:
+        "Your refund request was not approved",
+
+      subtitle:
+        "We reviewed your extended warranty refund request and were unable to approve it at this time.",
+    },
+
+    footerNotice:
+      "This email confirms the outcome of your extended warranty refund request. Please retain it for your records.",
   });
 }
-
-
-// import {
-//   escapeHtml,
-//   renderAdditionalNotesHtml,
-//   FIXED_REGISTRATION_EMAIL_STYLES,
-// } from "./_layout.js";
-
-// /**
-//  * Fixed Extended Warranty Refund Rejected email — matches the approved
-//  * Standard/Extended registration design system.
-//  */
-// export default function ExtendedWarrantyRefundRejectedTemplate({
-//   customerName,
-//   productTitle,
-//   serialNumber,
-//   planName,
-//   rejectionReason,
-//   processedDate,
-//   myProductsUrl,
-//   shopUrl,
-//   supportUrl,
-//   privacyUrl,
-//   termsUrl,
-//   additionalNotes = "",
-// }) {
-//   const firstName = String(customerName || "Customer").trim().split(/\s+/)[0];
-
-//   return `
-// <!DOCTYPE html>
-// <html lang="en">
-// <head>
-// <meta charset="UTF-8">
-// <meta name="viewport" content="width=device-width, initial-scale=1.0">
-// <title>Extended Warranty Refund Update</title>
-// <style>${FIXED_REGISTRATION_EMAIL_STYLES}</style>
-// </head>
-// <body>
-// <div class="wrapper">
-
-//   <div class="header">
-//     <div class="header-wordmark">SENNHEISER</div>
-//   </div>
-
-//   <div class="hero">
-//     <div style="padding-top: 24px;">
-//       <div class="hero-label hero-label--warning">REFUND UPDATE</div>
-//       <h1>Your refund request was not approved</h1>
-//       <p>We reviewed your extended warranty refund request and were unable to approve it at this time.</p>
-//     </div>
-//   </div>
-
-//   <div class="body">
-
-//     <p class="greeting">Hi ${escapeHtml(firstName)},</p>
-//     <p class="greeting">Thank you for your patience. Below are the details of our decision regarding your refund request.</p>
-
-//     <div class="product-card">
-//       <div class="product-info">
-//         <div class="product-name">${escapeHtml(productTitle)}</div>
-//         <div class="serial">Serial number: <span>${escapeHtml(serialNumber || "-")}</span></div>
-//         <div class="warranty-row">
-//           <span class="warranty-badge warranty-badge--warning">Refund Not Approved</span>
-//         </div>
-//       </div>
-//     </div>
-
-//     <div class="details-grid">
-//       <div class="detail-cell">
-//         <div class="detail-label">Plan</div>
-//         <div class="detail-value">${escapeHtml(planName || "-")}</div>
-//       </div>
-//       <div class="detail-cell">
-//         <div class="detail-label">Status</div>
-//         <div class="detail-value">Not approved</div>
-//       </div>
-//       <div class="detail-cell">
-//         <div class="detail-label">Decision date</div>
-//         <div class="detail-value">${escapeHtml(processedDate || "-")}</div>
-//       </div>
-//       <div class="detail-cell">
-//         <div class="detail-label">Reason</div>
-//         <div class="detail-value">${escapeHtml(rejectionReason || "Not specified")}</div>
-//       </div>
-//     </div>
-
-//     ${renderAdditionalNotesHtml(additionalNotes)}
-
-//     <div class="cta-block">
-//       ${myProductsUrl ? `<a href="${myProductsUrl}" class="cta-primary">View my warranty</a>` : ""}
-//       ${shopUrl ? `<a href="${shopUrl}" class="cta-secondary">Continue shopping</a>` : ""}
-//     </div>
-
-//     <hr class="divider">
-
-//     <div class="support-block">
-//       <p>If you have questions about this decision, our support team is ready to help.<br>
-//       ${supportUrl ? `<a href="${supportUrl}">Visit our support centre →</a>` : ""}</p>
-//     </div>
-
-//     <p class="sign-off">
-//       Thank you for choosing Sennheiser.<br><br>
-//       <strong>The Sennheiser Team</strong>
-//     </p>
-
-//   </div>
-
-//   <div class="footer">
-//     <div class="footer-brand">Sennheiser Consumer Hearing</div>
-//     <p>
-//       This email confirms the outcome of your extended warranty refund request. Please retain it for your records.<br>
-//       You are receiving this email because you requested a refund for extended warranty coverage${shopUrl ? ` at ${shopUrl.replace(/^https?:\/\//, "")}` : ""}.<br><br>
-//       ${privacyUrl ? `<a href="${privacyUrl}">Privacy Policy</a>` : ""}${privacyUrl && termsUrl ? " &nbsp;·&nbsp; " : ""}${termsUrl ? `<a href="${termsUrl}">Terms &amp; Conditions</a>` : ""}<br><br>
-//       © ${new Date().getFullYear()} Sonova Consumer Hearing GmbH. All rights reserved.
-//     </p>
-//   </div>
-
-// </div>
-// </body>
-// </html>
-//   `;
-// }

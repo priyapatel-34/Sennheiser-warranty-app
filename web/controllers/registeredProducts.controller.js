@@ -1,6 +1,11 @@
 import shopify from "../shopify.js";
 import { pool } from "../db/mysql.js";
 import { getEntitlementsForRegistrations } from "../services/extendedWarranty.service.js";
+import { STANDARD_PLUS_FREE_EXTENDED_LABEL } from "../services/indiaFreeExtendedWarranty.service.js";
+import {
+  hasIndiaFreeExtendedWarrantyTag,
+  isIndiaShop,
+} from "../services/indiaFreeExtendedWarranty.service.js";
 import {
   getLatestRefundForEntitlements,
   getCustomerFacingRefundStatus,
@@ -17,8 +22,6 @@ const SORT_COLUMNS = {
   warranty_end: "rp.warranty_end",
 };
 
-const ORDER_NAME_CACHE = new Map();
-
 /**
  * Resolves Shopify order names in bulk so the registered-products table can
  * display merchant-friendly order numbers instead of raw numeric ids.
@@ -34,24 +37,7 @@ async function fetchShopifyOrderNames(client, orderIds) {
   ];
   if (!uniqueIds.length) return map;
 
-  const idsToFetch = uniqueIds.filter((id) => {
-    const cachedName = ORDER_NAME_CACHE.get(id);
-
-    if (cachedName) {
-      map.set(id, cachedName);
-      return false;
-    }
-
-    return true;
-  });
-
-  if (!idsToFetch.length) return map;
-
-  const gids = idsToFetch.map(id =>
-    id.startsWith("gid://shopify/Order/")
-      ? id
-      : `gid://shopify/Order/${id}`,
-  );
+  const gids = uniqueIds.map(id => `gid://shopify/Order/${id}`);
 
   for (let offset = 0; offset < gids.length; offset += 50) {
     const chunk = gids.slice(offset, offset + 50);
@@ -72,18 +58,11 @@ async function fetchShopifyOrderNames(client, orderIds) {
 
       for (const node of result.data?.nodes || []) {
         if (!node?.id) continue;
-
         const numericId = node.id.split("/").pop();
-        const name = node.name || null;
-
-        map.set(numericId, name);
-
-        if (name) {
-          ORDER_NAME_CACHE.set(numericId, name);
-        }
+        map.set(numericId, node.name);
       }
     } catch (err) {
-      console.warn("Batch order name fetch failed:", err.message);
+      console.warn("⚠️ Batch order name fetch failed:", err.message);
     }
   }
 
@@ -112,7 +91,7 @@ async function fetchShopifyVariantTitle(client, variantId) {
     if (!title || title === "Default Title") return null;
     return title;
   } catch (err) {
-    console.warn("Variant title fetch failed:", err.message);
+    console.warn("⚠️ Variant title fetch failed:", err.message);
     return null;
   }
 }
@@ -137,7 +116,7 @@ async function fetchShopifyCustomerPhone(client, customerId) {
     );
     return result?.data?.customer?.phone || null;
   } catch (err) {
-    console.warn("Customer phone fetch failed:", err.message);
+    console.warn("⚠️ Customer phone fetch failed:", err.message);
     return null;
   }
 }
@@ -166,12 +145,33 @@ function resolveOrderNumber(row, orderNameMap) {
  * Derives the warranty type label shown in the registered-products table.
  */
 function formatWarrantyTypeLabel(row) {
+  if (row.has_free_extended_warranty || row.free_extended_warranty) {
+    return STANDARD_PLUS_FREE_EXTENDED_LABEL;
+  }
   const status = row.extended_warranty_status;
   if (status === "active") return "Extended (Active)";
   if (status === "refunded") return "Extended (Refunded)";
   if (status === "cancelled") return "Extended (Cancelled)";
   if (status === "expired") return "Extended (Expired)";
   return "Standard";
+}
+
+async function fetchIndiaFreeWarrantyProductIds(client, shopDomain, productIds) {
+  if (!isIndiaShop(shopDomain)) return new Set();
+  const ids = [...new Set(productIds.filter(Boolean).map(String))];
+  const eligible = new Set();
+  for (let offset = 0; offset < ids.length; offset += 50) {
+    const result = await client.request(
+      `query ($ids: [ID!]!) { nodes(ids: $ids) { ... on Product { id tags } } }`,
+      { variables: { ids: ids.slice(offset, offset + 50).map(id => `gid://shopify/Product/${id}`) } },
+    );
+    for (const product of result.data?.nodes || []) {
+      if (product?.id && hasIndiaFreeExtendedWarrantyTag(product, shopDomain)) {
+        eligible.add(product.id.split("/").pop());
+      }
+    }
+  }
+  return eligible;
 }
 
 /**
@@ -304,11 +304,16 @@ function buildSearchQuery(shopId, query, resolvedOrderIds = []) {
   const wt = String(warrantyType || "").trim().toLowerCase();
   if (wt === "standard") {
     conditions.push(`(
-      ew.status IS NULL
-      OR ew.status IN ('cancelled', 'refunded', 'expired')
+      IFNULL(rp.free_extended_warranty, 0) = 0
+      AND (
+        ew.status IS NULL
+        OR ew.status IN ('cancelled', 'refunded', 'expired')
+      )
     )`);
   } else if (wt === "extended") {
     conditions.push("ew.status = 'active'");
+  } else if (wt === "standard_extended_free") {
+    conditions.push("rp.free_extended_warranty = 1");
   }
 
   const pt = String(query.purchaseType || query.purchase_type || "")
@@ -328,8 +333,8 @@ function buildSearchQuery(shopId, query, resolvedOrderIds = []) {
       FROM extended_warranty_entitlements e2
       WHERE e2.shop_id = rp.shop_id
         AND e2.registered_product_id = rp.id
-        AND e2.status = 'active'
-      ORDER BY e2.created_at DESC
+        AND e2.status IN ('active', 'refunded', 'cancelled', 'expired')
+      ORDER BY FIELD(e2.status, 'active', 'refunded', 'cancelled', 'expired'), e2.created_at DESC
       LIMIT 1
     )
   `;
@@ -358,84 +363,66 @@ export async function registeredProducts(req, res) {
       return res.status(404).json({ error: "Shop not registered" });
     }
 
-    // Resolve order-name searches such as "#264" only when requested.
+    // If the search query looks like a Shopify order name (e.g. #1082), resolve
+    // it to a numeric shopify_order_id so we can match the DB field exactly.
     const resolvedOrderIds = [];
     const rawQ = String(req.query.q || "").trim();
-
     if (/^#\S+$/.test(rawQ)) {
       try {
         const lookupClient = new shopify.api.clients.Graphql({ session });
-        const orderName = rawQ.startsWith("#") ? rawQ : `#${rawQ}`;
-        const orderNumber = orderName.slice(1);
 
-        // Try the two common Shopify search formats. This keeps the normal
-        // registered-products request as a single DB request and only calls
-        // Shopify when the user explicitly searches by "#order-number".
-        const searchTerms = [orderName, orderNumber];
-
-        for (const searchTerm of searchTerms) {
+        // Step 1: Shopify orders search API (fast path).
+        try {
           const apiResult = await lookupClient.request(
             `query ($q: String!) {
               orders(first: 5, query: $q) {
-                edges {
-                  node {
-                    id
-                    name
-                  }
-                }
+                edges { node { id name } }
               }
             }`,
-            { variables: { q: `name:${searchTerm}` } },
+            { variables: { q: `name:${rawQ}` } }
           );
-
           for (const edge of apiResult?.data?.orders?.edges || []) {
-            const name = String(edge?.node?.name || "").trim();
-            const numericId = String(edge?.node?.id || "").split("/").pop();
-
-            if (
-              numericId &&
-              (name === orderName || name === `#${orderNumber}`)
-            ) {
-              resolvedOrderIds.push(numericId);
+            if (edge.node.name === rawQ) {
+              const numericId = edge.node.id.split("/").pop();
+              if (numericId && !resolvedOrderIds.includes(numericId)) {
+                resolvedOrderIds.push(numericId);
+              }
             }
           }
-
-          if (resolvedOrderIds.length) {
-            break;
-          }
+        } catch (apiErr) {
+          console.warn("⚠️ orders() search failed, will try fallback:", apiErr.message);
         }
 
-        // Keep the existing DB/Shopify fallback for stores where Shopify's
-        // order search does not return the order.
+        // Step 2: Fallback — reverse-map stored shopify_order_ids via nodes query
+        // (the nodes query is the same mechanism that renders order names in the table,
+        //  so it is guaranteed to work when the table already shows names).
         if (!resolvedOrderIds.length) {
           const [dbRows] = await pool.query(
-            `SELECT shopify_order_id
-              FROM registered_products
-              WHERE shop_id = ?
-                AND shopify_order_id IS NOT NULL
-              GROUP BY shopify_order_id
-              ORDER BY MAX(created_at) DESC
-              LIMIT 300`,
-            [shopId],
+            `SELECT DISTINCT shopify_order_id
+             FROM registered_products
+             WHERE shop_id = ? AND shopify_order_id IS NOT NULL
+             ORDER BY created_at DESC
+             LIMIT 300`,
+            [shopId]
           );
-
-          const dbOrderIds = dbRows.map(row => String(row.shopify_order_id));
-
+          const dbOrderIds = dbRows.map(r => String(r.shopify_order_id));
           if (dbOrderIds.length) {
-            const nameMap = await fetchShopifyOrderNames(
-              lookupClient,
-              dbOrderIds,
-            );
-
+            const nameMap = await fetchShopifyOrderNames(lookupClient, dbOrderIds);
             for (const [id, name] of nameMap.entries()) {
-              if (String(name).trim() === orderName) {
+              if (name === rawQ && !resolvedOrderIds.includes(id)) {
                 resolvedOrderIds.push(id);
               }
             }
           }
         }
+
+        console.log(
+          resolvedOrderIds.length
+            ? `✅ Order name "${rawQ}" resolved to shopify_order_id(s): ${resolvedOrderIds.join(", ")}`
+            : `ℹ️ No Shopify order found with name "${rawQ}"`
+        );
       } catch (err) {
-        console.warn("Order name resolution error:", err.message);
+        console.warn("⚠️ Order name resolution error:", err.message);
       }
     }
 
@@ -469,6 +456,8 @@ export async function registeredProducts(req, res) {
         rp.purchase_date,
         rp.warranty_start,
         rp.warranty_end,
+        rp.free_extended_warranty,
+        rp.free_extended_warranty_end,
         rp.consent_terms,
         rp.consent_marketing,
         rp.created_at,
@@ -495,14 +484,31 @@ export async function registeredProducts(req, res) {
         const client = new shopify.api.clients.Graphql({ session });
         orderNameMap = await fetchShopifyOrderNames(client, orderIds);
       } catch (err) {
-        console.warn("Order number enrichment skipped:", err.message);
+        console.warn("⚠️ Order number enrichment skipped:", err.message);
       }
     }
 
-    const data = rows.map(row => ({
-      ...row,
-      order_number: resolveOrderNumber(row, orderNameMap),
-    }));
+    let taggedFreeProductIds = new Set();
+    try {
+      taggedFreeProductIds = await fetchIndiaFreeWarrantyProductIds(
+        new shopify.api.clients.Graphql({ session }),
+        session.shop,
+        rows.map(row => row.shopify_product_id),
+      );
+    } catch (err) {
+      console.warn("Free extended warranty tag enrichment skipped:", err.message);
+    }
+
+    const data = rows.map(row => {
+      const enriched = {
+        ...row,
+        has_free_extended_warranty: Boolean(row.free_extended_warranty) ||
+          taggedFreeProductIds.has(String(row.shopify_product_id)),
+        order_number: resolveOrderNumber(row, orderNameMap),
+      };
+      enriched.warranty_type = formatWarrantyTypeLabel(enriched);
+      return enriched;
+    });
 
     const total = Number(countRow.total) || 0;
     const totalPages = Math.max(1, Math.ceil(total / built.pageSize));
@@ -554,8 +560,8 @@ export async function getRegisteredProductDetail(req, res) {
         FROM extended_warranty_entitlements e2
         WHERE e2.shop_id = rp.shop_id
           AND e2.registered_product_id = rp.id
-          AND e2.status = 'active'
-        ORDER BY e2.created_at DESC
+          AND e2.status IN ('active', 'refunded', 'cancelled', 'expired')
+        ORDER BY FIELD(e2.status, 'active', 'refunded', 'cancelled', 'expired'), e2.created_at DESC
         LIMIT 1
       )
       WHERE rp.id = ? AND rp.shop_id = ?
@@ -572,6 +578,17 @@ export async function getRegisteredProductDetail(req, res) {
     }
 
     const client = new shopify.api.clients.Graphql({ session });
+    let hasTaggedFreeWarranty = false;
+    try {
+      const taggedIds = await fetchIndiaFreeWarrantyProductIds(
+        client,
+        session.shop,
+        [row.shopify_product_id],
+      );
+      hasTaggedFreeWarranty = taggedIds.has(String(row.shopify_product_id));
+    } catch (err) {
+      console.warn("Free extended warranty tag detail lookup skipped:", err.message);
+    }
 
     let orderNumber = null;
     if (row.shopify_order_id) {
@@ -607,13 +624,20 @@ export async function getRegisteredProductDetail(req, res) {
         customer_name: row.customer_name,
         customer_email: row.customer_email,
         purchase_type: purchaseTypeLabel,
-        warranty_type: formatWarrantyTypeLabel(row),
+        warranty_type: formatWarrantyTypeLabel({
+          ...row,
+          has_free_extended_warranty: Boolean(row.free_extended_warranty) || hasTaggedFreeWarranty,
+        }),
         purchase_date: formatDateOnly(row.purchase_date),
         registration_date: formatDateOnly(row.created_at),
         warranty_start: formatDateOnly(row.warranty_start),
         warranty_end: formatDateOnly(row.warranty_end),
-        extended_warranty_start: formatDateOnly(row.extended_warranty_start),
-        extended_warranty_end: formatDateOnly(row.extended_warranty_end),
+        extended_warranty_start: formatDateOnly(
+          row.extended_warranty_start || row.free_extended_warranty_start,
+        ),
+        extended_warranty_end: formatDateOnly(
+          row.extended_warranty_end || row.free_extended_warranty_end,
+        ),
         retailer_name: row.retailer_name || null,
         shopify_customer_id: row.customer_id,
         refund_status: getCustomerFacingRefundStatus(entitlement, refundRecord),

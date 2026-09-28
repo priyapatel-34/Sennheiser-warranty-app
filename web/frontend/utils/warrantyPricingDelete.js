@@ -53,13 +53,3 @@ export function buildRemovePricingModalContent({
     ].filter(Boolean),
   };
 }
-
-// export function buildRemoveOverrideModalContent(product) {
-//   const productName = product?.title || "this product";
-//   return {
-//     title: "Remove from eligible list?",
-//     confirmLabel: "Remove from list",
-//     body: `Remove ${productName} from the extended-warranty eligible list? Existing pricing will not be deleted.`,
-//     details: [`Product: ${productName}`],
-//   };
-// }

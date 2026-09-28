@@ -29,12 +29,11 @@
     if (!contextRaw)
       return console.error("Missing warranty registration context");
 
-    const { order_id, product_id, line_item_id } = JSON.parse(contextRaw);
+    const { order_id, product_id } = JSON.parse(contextRaw);
     if (!order_id || !product_id)
       return console.error("Invalid registration context");
 
     const payload = new URLSearchParams({ order_id, product_id });
-    if (line_item_id) payload.set("line_item_id", line_item_id);
 
     const response = await fetch("/apps/warranty/orders", {
       method: "POST",
@@ -278,12 +277,7 @@
     };
 
     // include storefront locale for server-side email language selection
-    const storefrontLocale =
-      document.getElementById("storefrontLocale")?.value?.trim() ||
-      document.documentElement.lang ||
-      window.Shopify?.locale ||
-      navigator.language ||
-      "en";
+    const storefrontLocale = getCurrentStorefrontLocale();
 
     payload.locale = storefrontLocale;
 
@@ -340,11 +334,10 @@
 
       if (data.success === true) {
         const primary = data.registrations?.[0];
-        const shouldShowEw =
-          window.WarrantyFlowState?.isExtendedWarrantyOfferEnabledInResponse?.(data) ||
-          data?.postRegistrationNavigation?.next === "extended_warranty";
-
-        if (primary?.registerId && shouldShowEw) {
+        if (
+          primary?.registerId &&
+          window.WarrantyFlowState?.isExtendedWarrantyOfferEnabledInResponse?.(data)
+        ) {
           window.WarrantyFlowState?.savePostRegistration({
             registerId: primary.registerId,
             customerEmail: emailInput?.value?.trim() || "",
@@ -353,7 +346,7 @@
           });
         }
 
-        if (shouldShowEw) {
+        if (window.WarrantyFlowState?.isExtendedWarrantyOfferEnabledInResponse?.(data)) {
           window.ExtendedWarrantyOffer?.showPageLoader?.(
             "Loading extended warranty options..."
           );

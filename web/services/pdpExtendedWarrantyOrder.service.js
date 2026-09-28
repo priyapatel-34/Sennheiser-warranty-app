@@ -367,6 +367,43 @@ export async function attachPdpEntitlementToRegistration(conn, {
 }
 
 /**
+ * Links a paid PDP entitlement to a finished registration and returns the updated row.
+ */
+export async function linkPaidEntitlementToRegistration({
+  shopId,
+  registerId,
+  orderId,
+  lineItemId,
+  productId,
+  variantId,
+  registeredProduct,
+}) {
+  if (!shopId || !registerId || !orderId || !lineItemId) return null;
+
+  const existing = await getEntitlementForShopifyLine(shopId, { orderId, lineItemId });
+  if (!existing) return null;
+  if (existing.registered_product_id) return existing;
+
+  const conn = await pool.getConnection();
+  try {
+    const attachedId = await attachPdpEntitlementToRegistration(conn, {
+      shopId,
+      registerId,
+      orderId,
+      lineItemId,
+      productId,
+      variantId,
+      registeredProduct,
+    });
+    if (!attachedId) return existing;
+  } finally {
+    conn.release();
+  }
+
+  return (await getEntitlementForShopifyLine(shopId, { orderId, lineItemId })) || existing;
+}
+
+/**
  * Creates missing PDP entitlements for paid Shopify orders that already contain
  * warranty line items. Safe to call from My Products when a webhook was missed.
  */

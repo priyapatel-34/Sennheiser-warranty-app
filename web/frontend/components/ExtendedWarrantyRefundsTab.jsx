@@ -166,8 +166,8 @@ import {
     const [settingsLoading, setSettingsLoading] = useState(false);
     const [settingsSaving, setSettingsSaving] = useState(false);
     const [refundSettings, setRefundSettings] = useState({
-      refundEnabled: true,
-      proRataEnabled: true,
+      refundEnabled: false,
+      proRataEnabled: false,
       cancelOnRefund: true,
       autoCancelEntitlement: true,
       financeNotificationEmails: "",

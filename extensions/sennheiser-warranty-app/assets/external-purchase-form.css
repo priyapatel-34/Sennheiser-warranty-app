@@ -315,12 +315,10 @@
   transition: all 0.5s;
 }
 
-/* Show tooltip */
 .register-warranty-form-section .custom-toolip-wrap.active .tooltip {
   display: block;
 }
 
-/* Tooltip text should be white */
 .register-warranty-form-section .custom-toolip-wrap .tooltip {
   color: #fff;
 }
@@ -329,7 +327,6 @@
   color: #fff;
 }
 
-/* More information link */
 .register-warranty-form-section .custom-toolip-wrap .tooltip a {
   display: inline-block;
   margin-top: 5px;
@@ -338,7 +335,6 @@
   cursor: pointer;
 }
 
-/* Keep link white in every state */
 .register-warranty-form-section .custom-toolip-wrap .tooltip a:hover,
 .register-warranty-form-section .custom-toolip-wrap .tooltip a:focus,
 .register-warranty-form-section .custom-toolip-wrap .tooltip a:active,

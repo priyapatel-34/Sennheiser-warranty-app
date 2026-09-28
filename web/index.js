@@ -151,7 +151,12 @@ app.use("/app/standard-warranty",  shopify.validateAuthenticatedSession(), stand
 app.use("/app/extended-warranty",  shopify.validateAuthenticatedSession(), extendedWarranty);
 app.use("/app/registered-products",shopify.validateAuthenticatedSession(), registeredProducts);
 app.use("/app/email-settings",     shopify.validateAuthenticatedSession(), emailSettingsRoutes);
-
+app.use(
+  "/app/extended-warranty",
+  shopify.validateAuthenticatedSession(),
+  (req, res, next) => { console.log("session ok:", res.locals.shopify?.session?.shop); next(); },
+  extendedWarranty
+);
 // ── App-proxy routes (storefront) ─────────────────────────────────────────
 app.use("/tws-warranty/*", authenticateUser);
 

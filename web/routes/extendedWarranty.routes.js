@@ -7,7 +7,6 @@ import {
     searchExcludedWarrantyProducts,
     addWarrantyProductOverrides,
     removeWarrantyProductOverride,
-    // getExcludedWarrantyProducts,
     getProductVariants,
     getWarrantyPlans,
     saveWarrantyPlanMapping,
@@ -50,7 +49,6 @@ router.get("/products", getWarrantyProducts);
 router.get("/products/excluded", searchExcludedWarrantyProducts);
 router.post("/products/overrides", addWarrantyProductOverrides);
 router.delete("/products/overrides/:productId", removeWarrantyProductOverride);
-// router.get("/products/excluded", getExcludedWarrantyProducts);
 router.get("/products/:productId/variants", getProductVariants);
 router.get("/variants/:variantId/plans", getWarrantyPlans);
 router.post("/plans", saveWarrantyPlanMapping);

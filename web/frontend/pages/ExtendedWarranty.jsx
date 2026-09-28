@@ -142,11 +142,11 @@ export default function ExtendedWarrantyAdmin() {
         coverageText: "",
         extendedWarrantyPurchaseDays: "",
         warrantyPricingType: "amount",
-        extendedWarrantyOfferEnabled: true,
+        extendedWarrantyOfferEnabled: false,
         expiryReminderConfigs: [],
     });
     const [warrantyPricingType, setWarrantyPricingType] = useState("amount");
-    const [settingsLoading, setSettingsLoading] = useState(true);
+    const [settingsLoading, setSettingsLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [modalOpen, setModalOpen] = useState(false);
     const [configureProducts, setConfigureProducts] = useState([]);
@@ -228,7 +228,7 @@ export default function ExtendedWarrantyAdmin() {
         search = productSearchQuery,
         status = productStatusFilter,
         jumpLast = false,
-        } = {}) => {
+    } = {}) => {
         const requestId = ++productRequestIdRef.current;
         setProductsLoading(true);
         try {
@@ -252,7 +252,7 @@ export default function ExtendedWarrantyAdmin() {
 
             setProducts(Array.isArray(data.products) ? data.products : []);
             if (data.currency) setCurrency(data.currency);
-            if (data.warrantyPricingType === "percentage" || data.warrantyPricingType === "amount") {
+            if (data.warrantyPricingType) {
                 setWarrantyPricingType(data.warrantyPricingType);
             }
 
@@ -290,19 +290,19 @@ export default function ExtendedWarrantyAdmin() {
     };
 
     const removeSelectedProducts = useCallback(() => {
-    if (!selectedResources.length) {
-        toast.showError("Select at least one product to remove");
-        return;
-    }
+        if (!selectedResources.length) {
+            toast.showError("Select at least one product to remove");
+            return;
+        }
 
-    const selectedProducts = products.filter((product) =>
-        selectedResources.includes(product.id)
-    );
+        const selectedProducts = products.filter((product) =>
+            selectedResources.includes(product.id)
+        );
 
-    setConfirmAction({
-        kind: "overrideBulk",
-        products: selectedProducts,
-    });
+        setConfirmAction({
+            kind: "overrideBulk",
+            products: selectedProducts,
+        });
     }, [selectedResources, products, toast]);
 
     /**
@@ -324,19 +324,16 @@ export default function ExtendedWarrantyAdmin() {
                     s.extendedWarrantyPurchaseDays == null
                         ? ""
                         : String(s.extendedWarrantyPurchaseDays),
-                warrantyPricingType:
-                    s.warrantyPricingType === "percentage" ? "percentage" : "amount",
+                warrantyPricingType: s.warrantyPricingType || "amount",
                 extendedWarrantyOfferEnabled:
                     s.extendedWarrantyOfferEnabled === undefined
-                        ? true
+                        ? false
                         : Boolean(s.extendedWarrantyOfferEnabled),
                 expiryReminderConfigs: (s.expiryReminderConfigs || []).map((entry) => ({
                     reminderDays: (entry.reminderDays || []).map(String),
                 })),
             });
-            setWarrantyPricingType(
-                s.warrantyPricingType === "percentage" ? "percentage" : "amount"
-            );
+            setWarrantyPricingType(s.warrantyPricingType || "amount");
         } catch {
             toast.showError("Unable to load settings");
         } finally {
@@ -346,7 +343,6 @@ export default function ExtendedWarrantyAdmin() {
 
     useEffect(() => {
         loadDurations();
-        loadSettings();
     }, []);
 
     useEffect(() => {
@@ -474,10 +470,6 @@ export default function ExtendedWarrantyAdmin() {
     };
 
     const openConfigureModal = (targets, mode) => {
-        if (settingsLoading) {
-            toast.showError("Warranty pricing settings are still loading. Try again in a moment.");
-            return;
-        }
         if (!durations.length) {
             toast.showError("Add durations first");
             return;
@@ -778,24 +770,24 @@ export default function ExtendedWarrantyAdmin() {
     };
 
     const confirmModal =
-    confirmAction?.kind === "overrideBulk"
-        ? {
-              title:
-                  confirmAction.products.length === 1
-                      ? "Remove product?"
-                      : "Remove products?",
-              body:
-                  confirmAction.products.length === 1
-                      ? `Are you sure you want to remove "${confirmAction.products[0].title}" from the warranty product list?`
-                      : `Are you sure you want to remove ${confirmAction.products.length} selected products from the warranty product list?`,
-              confirmLabel:
-                  confirmAction.products.length === 1
-                      ? "Remove product"
-                      : "Remove products",
-          }
-        : confirmAction
-          ? buildRemovePricingModalContent(confirmAction)
-          : null;
+        confirmAction?.kind === "overrideBulk"
+            ? {
+                title:
+                    confirmAction.products.length === 1
+                        ? "Remove product?"
+                        : "Remove products?",
+                body:
+                    confirmAction.products.length === 1
+                        ? `Are you sure you want to remove "${confirmAction.products[0].title}" from the warranty product list?`
+                        : `Are you sure you want to remove ${confirmAction.products.length} selected products from the warranty product list?`,
+                confirmLabel:
+                    confirmAction.products.length === 1
+                        ? "Remove product"
+                        : "Remove products",
+            }
+            : confirmAction
+                ? buildRemovePricingModalContent(confirmAction)
+                : null;
 
     const executeConfirmedAction = async () => {
         if (!confirmAction || confirmLoading || confirmInFlightRef.current) return;
@@ -822,16 +814,16 @@ export default function ExtendedWarrantyAdmin() {
                         ? "Product removed from the eligible list"
                         : `${productIds.length} products removed from the eligible list`
                 );
-            setConfirmAction(null);
-            clearSelection();
+                setConfirmAction(null);
+                clearSelection();
 
-            await loadProducts({
-                targetPage: page,
-                search: productSearchQuery,
-                status: productStatusFilter,
-            });
+                await loadProducts({
+                    targetPage: page,
+                    search: productSearchQuery,
+                    status: productStatusFilter,
+                });
 
-            return;
+                return;
             }
 
             if (confirmAction.kind === "override") {
@@ -1044,9 +1036,7 @@ export default function ExtendedWarrantyAdmin() {
                             ? ""
                             : String(data.settings.extendedWarrantyPurchaseDays),
                     warrantyPricingType:
-                        data.settings.warrantyPricingType === "percentage"
-                            ? "percentage"
-                            : "amount",
+                        data.settings.warrantyPricingType || "amount",
                     extendedWarrantyOfferEnabled: Boolean(
                         data.settings.extendedWarrantyOfferEnabled
                     ),
@@ -1056,11 +1046,7 @@ export default function ExtendedWarrantyAdmin() {
                         reminderDays: (entry.reminderDays || []).map(String),
                     })),
                 });
-                setWarrantyPricingType(
-                    data.settings.warrantyPricingType === "percentage"
-                        ? "percentage"
-                        : "amount"
-                );
+                setWarrantyPricingType(data.settings.warrantyPricingType || "amount");
             }
             toast.showSuccess("Settings saved");
         } catch (err) {
@@ -1140,7 +1126,7 @@ export default function ExtendedWarrantyAdmin() {
                 tab === 1
                     ? [
                         {
-                            content: "Remove products",                            
+                            content: "Remove products",
                             disabled: selectedResources.length === 0,
                             onAction: removeSelectedProducts,
                         },

@@ -32,6 +32,7 @@ const WARRANTY_TYPE_OPTIONS = [
   { label: "All statuses", value: ALL_FILTER },
   { label: "Standard warranty", value: "standard" },
   { label: "Extended warranty", value: "extended" },
+  // { label: "Standard + Extended Free", value: "standard_extended_free" },
 ];
 
 const PURCHASE_TYPE_OPTIONS = [
@@ -59,15 +60,17 @@ const DETAIL_CELL_SPAN = {
 
 const CSV_HEADERS = [
   "Warranty Record ID",
-  "Customer",
-  "Product",
-  "Serial Number",
-  "Purchase Type",
-  "retailer_name",
   "Order Number",
+  "Customer",
+  "Serial Number",
   "SKU",
+  "Product",
+  "Purchase Type",
+  "Retailer Name",
   "Email",
   "Warranty Type",
+  "Purchase Date",
+  "Registration Date",
   "Warranty End",
   "Extended Warranty End",
 ];
@@ -129,6 +132,7 @@ function getWarrantyStatus(item) {
 }
 
 function getWarrantyLabel(item) {
+  if (item.warranty_type) return item.warranty_type;
   const status = getWarrantyStatus(item);
   return WARRANTY_STATUS_LABELS[status] || "Standard";
 }
@@ -237,15 +241,17 @@ function downloadCsv(filename, rows) {
   const csvRows = rows.map((item) =>
     [
       item.id,
+      getOrderNumber(item),
       item.customer_name,
-      item.product_name,
       item.serial_number,
+      item.sku,
+      item.product_name,
       getPurchaseLabel(item.purchase_type),
       item.retailer_name || "—",
-      getOrderNumber(item),
-      item.sku,
       item.customer_email,
       getWarrantyLabel(item),
+      formatDate(item.purchase_date),
+      formatDate(item.created_at),
       formatDate(item.warranty_end),
       formatDate(item.extended_warranty_end),
     ]
@@ -352,7 +358,6 @@ function ProductDetails({ product }) {
     { label: "Serial Number", value: product.serial_number },
     { label: "SKU", value: product.sku },
     { label: "Product Name", value: product.product_name },
-    { label: "Product Variant", value: product.product_variant },
     { label: "Purchase Type", value: product.purchase_type },
     {
       label: "Retailer Name",
@@ -383,11 +388,6 @@ function ProductDetails({ product }) {
     {
       label: "Standard Warranty End",
       value: product.warranty_end,
-      isDate: true,
-    },
-    {
-      label: "Extended Warranty Start",
-      value: product.extended_warranty_start,
       isDate: true,
     },
     {

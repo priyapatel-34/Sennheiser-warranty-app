@@ -1,11 +1,12 @@
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Page,
   Layout,
   Text,
   Card,
   Stack,
-  Link,
 } from "@shopify/polaris";
+import { navigateInApp } from "../components/AppLayout.jsx";
 
 const DASHBOARD_SECTIONS = [
   {
@@ -55,6 +56,9 @@ const DASHBOARD_SECTIONS = [
  * sections for warranties, retailers, registrations, and email settings.
  */
 export default function HomePage() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
   return (
     <div className="wa-dashboard-page">
       <Page
@@ -100,9 +104,15 @@ export default function HomePage() {
                       </Stack>
                     </div>
                     <div className="wa-dashboard-card__link">
-                      <Link url={section.path} removeUnderline>
+                      <button
+                        type="button"
+                        className="wa-dashboard-card__action"
+                        onClick={() =>
+                          navigateInApp(navigate, location, section.path)
+                        }
+                      >
                         Open {section.title} →
-                      </Link>
+                      </button>
                     </div>
                   </div>
                 </Card>

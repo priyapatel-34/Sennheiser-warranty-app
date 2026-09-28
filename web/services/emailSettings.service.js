@@ -1,9 +1,10 @@
 import { pool } from "../db/mysql.js";
-import { renderEmailLayout } from "../emailTemp/_layout.js";
+import { ADMIN_EMAIL_EXTRA_MARKER, renderEmailLayout } from "../emailTemp/_layout.js";
 import { sendEmailService } from "./email.service.js";
 import {
   renderViewProductDetailsButton,
   buildMyProductsLoginUrl,
+  buildProductDetailsUrl,
 } from "./emailLink.service.js";
 import WarrantyRegistrationSuccessTemplate from "../emailTemp/standard_warranty.js";
 import WarrantyRegistrationSuccessTemplateJA from "../emailTemp/standard_warranty_ja.js";
@@ -13,7 +14,7 @@ import ExtendedWarrantyRefundApprovedTemplate from "../emailTemp/extended_warran
 import ExtendedWarrantyRefundRejectedTemplate from "../emailTemp/extended_warranty_refund_rejected.js";
 
 const SIGN_OFF_MARKER = '<p style="margin-top:30px;">';
-const EMAIL_TEAM_NAME = "Sonova Team";
+const EMAIL_TEAM_NAME = "Sennheiser Hearing";
 
 /**
  * Inserts merchant-authored extra content into the rendered email layout while
@@ -23,7 +24,10 @@ export function injectExtraEmailContent(fullHtml, extraHtml) {
   const extra = String(extraHtml || "").trim();
   if (!extra) return fullHtml;
 
-  const block = `<div class="admin-email-extra" style="margin-top:20px;">${extra}</div>`;
+  const block = `<div class="admin-email-extra" style=" margin-bottom:20px; font-size:12px">${extra}</div>`;
+  if (fullHtml.includes(ADMIN_EMAIL_EXTRA_MARKER)) {
+    return fullHtml.replace(ADMIN_EMAIL_EXTRA_MARKER, `${block}\n${ADMIN_EMAIL_EXTRA_MARKER}`);
+  }
   if (fullHtml.includes(SIGN_OFF_MARKER)) {
     return fullHtml.replace(SIGN_OFF_MARKER, `${block}\n          ${SIGN_OFF_MARKER}`);
   }
@@ -49,6 +53,10 @@ function buildSampleExtendWarrantyUrl(data) {
   return buildMyProductsLoginUrl(data.shopDomain) || "";
 }
 
+function sampleViewWarrantyUrl(data) {
+  return buildProductDetailsUrl(data.shopDomain, data.registerId) || "";
+}
+
 /**
  * Renders one of the built-in email templates using sample data so merchants
  * can preview the app's default message before adding custom content.
@@ -56,6 +64,13 @@ function buildSampleExtendWarrantyUrl(data) {
 function renderBuiltInEmailHtml(templateKey, sampleData = {}) {
   const data = { ...sampleData };
   const productDetailsHtml = buildSampleProductDetailsHtml(data);
+  const viewWarrantyUrl = sampleViewWarrantyUrl(data);
+  const urls = {
+    storeUrl: normalizeOptionalUrl(data.storeUrl),
+    privacyUrl: normalizeOptionalUrl(data.privacyUrl),
+    termsUrl: normalizeOptionalUrl(data.termsUrl),
+    supportUrl: normalizeOptionalUrl(data.supportUrl),
+  };
 
   switch (templateKey) {
     case "standard_warranty":
@@ -63,10 +78,19 @@ function renderBuiltInEmailHtml(templateKey, sampleData = {}) {
         customerName: data.customerName,
         productTitle: data.productName,
         orderNumber: data.orderNumber,
-        serialNumber:data.serialNumber,
+        serialNumber: data.serialNumber || data.warrantyNumber,
         purchaseDate: data.purchaseDate,
         warrantyPeriod: data.warrantyDuration,
+        registrationDate: data.registrationDate,
+        warrantyStartDate: data.warrantyStartDate || data.registrationDate,
+        warrantyExpiry: data.warrantyExpiry,
         productDetailsHtml,
+        viewWarrantyUrl,
+        shopDomain: data.shopDomain,
+        shopifyShop: data.shopifyShop,
+        hasFreeExtendedWarranty: Boolean(data.hasFreeExtendedWarranty),
+        freeExtendedWarrantySource: data.freeExtendedWarrantySource || null,
+        ...urls,
       });
     case "extended_warranty_purchase":
       return ExtendedWarrantyPurchaseTemplate({
@@ -77,20 +101,27 @@ function renderBuiltInEmailHtml(templateKey, sampleData = {}) {
         durationMonths: data.durationMonths,
         price: data.price,
         currency: data.currency,
-        serialNumber: data.warrantyNumber,
-        activationDate: data.registrationDate,
-        expiryDate: data.warrantyExpiry,
+        serialNumber: data.serialNumber || data.warrantyNumber,
+        activationDate: data.activationDate || data.registrationDate,
+        expiryDate: data.warrantyExpiry || data.expiryDate,
         productDetailsHtml,
+        viewWarrantyUrl,
+        ...urls,
       });
     case "extended_warranty_reminder":
       return ExtendedWarrantyEligibilityReminderTemplate({
         customerName: data.customerName,
         productTitle: data.productName,
-        serialNumber: data.warrantyNumber,
+        serialNumber: data.serialNumber || data.warrantyNumber,
         daysRemaining: data.daysRemaining,
-        eligibilityEndDate: data.warrantyExpiry,
+        eligibilityEndDate: data.offerExpiryDate || data.warrantyExpiry,
+        offerExpiryDate: data.offerExpiryDate || data.warrantyExpiry,
+        warrantyExpiryDate: data.warrantyExpiry,
+        plans: data.plans || [],
+        coverageBenefits: data.coverageBenefits || "",
         extendWarrantyUrl: buildSampleExtendWarrantyUrl(data),
         productDetailsHtml,
+        ...urls,
       });
     case "extended_warranty_refund_approved":
       return ExtendedWarrantyRefundApprovedTemplate({
@@ -99,7 +130,11 @@ function renderBuiltInEmailHtml(templateKey, sampleData = {}) {
         planName: data.planName,
         refundAmount: data.refundAmount,
         currency: data.currency,
+        serialNumber: data.serialNumber || data.warrantyNumber,
+        processedDate: data.processedDate,
         productDetailsHtml,
+        viewWarrantyUrl,
+        ...urls,
       });
     case "extended_warranty_refund_rejected":
       return ExtendedWarrantyRefundRejectedTemplate({
@@ -107,7 +142,11 @@ function renderBuiltInEmailHtml(templateKey, sampleData = {}) {
         productTitle: data.productName,
         planName: data.planName,
         rejectionReason: data.rejectionReason,
+        serialNumber: data.serialNumber || data.warrantyNumber,
+        processedDate: data.processedDate,
         productDetailsHtml,
+        viewWarrantyUrl,
+        ...urls,
       });
     default:
       return renderEmailLayout({
@@ -126,8 +165,10 @@ export const EMAIL_TEMPLATE_DEFINITIONS = {
     sampleData: {
       customerName: "Jane Customer",
       productName: "ACCENTUM Wireless",
+      serialNumber: "SN-ABC123",
       orderNumber: "JP-10452",
       purchaseDate: "2026-01-15",
+      warrantyStartDate: "2026-01-15",
       warrantyDuration: "24 Months",
       warrantyExpiry: "2028-06-01",
       registrationDate: "2026-06-01",
@@ -143,6 +184,7 @@ export const EMAIL_TEMPLATE_DEFINITIONS = {
     sampleData: {
       customerName: "Jane Customer",
       productName: "ACCENTUM Wireless",
+      serialNumber: "SN-ABC123",
       orderNumber: "JP-10452",
       planName: "+2 Year",
       warrantyDuration: "24 Months",
@@ -152,6 +194,7 @@ export const EMAIL_TEMPLATE_DEFINITIONS = {
       registerId: "100245",
       warrantyNumber: "SN-ABC123",
       registrationDate: "2028-06-01",
+      activationDate: "2028-06-01",
       warrantyExpiry: "2030-06-01",
       storeName: EMAIL_TEAM_NAME,
     },
@@ -163,11 +206,44 @@ export const EMAIL_TEMPLATE_DEFINITIONS = {
     sampleData: {
       customerName: "Jane Customer",
       productName: "ACCENTUM Wireless",
+      serialNumber: "SN-ABC123",
       warrantyNumber: "SN-ABC123",
       registerId: "100245",
-      warrantyExpiry: "2026-07-01",
+      warrantyExpiry: "2028-06-07",
+      offerExpiryDate: "2026-07-01",
       daysRemaining: 7,
       storeName: EMAIL_TEAM_NAME,
+      plans: [
+        {
+          planName: "+1 Year",
+          startDate: "2027-06-07",
+          endDate: "2028-06-07",
+          price: "23.00",
+          currency: "EUR",
+        },
+        {
+          planName: "+2 Year",
+          startDate: "2027-06-07",
+          endDate: "2029-06-07",
+          price: "45.00",
+          currency: "EUR",
+          badgeLabel: "Most Popular",
+          featured: true,
+        },
+        {
+          planName: "+3 Year",
+          startDate: "2027-06-07",
+          endDate: "2030-06-07",
+          price: "59.00",
+          currency: "EUR",
+        },
+      ],
+      coverageBenefits: [
+        "Comprehensive coverage for mechanical and electrical breakdowns",
+        "100% coverage for repairs including labour — not just parts",
+        "Coverage for wear and tear affecting product functionality",
+        "Replacement or reimbursement if we cannot repair it",
+      ].join("\n"),
     },
   },
   extended_warranty_refund_approved: {
@@ -180,6 +256,8 @@ export const EMAIL_TEMPLATE_DEFINITIONS = {
       planName: "+2 Year",
       refundAmount: "99.00",
       currency: "USD",
+      serialNumber: "SN-ABC123",
+      processedDate: "2026-06-01",
       registerId: "100245",
       warrantyNumber: "100245",
       storeName: EMAIL_TEAM_NAME,
@@ -194,6 +272,8 @@ export const EMAIL_TEMPLATE_DEFINITIONS = {
       productName: "ACCENTUM Wireless",
       planName: "+2 Year",
       rejectionReason: "Documentation incomplete",
+      serialNumber: "SN-ABC123",
+      processedDate: "2026-06-01",
       registerId: "100245",
       warrantyNumber: "100245",
       storeName: EMAIL_TEAM_NAME,
@@ -213,6 +293,23 @@ export function normalizeLocale(locale) {
   return "en";
 }
 
+const JAPAN_STORE_HOST = "jp.sennheiser-hearing.com";
+
+/**
+ * True only for the Japan storefront. Accepts a bare host or a full URL,
+ * with or without www, so the standard-email branch does not miss the shop.
+ */
+export function isJapanStoreDomain(shopDomain) {
+  const host = String(shopDomain || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .split("/")[0]
+    .replace(/:\d+$/, "")
+    .replace(/^www\./, "");
+  return host === JAPAN_STORE_HOST;
+}
+
 /**
  * Returns a renderer function for a built-in templateKey and locale. The
  * renderer returns an object { subject, html } when called with template data.
@@ -224,7 +321,7 @@ export function getWarrantyEmailTemplate(templateKey, locale) {
     case "standard_warranty":
       if (lang === "ja") {
         return (data = {}) => ({
-          subject: "保証登録が完了しました",
+          subject: "製品登録が完了しました",
           html: WarrantyRegistrationSuccessTemplateJA({
             customerName: data.customerName,
             productTitle: data.productTitle || data.productName,
@@ -232,6 +329,16 @@ export function getWarrantyEmailTemplate(templateKey, locale) {
             purchaseDate: data.purchaseDate,
             warrantyPeriod: data.warrantyPeriod || data.warrantyDuration,
             serialNumber: data.serialNumber,
+            shopDomain: data.shopDomain,
+            registerId: data.registerId,
+            registrationDate: data.registrationDate,
+            warrantyStartDate: data.warrantyStartDate,
+            warrantyExpiry: data.warrantyExpiry,
+            viewWarrantyUrl: data.viewWarrantyUrl,
+            storeUrl: data.storeUrl,
+            privacyUrl: data.privacyUrl,
+            termsUrl: data.termsUrl,
+            supportUrl: data.supportUrl,
           }),
         });
       }
@@ -247,6 +354,19 @@ export function getWarrantyEmailTemplate(templateKey, locale) {
           warrantyPeriod: data.warrantyPeriod || data.warrantyDuration,
           serialNumber: data.serialNumber,
           productDetailsHtml: data.productDetailsHtml || "",
+          shopDomain: data.shopDomain,
+          shopifyShop: data.shopifyShop,
+          hasFreeExtendedWarranty: Boolean(data.hasFreeExtendedWarranty),
+          freeExtendedWarrantySource: data.freeExtendedWarrantySource || null,
+          locale: data.locale,
+          registrationDate: data.registrationDate,
+          warrantyStartDate: data.warrantyStartDate,
+          warrantyExpiry: data.warrantyExpiry,
+          viewWarrantyUrl: data.viewWarrantyUrl,
+          storeUrl: data.storeUrl,
+          privacyUrl: data.privacyUrl,
+          termsUrl: data.termsUrl,
+          supportUrl: data.supportUrl,
         }),
       });
     default:
@@ -291,10 +411,42 @@ export function findInvalidPlaceholders(body, allowedPlaceholders = []) {
  */
 async function getShopGlobalSettings(shopId) {
   const [[row]] = await pool.query(
-    `SELECT global_enabled FROM email_settings WHERE shop_id = ?`,
+    `
+    SELECT global_enabled, store_url, privacy_policy_url, terms_conditions_url, support_url
+    FROM email_settings
+    WHERE shop_id = ?
+    `,
     [shopId]
   );
-  return { globalEnabled: row ? Boolean(row.global_enabled) : true };
+  return {
+    globalEnabled: row ? Boolean(row.global_enabled) : true,
+    urls: {
+      storeUrl: normalizeOptionalUrl(row?.store_url),
+      privacyUrl: normalizeOptionalUrl(row?.privacy_policy_url),
+      termsUrl: normalizeOptionalUrl(row?.terms_conditions_url),
+      supportUrl: normalizeOptionalUrl(row?.support_url),
+    },
+  };
+}
+
+/** Returns an empty value for omitted URLs and only permits safe web links. */
+function normalizeOptionalUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function validateOptionalUrl(value, label) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const normalized = normalizeOptionalUrl(raw);
+  if (!normalized) throw new Error(`${label} must be a valid http or https URL`);
+  return normalized;
 }
 
 /**
@@ -347,6 +499,7 @@ export async function getEmailSettingsForShop(shopId) {
 
   return {
     globalEnabled: globalSettings.globalEnabled,
+    urls: globalSettings.urls,
     templates,
   };
 }
@@ -357,16 +510,26 @@ export async function getEmailSettingsForShop(shopId) {
  */
 export async function saveEmailSettingsForShop(shopId, payload = {}) {
   const globalEnabled = payload.globalEnabled !== false;
+  const urls = payload.urls || {};
+  const storeUrl = validateOptionalUrl(urls.storeUrl, "Store URL");
+  const privacyUrl = validateOptionalUrl(urls.privacyUrl, "Privacy Policy URL");
+  const termsUrl = validateOptionalUrl(urls.termsUrl, "Terms & Conditions URL");
+  const supportUrl = validateOptionalUrl(urls.supportUrl, "Support URL");
 
   await pool.query(
     `
-    INSERT INTO email_settings (shop_id, global_enabled)
-    VALUES (?, ?)
+    INSERT INTO email_settings (
+      shop_id, global_enabled, store_url, privacy_policy_url, terms_conditions_url, support_url
+    ) VALUES (?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
       global_enabled = VALUES(global_enabled),
+      store_url = VALUES(store_url),
+      privacy_policy_url = VALUES(privacy_policy_url),
+      terms_conditions_url = VALUES(terms_conditions_url),
+      support_url = VALUES(support_url),
       updated_at = CURRENT_TIMESTAMP
     `,
-    [shopId, globalEnabled ? 1 : 0]
+    [shopId, globalEnabled ? 1 : 0, storeUrl, privacyUrl, termsUrl, supportUrl]
   );
 
   if (!Array.isArray(payload.templates)) {
@@ -461,13 +624,40 @@ export async function sendShopEmail({
     return { success: false, error: "No template renderer available" };
   }
 
-  const rendered = await renderDefault();
-  subject = saved?.subject?.trim()
-    ? interpolateTemplate(saved.subject, data)
-    : rendered.subject;
-  html = rendered.html;
+  const rendered = await renderDefault({ urls: globalSettings.urls });
 
-  if (saved?.body_html?.trim()) {
+  const isJapanStore =
+    isJapanStoreDomain(data.shopDomain) ||
+    isJapanStoreDomain(data.shopifyShop);
+  const japaneseStandardEmail =
+    templateKey === "standard_warranty" &&
+    isJapanStore &&
+    normalizeLocale(data.locale) === "ja";
+
+  if (japaneseStandardEmail) {
+    html = getWarrantyEmailTemplate("standard_warranty", "ja")({
+      ...data,
+      ...(globalSettings.urls || {}),
+      productTitle: data.productTitle || data.productName,
+      warrantyPeriod: data.warrantyPeriod || data.warrantyDuration,
+      registerId: data.registerId || data.warrantyNumber,
+    }).html;
+  } else {
+    html = rendered.html;
+  }
+
+  if (templateKey === "standard_warranty" && isJapanStore) {
+    subject =
+      normalizeLocale(data.locale) === "ja"
+        ? "製品登録が完了しました"
+        : "Product Registration Successful!!!";
+  } else {
+    subject = saved?.subject?.trim()
+      ? interpolateTemplate(saved.subject, data)
+      : rendered.subject;
+  }
+
+  if (saved?.body_html?.trim() && !japaneseStandardEmail) {
     html = injectExtraEmailContent(html, saved.body_html.trim());
   }
 
@@ -478,463 +668,3 @@ export async function sendShopEmail({
     from: process.env.DEFAULT_FROM_EMAIL,
   });
 }
-
-
-// import { pool } from "../db/mysql.js";
-// import { sendEmailService, getEmailDeliveryStatus } from "./email.service.js";
-// import {
-//   buildMyProductsLoginUrl,
-//   buildProductDetailsUrl,
-//   buildShopUrl,
-//   buildPrivacyPolicyUrl,
-//   buildTermsPolicyUrl,
-// } from "./emailLink.service.js";
-// import WarrantyRegistrationSuccessTemplate from "../emailTemp/standard_warranty.js";
-// import ExtendedWarrantyPurchaseTemplate from "../emailTemp/extended_warranty_purchase.js";
-// import ExtendedWarrantyEligibilityReminderTemplate from "../emailTemp/extended_warranty_eligibility_reminder.js";
-// import ExtendedWarrantyRefundApprovedTemplate from "../emailTemp/extended_warranty_refund_approved.js";
-// import ExtendedWarrantyRefundRejectedTemplate from "../emailTemp/extended_warranty_refund_rejected.js";
-
-// export const EMAIL_TEMPLATE_DEFINITIONS = {
-//   standard_warranty: {
-//     label: "Standard Warranty Registration",
-//     defaultSubject: "Your Product Standard Warranty Registration is Completed.",
-//     sampleData: {
-//       customerName: "Jane Customer",
-//       productName: "ACCENTUM Wireless",
-//       serialNumber: "SN-ABC123",
-//       orderNumber: "JP-10452",
-//       purchaseDate: "15 Jan 2026",
-//       warrantyStartDate: "01 Jun 2026",
-//       registrationDate: "01 Jun 2026",
-//       warrantyExpiry: "01 Jun 2028",
-//       warrantyDuration: "24 Months",
-//       registerId: "100245",
-//       shopDomain: "sennheiser-hearing.com",
-//     },
-//   },
-//   extended_warranty_purchase: {
-//     label: "Extended Warranty Purchased",
-//     defaultSubject: "Extended Warranty Purchase Confirmation",
-//     sampleData: {
-//       customerName: "Jane Customer",
-//       productName: "ACCENTUM Wireless",
-//       serialNumber: "SN-ABC123",
-//       orderNumber: "JP-10452",
-//       planName: "+2 Year",
-//       durationMonths: 24,
-//       price: "99.00",
-//       currency: "USD",
-//       registerId: "100245",
-//       activationDate: "01 Jun 2028",
-//       expiryDate: "01 Jun 2030",
-//       shopDomain: "sennheiser-hearing.com",
-//     },
-//   },
-//   extended_warranty_reminder: {
-//     label: "Reminder Email",
-//     defaultSubject: "Reminder: extend your warranty",
-//     sampleData: {
-//       customerName: "Jane Customer",
-//       productName: "ACCENTUM Wireless",
-//       serialNumber: "SN-ABC123",
-//       registerId: "100245",
-//       warrantyExpiry: "01 Jul 2028",
-//       offerExpiryDate: "01 Jul 2026",
-//       daysRemaining: 7,
-//       shopDomain: "sennheiser-hearing.com",
-//       plans: [
-//         {
-//           planName: "+1 Year",
-//           startDate: "01 Jul 2028",
-//           endDate: "01 Jul 2029",
-//           price: "49.00 USD",
-//         },
-//         {
-//           planName: "+2 Years",
-//           startDate: "01 Jul 2028",
-//           endDate: "01 Jul 2030",
-//           price: "99.00 USD",
-//           featured: true,
-//         },
-//         {
-//           planName: "+3 Years",
-//           startDate: "01 Jul 2028",
-//           endDate: "01 Jul 2031",
-//           price: "129.00 USD",
-//         },
-//       ],
-//       coverageBenefits: [
-//         "Comprehensive coverage for mechanical and electrical breakdowns",
-//         "100% coverage for repairs including labour — not just parts",
-//         "Coverage for wear and tear affecting product functionality",
-//         "Replacement or reimbursement if we cannot repair it",
-//       ].join("\n"),
-//     },
-//   },
-//   extended_warranty_refund_approved: {
-//     label: "Refund Approved",
-//     defaultSubject: "Extended Warranty Refund Approved",
-//     sampleData: {
-//       customerName: "Jane Customer",
-//       productName: "ACCENTUM Wireless",
-//       serialNumber: "SN-ABC123",
-//       planName: "+2 Year",
-//       refundAmount: "99.00 USD",
-//       processedDate: "01 Jun 2026",
-//       registerId: "100245",
-//       shopDomain: "sennheiser-hearing.com",
-//     },
-//   },
-//   extended_warranty_refund_rejected: {
-//     label: "Refund Rejected",
-//     defaultSubject: "Extended Warranty Refund Request Update",
-//     sampleData: {
-//       customerName: "Jane Customer",
-//       productName: "ACCENTUM Wireless",
-//       serialNumber: "SN-ABC123",
-//       planName: "+2 Year",
-//       rejectionReason: "Documentation incomplete",
-//       processedDate: "01 Jun 2026",
-//       registerId: "100245",
-//       shopDomain: "sennheiser-hearing.com",
-//     },
-//   },
-// };
-
-// /**
-//  * `body_html` stores optional plain-text Additional Notes per template.
-//  * Legacy installs may still have HTML from the old rich-text editor — strip
-//  * tags on read so existing content is preserved as readable plain text.
-//  */
-// export function resolveAdditionalNotes(rawBodyHtml) {
-//   if (!rawBodyHtml?.trim()) return "";
-//   const text = rawBodyHtml.trim();
-//   if (!/<[a-z][\s\S]*>/i.test(text)) return text;
-
-//   return text
-//     .replace(/<br\s*\/?>/gi, "\n")
-//     .replace(/<\/p>/gi, "\n")
-//     .replace(/<[^>]+>/g, "")
-//     .replace(/&nbsp;/g, " ")
-//     .replace(/&amp;/g, "&")
-//     .replace(/&lt;/g, "<")
-//     .replace(/&gt;/g, ">")
-//     .replace(/&quot;/g, '"')
-//     .replace(/&#39;/g, "'")
-//     .replace(/\n{3,}/g, "\n\n")
-//     .trim();
-// }
-
-// function buildSampleUrls(shopDomain, registerId) {
-//   const domain = shopDomain || "example.myshopify.com";
-//   return {
-//     myProductsUrl: buildProductDetailsUrl(domain, registerId),
-//     shopUrl: buildShopUrl(domain),
-//     supportUrl: buildShopUrl(domain),
-//     privacyUrl: buildPrivacyPolicyUrl(domain),
-//     termsUrl: buildTermsPolicyUrl(domain),
-//     upsellUrl: buildMyProductsLoginUrl(domain) || buildShopUrl(domain, "/pages/my-products"),
-//     unsubscribeUrl: buildShopUrl(domain, "/account"),
-//   };
-// }
-
-// function renderBuiltInEmailHtml(templateKey, sampleData = {}, additionalNotes = "") {
-//   const data = { ...sampleData };
-//   const urls = buildSampleUrls(data.shopDomain, data.registerId);
-
-//   switch (templateKey) {
-//     case "standard_warranty":
-//       return WarrantyRegistrationSuccessTemplate({
-//         customerName: data.customerName,
-//         productTitle: data.productName,
-//         serialNumber: data.serialNumber || data.warrantyNumber,
-//         registrationDate: data.registrationDate,
-//         purchaseDate: data.purchaseDate,
-//         warrantyStartDate: data.warrantyStartDate || data.registrationDate,
-//         warrantyExpiry: data.warrantyExpiry,
-//         myProductsUrl: urls.myProductsUrl,
-//         shopUrl: urls.shopUrl,
-//         supportUrl: urls.supportUrl,
-//         privacyUrl: urls.privacyUrl,
-//         termsUrl: urls.termsUrl,
-//         additionalNotes,
-//       });
-//     case "extended_warranty_purchase":
-//       return ExtendedWarrantyPurchaseTemplate({
-//         customerName: data.customerName,
-//         productTitle: data.productName,
-//         serialNumber: data.serialNumber || data.warrantyNumber,
-//         planName: data.planName,
-//         price: data.price,
-//         currency: data.currency,
-//         activationDate: data.activationDate || data.registrationDate,
-//         expiryDate: data.warrantyExpiry || data.expiryDate,
-//         myProductsUrl: urls.myProductsUrl,
-//         shopUrl: urls.shopUrl,
-//         supportUrl: urls.supportUrl,
-//         privacyUrl: urls.privacyUrl,
-//         termsUrl: urls.termsUrl,
-//         additionalNotes,
-//       });
-//     case "extended_warranty_reminder":
-//       return ExtendedWarrantyEligibilityReminderTemplate({
-//         customerName: data.customerName,
-//         productTitle: data.productName,
-//         serialNumber: data.serialNumber || data.warrantyNumber,
-//         daysRemaining: data.daysRemaining,
-//         warrantyExpiryDate: data.warrantyExpiry,
-//         offerExpiryDate: data.offerExpiryDate || data.warrantyExpiry,
-//         plans: data.plans || [],
-//         upsellUrl: urls.upsellUrl,
-//         supportUrl: urls.supportUrl,
-//         privacyUrl: urls.privacyUrl,
-//         termsUrl: urls.termsUrl,
-//         unsubscribeUrl: urls.unsubscribeUrl,
-//         additionalNotes,
-//         coverageBenefits: data.coverageBenefits,
-//       });
-//     case "extended_warranty_refund_approved":
-//       return ExtendedWarrantyRefundApprovedTemplate({
-//         customerName: data.customerName,
-//         productTitle: data.productName,
-//         serialNumber: data.serialNumber,
-//         planName: data.planName,
-//         refundAmount: data.refundAmount,
-//         currency: data.currency,
-//         processedDate: data.processedDate,
-//         myProductsUrl: urls.myProductsUrl,
-//         shopUrl: urls.shopUrl,
-//         supportUrl: urls.supportUrl,
-//         privacyUrl: urls.privacyUrl,
-//         termsUrl: urls.termsUrl,
-//         additionalNotes,
-//       });
-//     case "extended_warranty_refund_rejected":
-//       return ExtendedWarrantyRefundRejectedTemplate({
-//         customerName: data.customerName,
-//         productTitle: data.productName,
-//         serialNumber: data.serialNumber,
-//         planName: data.planName,
-//         rejectionReason: data.rejectionReason,
-//         processedDate: data.processedDate,
-//         myProductsUrl: urls.myProductsUrl,
-//         shopUrl: urls.shopUrl,
-//         supportUrl: urls.supportUrl,
-//         privacyUrl: urls.privacyUrl,
-//         termsUrl: urls.termsUrl,
-//         additionalNotes,
-//       });
-//     default:
-//       return "<p>Preview is not available for this template.</p>";
-//   }
-// }
-
-// async function getShopGlobalSettings(shopId) {
-//   const [[row]] = await pool.query(
-//     `SELECT global_enabled FROM email_settings WHERE shop_id = ?`,
-//     [shopId]
-//   );
-//   return {
-//     globalEnabled: !row || Number(row.global_enabled) !== 0,
-//   };
-// }
-
-// function isTemplateEnabled(saved) {
-//   if (!saved) return true;
-//   return Number(saved.enabled) !== 0;
-// }
-
-// export { getEmailDeliveryStatus };
-
-// async function getShopTemplateRow(shopId, templateKey) {
-//   const [[row]] = await pool.query(
-//     `
-//     SELECT enabled, body_html
-//     FROM email_template_settings
-//     WHERE shop_id = ? AND template_key = ?
-//     `,
-//     [shopId, templateKey]
-//   );
-//   return row || null;
-// }
-
-// async function getCoverageTextForShop(shopId) {
-//   if (!shopId) return "";
-//   const [[row]] = await pool.query(
-//     `SELECT coverage_text FROM extended_warranty_settings WHERE shop_id = ?`,
-//     [shopId]
-//   );
-//   return row?.coverage_text || "";
-// }
-
-// export async function getEmailSettingsForShop(shopId) {
-//   const globalSettings = await getShopGlobalSettings(shopId);
-//   const [rows] = await pool.query(
-//     `
-//     SELECT template_key, enabled, body_html
-//     FROM email_template_settings
-//     WHERE shop_id = ?
-//     `,
-//     [shopId]
-//   );
-//   const savedByKey = Object.fromEntries(rows.map((r) => [r.template_key, r]));
-
-//   const templates = Object.entries(EMAIL_TEMPLATE_DEFINITIONS).map(
-//     ([key, def]) => {
-//       const saved = savedByKey[key];
-//       return {
-//         key,
-//         label: def.label,
-//         enabled: isTemplateEnabled(saved),
-//         additionalNotes: resolveAdditionalNotes(saved?.body_html),
-//         defaultSubject: def.defaultSubject,
-//       };
-//     }
-//   );
-
-//   return {
-//     globalEnabled: globalSettings.globalEnabled,
-//     delivery: getEmailDeliveryStatus(),
-//     templates,
-//   };
-// }
-
-// export async function saveEmailSettingsForShop(shopId, payload = {}) {
-//   const globalEnabled = payload.globalEnabled !== false;
-
-//   await pool.query(
-//     `
-//     INSERT INTO email_settings (shop_id, global_enabled)
-//     VALUES (?, ?)
-//     ON DUPLICATE KEY UPDATE
-//       global_enabled = VALUES(global_enabled),
-//       updated_at = CURRENT_TIMESTAMP
-//     `,
-//     [shopId, globalEnabled ? 1 : 0]
-//   );
-
-//   if (!Array.isArray(payload.templates)) {
-//     return getEmailSettingsForShop(shopId);
-//   }
-
-//   for (const template of payload.templates) {
-//     const def = EMAIL_TEMPLATE_DEFINITIONS[template.key];
-//     if (!def) continue;
-
-//     const additionalNotes = String(template.additionalNotes ?? "").trim();
-
-//     await pool.query(
-//       `
-//       INSERT INTO email_template_settings (
-//         shop_id, template_key, enabled, subject, body_html
-//       ) VALUES (?, ?, ?, ?, ?)
-//       ON DUPLICATE KEY UPDATE
-//         enabled = VALUES(enabled),
-//         body_html = VALUES(body_html),
-//         updated_at = CURRENT_TIMESTAMP
-//       `,
-//       [
-//         shopId,
-//         template.key,
-//         template.enabled === false ? 0 : 1,
-//         def.defaultSubject,
-//         additionalNotes || null,
-//       ]
-//     );
-//   }
-
-//   return getEmailSettingsForShop(shopId);
-// }
-
-// export async function previewEmailTemplate(
-//   templateKey,
-//   { shopId, additionalNotes: overrideNotes } = {}
-// ) {
-//   const def = EMAIL_TEMPLATE_DEFINITIONS[templateKey];
-//   if (!def) throw new Error("Unknown template");
-
-//   let additionalNotes = "";
-//   if (overrideNotes !== undefined && overrideNotes !== null) {
-//     additionalNotes = String(overrideNotes).trim();
-//   } else if (shopId) {
-//     const saved = await getShopTemplateRow(shopId, templateKey);
-//     additionalNotes = resolveAdditionalNotes(saved?.body_html);
-//   }
-
-//   const sampleData = { ...def.sampleData };
-//   if (templateKey === "extended_warranty_reminder" && shopId) {
-//     sampleData.coverageBenefits = await getCoverageTextForShop(shopId);
-//   }
-
-//   const html = renderBuiltInEmailHtml(
-//     templateKey,
-//     sampleData,
-//     additionalNotes
-//   );
-
-//   return { subject: def.defaultSubject, html };
-// }
-
-// export async function sendShopEmail({
-//   shopId,
-//   templateKey,
-//   to,
-//   renderDefault,
-// }) {
-//   if (!to) return { success: false, error: "Missing recipient" };
-
-//   const globalSettings = await getShopGlobalSettings(shopId);
-//   if (!globalSettings.globalEnabled) {
-//     console.warn("Email skipped: global notifications disabled", { shopId, templateKey, to });
-//     return { success: true, skipped: true, reason: "global_disabled" };
-//   }
-
-//   const def = EMAIL_TEMPLATE_DEFINITIONS[templateKey];
-//   if (!def && typeof renderDefault !== "function") {
-//     return { success: false, error: "Unknown template" };
-//   }
-
-//   const saved = await getShopTemplateRow(shopId, templateKey);
-//   if (def && saved && !isTemplateEnabled(saved)) {
-//     console.warn("Email skipped: template disabled", { shopId, templateKey, to });
-//     return { success: true, skipped: true, reason: "template_disabled" };
-//   }
-
-//   if (typeof renderDefault !== "function") {
-//     return { success: false, error: "No template renderer available" };
-//   }
-
-//   const delivery = getEmailDeliveryStatus();
-//   if (!delivery.ready) {
-//     const error = delivery.sendgridConfigured
-//       ? "Sender email is not configured (DEFAULT_FROM_EMAIL)"
-//       : "SendGrid is not configured (SENDGRID_API_KEY)";
-//     console.error("Email send blocked:", error, { shopId, templateKey, to });
-//     return { success: false, error };
-//   }
-
-//   const additionalNotes = resolveAdditionalNotes(saved?.body_html);
-//   const rendered = await renderDefault({ additionalNotes });
-
-//   const subject = rendered.subject || def?.defaultSubject;
-//   const html = rendered.html;
-
-//   const result = await sendEmailService({
-//     to,
-//     subject,
-//     html,
-//   });
-
-//   if (!result.success) {
-//     console.error("Email send failed", {
-//       shopId,
-//       templateKey,
-//       to,
-//       error: result.error,
-//       statusCode: result.statusCode,
-//     });
-//   }
-
-//   return result;
-// }

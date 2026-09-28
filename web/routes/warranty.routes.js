@@ -13,9 +13,11 @@ import {
     getExtendedWarrantyOffer,
     initiateExtendedWarrantyCheckout,
     getCartCheckoutPayload,
-    getPdpExtendedWarrantyOffer,
-    getPdpCartPayload,
 } from "../controllers/extendedWarrantyPurchase.controller.js";
+import {
+    getPdpExtendedWarrantyOffer,
+    getPdpExtendedWarrantyCartPayload,
+} from "../controllers/pdpExtendedWarranty.controller.js";
 
 const router = express.Router();
 
@@ -40,11 +42,11 @@ router.post("/register", registerProducts);
 
 router.get("/extended-warranty/offer", getExtendedWarrantyOffer);
 router.post("/extended-warranty/offer", getExtendedWarrantyOffer);
-router.post("/extended-warranty/checkout", initiateExtendedWarrantyCheckout);
-router.post("/extended-warranty/cart-payload", getCartCheckoutPayload);
 router.get("/extended-warranty/pdp-offer", getPdpExtendedWarrantyOffer);
 router.post("/extended-warranty/pdp-offer", getPdpExtendedWarrantyOffer);
-router.post("/extended-warranty/pdp-cart-payload", getPdpCartPayload);
+router.post("/extended-warranty/pdp-cart-payload", getPdpExtendedWarrantyCartPayload);
+router.post("/extended-warranty/checkout", initiateExtendedWarrantyCheckout);
+router.post("/extended-warranty/cart-payload", getCartCheckoutPayload);
 
 
 // router.post("/submit", submit);

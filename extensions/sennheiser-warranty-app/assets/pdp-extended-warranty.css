@@ -204,6 +204,10 @@
   color: #e47777;
 }
 
+.ew-pdp__status + .ew-pdp__covered-link {
+  margin-top: 8px;
+}
+
 /* ================= MODAL ================= */
 
 .ew-pdp-modal[hidden],
@@ -610,6 +614,14 @@ body.ew-pdp-modal-open {
   overflow: hidden;
 }
 
+ .ew-cart-line-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
 /* ================= TABLET ================= */
 
 @media (max-width: 900px) {
@@ -832,55 +844,102 @@ body.ew-pdp-modal-open {
   }
 }
 
-/* ================= CART DRAWER / PAGE ================= */
+/* =========================================================
+   EXTENDED WARRANTY - CART
+   ========================================================= */
 
-.ew-cart-line-hidden {
-  display: none !important;
+.ew-cart-slot {
+  box-sizing: border-box;
+  flex: 0 0 auto;
 }
 
 .ew-cart-fallback {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: block;
   width: 100%;
-  margin-top: 12px;
-}
-
-.ew-cart-slot {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  width: 100%;
-  margin-top: 10px;
-  box-sizing: border-box;
+  flex: 0 0 auto;
+  margin-top: 8px;
 }
 
 .ew-cart-add {
-  display: inline-flex;
+  display: inline-flex !important;
   align-items: center;
-  padding: 0;
+  justify-content: center;
+  visibility: visible !important;
+  opacity: 1 !important;
+  height: auto !important;
+  min-height: 32px;
+  overflow: visible !important;
+  padding: 8px 12px;
   border: 0;
-  background: transparent;
-  color: #0096d6;
+  border-radius: 4px;
+  background: #037cc2 !important;
+  color: #ffffff !important;
   font-family: inherit;
-  font-size: 13px;
-  line-height: 1.3;
+  font-size: 12px;
+  line-height: 1.2;
   font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration: none;
+  white-space: nowrap;
   cursor: pointer;
 }
 
 .ew-cart-add:hover {
-  color: #0aa3e2;
+  background: #037cc2 !important;
+  color: #ffffff !important;
 }
 
-.ew-cart-add:focus-visible,
-.ew-cart-warranty__remove:focus-visible {
-  outline: 2px solid #0096d6;
-  outline-offset: 2px;
+.ew-cart-add:active {
+  background: #026da9 !important;
 }
+
+/* =========================================================
+   CART PAGE
+   Add Warranty directly below price
+   ========================================================= */
+
+.ew-cart-page-slot {
+  display: block !important;
+  width: fit-content !important;
+  max-width: 100% !important;
+  margin-top: 8px !important;
+  clear: none !important;
+  flex: 0 0 auto !important;
+  grid-column: auto !important;
+  position: static !important;
+  float: none !important;
+}
+
+.ew-cart-page-slot .ew-cart-add {
+  display: inline-flex !important;
+  width: max-content !important;
+  margin: 0 !important;
+}
+
+/* Sit in the product details column, directly under the unit price. */
+.product-details .ew-cart-page-slot {
+  display: block !important;
+  width: fit-content !important;
+  max-width: 100% !important;
+  margin-top: 8px !important;
+  flex: 0 0 auto !important;
+  grid-column: auto !important;
+  clear: none !important;
+}
+
+
+/* Drawer slot must never inherit page positioning */
+.ew-cart-drawer-slot {
+  display: inline-flex !important;
+  width: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  position: static !important;
+  float: none !important;
+}
+
+/* =========================================================
+   WARRANTY LINE
+   ========================================================= */
 
 .ew-cart-warranty {
   display: flex;
@@ -918,8 +977,4 @@ body.ew-pdp-modal-open {
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
-}
-
-.ew-cart-warranty__remove:hover {
-  color: #0aa3e2;
 }

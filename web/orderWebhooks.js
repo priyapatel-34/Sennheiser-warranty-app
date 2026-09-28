@@ -6,9 +6,11 @@ import {
   activateEntitlementFromPayment,
   cancelEntitlementFromRefund,
   getNumericIdFromGid,
+  getActiveEntitlement,
   getExtendedWarrantySettings,
   // normalizeWarrantyPricingType,
 } from "./services/extendedWarranty.service.js";
+import { syncExtendedWarrantyOrderTags } from "./services/shopifyOrderTags.service.js";
 import { normalizeWarrantyPricingType } from "./services/extendedWarrantyPricing.js";
 import { activatePdpEntitlementsFromOrder, collectPdpWarrantyTargets } from "./services/pdpExtendedWarrantyOrder.service.js";
 
@@ -173,14 +175,6 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
     order.lineItems?.edges || []
   );
 
-  console.log("[EW Webhook] Activation targets from line items", {
-    orderId,
-    orderName: order.name,
-    targetCount: targets.size,
-    pdpTargetCount: pdpTargets.length,
-    targets: [...targets.entries()],
-  });
-
   if (targets.size === 0 && !pdpTargets.length) {
     console.warn("[EW Webhook] Paid order has no EW line-item metadata", {
       orderId,
@@ -198,10 +192,6 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
         customerEmail,
         pricingType: normalizeWarrantyPricingType(settings?.warranty_pricing_type),
         targets: pdpTargets,
-      });
-      console.log("[EW Webhook] PDP entitlements processed", {
-        orderId,
-        created: (created || []).map((row) => row?.id).filter(Boolean),
       });
     } catch (err) {
       console.error("[EW Webhook] PDP entitlement activation failed:", err.message);
@@ -235,6 +225,26 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
       );
     } catch (err) {
       console.error("[EW Webhook] EW activation failed:", err.message);
+
+      const active = await getActiveEntitlement(shopId, registerId);
+      if (active?.status === "active") {
+        const [[registered]] = await pool.query(
+          `SELECT shopify_order_id FROM registered_products WHERE shop_id = ? AND id = ?`,
+          [shopId, registerId]
+        );
+
+        const tagResults = await syncExtendedWarrantyOrderTags({
+          shop: session.shop,
+          productOrderId: registered?.shopify_order_id,
+          purchaseOrderId: active.shopify_order_id || String(orderId),
+          session,
+          registerId,
+        });
+        console.log("[EW Webhook] Tag sync retry for active entitlement", {
+          registerId,
+          tagResults,
+        });
+      }
     }
   }
 }
@@ -253,6 +263,11 @@ async function handleOrderWebhook(topic, shop, body) {
 
 export const OrderWebhookHandlers = {
   ORDERS_PAID: {
+    deliveryMethod: DeliveryMethod.Http,
+    callbackUrl: "/api/webhooks",
+    callback: handleOrderWebhook,
+  },
+  ORDERS_CREATE: {
     deliveryMethod: DeliveryMethod.Http,
     callbackUrl: "/api/webhooks",
     callback: handleOrderWebhook,
@@ -308,7 +323,7 @@ export async function registerOrderWebhooks(admin) {
   }
 
   const callbackUrl = `${appUrl.replace(/\/$/, "")}/api/webhooks`;
-  const topics = ["ORDERS_PAID", "REFUNDS_CREATE"];
+  const topics = ["ORDERS_PAID", "ORDERS_CREATE", "REFUNDS_CREATE"];
 
   // Fetch all existing webhook subscriptions for these topics in one query so
   // we can skip topics that are already registered.  Previously this loop used
@@ -331,6 +346,9 @@ export async function registerOrderWebhooks(admin) {
       ordersPayedSubs: webhookSubscriptions(first: 5, topics: ORDERS_PAID) {
         edges { node { endpoint { ... on WebhookHttpEndpoint { callbackUrl } } } }
       }
+      ordersCreateSubs: webhookSubscriptions(first: 5, topics: ORDERS_CREATE) {
+        edges { node { endpoint { ... on WebhookHttpEndpoint { callbackUrl } } } }
+      }
       refundsCreateSubs: webhookSubscriptions(first: 5, topics: REFUNDS_CREATE) {
         edges { node { endpoint { ... on WebhookHttpEndpoint { callbackUrl } } } }
       }
@@ -339,6 +357,7 @@ export async function registerOrderWebhooks(admin) {
 
   const existingByTopic = {
     ORDERS_PAID:    existingResponse.data?.ordersPayedSubs?.edges  || [],
+    ORDERS_CREATE:  existingResponse.data?.ordersCreateSubs?.edges || [],
     REFUNDS_CREATE: existingResponse.data?.refundsCreateSubs?.edges || [],
   };
 

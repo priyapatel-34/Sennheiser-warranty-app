@@ -22,11 +22,14 @@
   const consentConfirmError = document.getElementById("consentConfirmError");
 
   const externalProducts = document.getElementById("externalProducts");
+  console.log("External Div:", externalProducts);
   const addProductBtn = document.getElementById("addProduct");
 
   const infoIconUrl = document.getElementById("info-icon").value;
 
   let retailerRequired = true;
+
+  console.log("In js external 110");
 
   /* ===============================
      ERROR HELPERS
@@ -521,14 +524,9 @@
 
       products: [],
     };
-
+    
     // include storefront locale for server-side email language selection
-    const storefrontLocale =
-      document.getElementById("storefrontLocale")?.value?.trim() ||
-      document.documentElement.lang ||
-      window.Shopify?.locale ||
-      navigator.language ||
-      "en";
+    const storefrontLocale = getCurrentStorefrontLocale();
 
     payload.locale = storefrontLocale;
 
@@ -590,11 +588,7 @@
         window.scrollTo({ top: 0, behavior: "smooth" });
 
         const primary = data.registrations?.[0];
-        const shouldShowEw =
-          window.WarrantyFlowState?.isExtendedWarrantyOfferEnabledInResponse?.(data) ||
-          data?.postRegistrationNavigation?.next === "extended_warranty";
-
-        if (primary?.registerId && shouldShowEw) {
+        if (primary?.registerId && window.WarrantyFlowState?.isExtendedWarrantyOfferEnabledInResponse?.(data)) {
           window.WarrantyFlowState?.savePostRegistration({
             registerId: primary.registerId,
             customerEmail: emailInput.value.trim(),
@@ -605,7 +599,7 @@
 
         window.WarrantyToast?.showSuccess("Product registered successfully");
 
-        if (shouldShowEw) {
+        if (window.WarrantyFlowState?.isExtendedWarrantyOfferEnabledInResponse?.(data)) {
           window.ExtendedWarrantyOffer?.showPageLoader?.(
             "Loading extended warranty options..."
           );

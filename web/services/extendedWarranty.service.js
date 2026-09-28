@@ -10,22 +10,22 @@ import {
 } from "./emailLink.service.js";
 import {
   DEFAULT_WARRANTY_PRICING_TYPE,
-  configuredWarrantyPricingType,
   normalizeWarrantyPricingType,
   resolvePlanPrice,
 } from "./extendedWarrantyPricing.js";
-import { computePurchaseWindowState, formatExtensionOfferExpiryLabel } from "./purchaseWindow.utils.js";
+import { computePurchaseWindowState, formatExtensionOfferExpiryLabel, resolveRegistrationTimestamp } from "./purchaseWindow.utils.js";
 import { syncExtendedWarrantyOrderTags } from "./shopifyOrderTags.service.js";
 import {
-  slugifyProductType,
-  hasProductOverride,
-} from "./warrantyProductEligibility.service.js";
-
+  isIndiaShop,
+  loadProductPreorderMap,
+  registeredHidesPaidExtendedWarranty,
+  shouldSuppressPaidExtendedWarranty,
+} from "./indiaFreeExtendedWarranty.service.js";
 export {
   computePurchaseWindowState,
   formatExtensionOfferExpiryLabel,
   resolveRegistrationTimestamp,
-} from "./purchaseWindow.utils.js";
+};
 
 export function getNumericIdFromGid(gid) {
   if (!gid) return null;
@@ -223,12 +223,13 @@ export async function buildPlanAvailabilityIndex(shopId, productIds) {
 }
 
 export function registeredHasEligiblePlansInIndex(registeredProduct, planIndex) {
+  if (!planIndex || typeof planIndex.get !== "function") return false;
   const productId = Number(registeredProduct.shopify_product_id);
   const entries = planIndex.get(productId);
   return Boolean(entries?.length);
 }
 
-export function parseExtendedWarrantyOfferEnabled(value, defaultValue = true) {
+export function parseExtendedWarrantyOfferEnabled(value, defaultValue = false) {
   if (value === undefined || value === null) return defaultValue;
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
@@ -241,10 +242,10 @@ export function parseExtendedWarrantyOfferEnabled(value, defaultValue = true) {
 }
 
 export function isExtendedWarrantyOfferEnabled(settings) {
-  if (!settings) return true;
+  if (!settings) return false;
   return parseExtendedWarrantyOfferEnabled(
     settings.extended_warranty_offer_enabled,
-    true
+    false
   );
 }
 
@@ -272,11 +273,20 @@ export function canExtendWarrantyLight({
   ewSettings,
   planIndex,
 }) {
+  if (registeredHidesPaidExtendedWarranty(registered)) {
+    return {
+      eligible: false,
+      reason: registered?.free_extended_warranty
+        ? "free_extended_warranty_applied"
+        : "preorder_product",
+    };
+  }
+
   if (!isExtendedWarrantyOfferEnabledForRegistration(registered, ewSettings)) {
     return { eligible: false, reason: "feature_disabled" };
   }
 
-  if (entitlement?.status === "active") {
+  if (isPurchasedExtendedWarrantyStatus(entitlement?.status)) {
     return { eligible: false, reason: "already_purchased" };
   }
 
@@ -306,9 +316,7 @@ export async function getExtendedWarrantySettings(shopId) {
       coverage_text,
       extended_warranty_purchase_days,
       warranty_pricing_type,
-      extended_warranty_offer_enabled,
-      shopify_checkout_product_id,
-      allowed_product_types
+      extended_warranty_offer_enabled
     FROM extended_warranty_settings
     WHERE shop_id = ?
     `,
@@ -321,19 +329,11 @@ export async function getExtendedWarrantySettings(shopId) {
       coverage_text: null,
       extended_warranty_purchase_days: null,
       warranty_pricing_type: DEFAULT_WARRANTY_PRICING_TYPE,
-      extended_warranty_offer_enabled: 1,
-      shopify_checkout_product_id: null,
-      allowed_product_types: [],
+      extended_warranty_offer_enabled: 0,
     };
   }
 
-  return {
-    ...row,
-    allowed_product_types:
-      row.allowed_product_types && typeof row.allowed_product_types === "string"
-        ? JSON.parse(row.allowed_product_types)
-        : row.allowed_product_types || [],
-  };
+  return row;
 }
 
 export async function fetchProductPricing(session, registered) {
@@ -720,6 +720,11 @@ export async function loadEligiblePlans(shopId, registeredProduct) {
   return dedupeActivePlansByDuration(rows);
 }
 
+// True when an extended warranty was already purchased for this product.
+function isPurchasedExtendedWarrantyStatus(status) {
+  return status === "active" || status === "expired" || status === "refunded" || status === "cancelled";
+}
+
 export async function getActiveEntitlement(shopId, registeredProductId) {
   const [[row]] = await pool.query(
     `
@@ -729,6 +734,23 @@ export async function getActiveEntitlement(shopId, registeredProductId) {
       AND registered_product_id = ?
       AND status = 'active'
     ORDER BY created_at DESC
+    LIMIT 1
+    `,
+    [shopId, registeredProductId]
+  );
+  return row || null;
+}
+
+// Latest purchased extended warranty for a registration, including inactive purchases.
+export async function getPurchasedEntitlement(shopId, registeredProductId) {
+  const [[row]] = await pool.query(
+    `
+    SELECT *
+    FROM extended_warranty_entitlements
+    WHERE shop_id = ?
+      AND registered_product_id = ?
+      AND status IN ('active', 'expired', 'refunded', 'cancelled')
+    ORDER BY FIELD(status, 'active', 'expired', 'refunded', 'cancelled'), created_at DESC
     LIMIT 1
     `,
     [shopId, registeredProductId]
@@ -1022,20 +1044,6 @@ export async function activateEntitlementFromPayment({
     const activationDateText = formatDateOnly(activationDate);
     const expiryDateText = formatDateOnly(expiryDate);
 
-    const purchaseHtml = ExtendedWarrantyPurchaseTemplate({
-      customerName: customerName || registered.customer_name || "Customer",
-      productTitle: registered.product_name,
-      orderNumber: shopifyOrderName || shopifyOrderId,
-      planName: planToUse.plan_name,
-      durationMonths: planToUse.duration_months,
-      price: String(purchasePrice),
-      currency: purchaseCurrency,
-      serialNumber: registered.serial_number,
-      activationDate: activationDateText,
-      expiryDate: expiryDateText,
-      productDetailsHtml,
-    });
-
     await sendShopEmail({
       shopId,
       templateKey: "extended_warranty_purchase",
@@ -1050,9 +1058,25 @@ export async function activateEntitlementFromPayment({
         registrationDate: activationDateText,
         warrantyExpiry: expiryDateText,
       },
-      renderDefault: async () => ({
+      renderDefault: async ({ urls } = {}) => ({
         subject: "Extended Warranty Purchase Confirmation",
-        html: purchaseHtml,
+        html: ExtendedWarrantyPurchaseTemplate({
+          customerName: customerName || registered.customer_name || "Customer",
+          productTitle: registered.product_name,
+          orderNumber: shopifyOrderName || shopifyOrderId,
+          planName: planToUse.plan_name,
+          durationMonths: planToUse.duration_months,
+          price: String(purchasePrice),
+          currency: purchaseCurrency,
+          serialNumber: registered.serial_number,
+          activationDate: activationDateText,
+          expiryDate: expiryDateText,
+          productDetailsHtml,
+          storeUrl: urls?.storeUrl || "",
+          privacyUrl: urls?.privacyUrl || "",
+          termsUrl: urls?.termsUrl || "",
+          supportUrl: urls?.supportUrl || "",
+        }),
       }),
     });
 
@@ -1096,6 +1120,54 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
     return { eligible: false, reason: "registration_not_found" };
   }
 
+  // A free India preorder warranty is already applied at registration and
+  // must never enter the paid checkout/draft-order flow. Preorder products
+  // also stay out of paid plans after the campaign window ends.
+  if (registered.free_extended_warranty) {
+    return {
+      eligible: false,
+      reason: "free_extended_warranty_applied",
+      freeExtendedWarranty: {
+        durationMonths: 12,
+        price: "0.00",
+        currency: null,
+        startDate: formatDateOnly(registered.free_extended_warranty_start),
+        endDate: formatDateOnly(registered.free_extended_warranty_end),
+      },
+    };
+  }
+
+  if (registered.preorder_product) {
+    return {
+      eligible: false,
+      reason: "preorder_product",
+    };
+  }
+
+  if (session?.shop && registered.shopify_product_id && isIndiaShop(session.shop)) {
+    try {
+      const client = new shopify.api.clients.Graphql({ session });
+      const preorderMap = await loadProductPreorderMap(client, [
+        registered.shopify_product_id,
+      ]);
+      const preorderState = preorderMap.get(String(registered.shopify_product_id));
+      if (
+        preorderState?.product &&
+        shouldSuppressPaidExtendedWarranty(preorderState.product, session.shop)
+      ) {
+        return {
+          eligible: false,
+          reason: "preorder_product",
+        };
+      }
+    } catch (preorderErr) {
+      console.warn(
+        "Preorder paid-warranty check skipped:",
+        preorderErr.message,
+      );
+    }
+  }
+
   if (!isExtendedWarrantyOfferEnabledForRegistration(registered, settings)) {
     return { eligible: false, reason: "feature_disabled" };
   }
@@ -1104,8 +1176,8 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
     registered.created_at = new Date();
   }
 
-  const existing = await getActiveEntitlement(shopId, registerId);
-  if (existing?.status === "active") {
+  const existing = await getPurchasedEntitlement(shopId, registerId);
+  if (isPurchasedExtendedWarrantyStatus(existing?.status)) {
     return {
       eligible: false,
       reason: "already_purchased",
@@ -1121,46 +1193,6 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
       purchaseWindow,
     };
   }
-
-  // Enforce admin-configured allowed product types when present. If a whitelist
-  // is configured and the product's type isn't in it, the product is not
-  // eligible unless an explicit product override exists. This requires a
-  // Shopify session to resolve the product type; if no session is available
-  // we conservatively skip the type check.
-  // const allowedTypesRaw = Array.isArray(settings.allowed_product_types)
-  //   ? settings.allowed_product_types
-  //   : [];
-  // if (allowedTypesRaw.length) {
-  //   let productTypeValue = null;
-  //   if (session) {
-  //     try {
-  //       const admin = new shopify.api.clients.Graphql({ session });
-  //       const productGid = String(registered.shopify_product_id).startsWith("gid://")
-  //         ? registered.shopify_product_id
-  //         : `gid://shopify/Product/${registered.shopify_product_id}`;
-  //       const res = await admin.request(
-  //         `query ($id: ID!) { product(id: $id) { productType } }`,
-  //         { variables: { id: productGid } }
-  //       );
-  //       productTypeValue = res?.data?.product?.productType || null;
-  //     } catch (err) {
-  //       // ignore and allow fallback to override check
-  //       productTypeValue = null;
-  //     }
-  //   }
-
-  //   const allowedSet = new Set(allowedTypesRaw.map((t) => slugifyProductType(t)).filter(Boolean));
-  //   const nodeSlug = slugifyProductType(productTypeValue || "");
-  //   const isAllowedType = nodeSlug && allowedSet.has(nodeSlug);
-
-  //   if (!isAllowedType) {
-  //     // Check admin overrides; if an override exists the product is eligible.
-  //     const overrideExists = await hasProductOverride(pool, shopId, registered.shopify_product_id);
-  //     if (!overrideExists) {
-  //       return { eligible: false, reason: "product_type_not_allowed" };
-  //     }
-  //   }
-  // }
 
   const plans = await loadEligiblePlans(shopId, registered);
   if (!plans.length) {
@@ -1242,285 +1274,6 @@ export async function buildExtendedWarrantyOffer(shopId, registerId, options = {
       purchaseDate: registered.purchase_date,
       variantId: registered.shopify_variant_id,
       productId: registered.shopify_product_id,
-    },
-  };
-}
-
-/**
- * PDP merchandising offer: same shop-scoped plans and pricing as registration,
- * but without a registered serial. Purchase-window / already-purchased checks
- * do not apply until the customer later registers the product.
- */
-export async function buildPdpExtendedWarrantyOffer(
-  shopId,
-  {
-    session = null,
-    productId,
-    variantId,
-    sku = null,
-    country = null,
-  } = {}
-) {
-  const settings = await getExtendedWarrantySettings(shopId);
-
-  /*
-   * PDP eligibility:
-   * Unlike the registration flow, the customer has not registered
-   * the product yet, so purchase-window and entitlement checks
-   * must NOT be applied here.
-   */
-  if (!isExtendedWarrantyOfferEnabled(settings)) {
-    return {
-      eligible: false,
-      reason: "feature_disabled",
-    };
-  }
-
-  /*
-   * Normalize Shopify product/variant IDs.
-   *
-   * The storefront can send either:
-   * - numeric Shopify IDs
-   * - Shopify GIDs
-   */
-  const productNumeric =
-    getNumericIdFromGid(productId) || Number(productId);
-
-  const variantNumeric = variantId
-    ? getNumericIdFromGid(variantId) || Number(variantId)
-    : null;
-
-  if (
-    !Number.isFinite(productNumeric) ||
-    productNumeric <= 0
-  ) {
-    return {
-      eligible: false,
-      reason: "invalid_product",
-    };
-  }
-
-  /*
-   * IMPORTANT:
-   * Plan eligibility is evaluated against the selected variant.
-   *
-   * If no variant-specific plans exist, loadEligiblePlans()
-   * falls back to product-level plans.
-   */
-  const productRef = {
-    shopify_product_id: productNumeric,
-
-    shopify_variant_id:
-      Number.isFinite(variantNumeric) &&
-      variantNumeric > 0
-        ? variantNumeric
-        : null,
-
-    sku: sku || null,
-  };
-
-  const plans = await loadEligiblePlans(
-    shopId,
-    productRef
-  );
-
-  if (!plans.length) {
-    return {
-      eligible: false,
-      reason: "no_plans_configured",
-    };
-  }
-
-  /*
-   * Resolve warranty pricing.
-   *
-   * For percentage pricing we MUST use the currently
-   * selected Shopify variant price.
-   *
-   * Example:
-   * Product = ₹48,690
-   * 5% warranty = ₹2,434.50
-   */
-  const explicitPricingType = configuredWarrantyPricingType(
-    settings.warranty_pricing_type
-  );
-  const pricingType = normalizeWarrantyPricingType(
-    explicitPricingType || settings.warranty_pricing_type
-  );
-
-  let variantPricing = null;
-  if (pricingType === "percentage" && session && productRef.shopify_variant_id) {
-    variantPricing = await fetchVariantPricing(
-      session,
-      productRef.shopify_variant_id,
-      productNumeric
-    );
-    if (!variantPricing) {
-      variantPricing = await fetchVariantPricing(
-        session,
-        productRef.shopify_variant_id,
-        productNumeric
-      );
-    }
-  }
-
-  /*
-   * Percentage plans cannot be calculated without
-   * the selected variant price. Do not treat a missing
-   * pricing-type setting as this failure — that is a
-   * separate configuration problem.
-   */
-  if (pricingType === "percentage" && !variantPricing) {
-    return {
-      eligible: false,
-      reason: "pricing_unavailable",
-      message: "Warranty price could not be calculated for this product variant.",
-    };
-  }
-
-  const shopCurrency =
-    plans[0]?.currency || null;
-
-  /*
-   * DO NOT filter plans based on
-   * shopify_checkout_variant_id.
-   *
-   * A plan can be displayed even when it does not have
-   * a mapped Shopify checkout variant. Checkout always uses
-   * the Shopify cart; missing variants are provisioned later.
-   */
-  const basePlans = [];
-
-  for (const planRow of plans) {
-    const pricing = mapPlanForApi(
-      planRow,
-      pricingType,
-      variantPricing
-    );
-
-    if (!pricing) {
-      continue;
-    }
-
-    /*
-     * PDP does not have a registered product yet.
-     *
-     * Therefore we do not calculate registration-based
-     * activation/expiry dates here.
-     */
-    basePlans.push({
-      planId: planRow.plan_id,
-      planName: planRow.plan_name,
-
-      durationYears:
-        planRow.duration_years,
-
-      durationMonths:
-        planRow.duration_months,
-
-      pricingType:
-        pricing.pricingType,
-
-      /*
-       * For percentage pricing this is the calculated
-       * price based on the selected product variant.
-       */
-      price:
-        pricing.displayPrice ||
-        String(pricing.calculatedPrice),
-
-      percentage:
-        pricing.percentage ?? null,
-
-      calculatedPrice:
-        pricing.calculatedPrice,
-
-      currency:
-        planRow.currency,
-
-      coverageText:
-        planRow.coverage_text ||
-        settings.coverage_text,
-
-      /*
-       * Checkout information.
-       *
-       * Purchase always goes through the Shopify cart.
-       * Missing checkoutVariantId must NOT hide the plan;
-       * the cart-payload endpoint provisions a variant if needed.
-       */
-      checkoutVariantId:
-        planRow.shopify_checkout_variant_id
-          ? String(
-              planRow.shopify_checkout_variant_id
-            )
-          : null,
-
-      checkoutMethod: "cart",
-    });
-  }
-
-  if (!basePlans.length) {
-    return {
-      eligible: false,
-      reason: "no_plans_configured",
-    };
-  }
-
-  const enrichedPlans =
-    sortPlansByDuration(
-      await attachMerchandisingBadges(
-        shopId,
-        basePlans
-      )
-    );
-
-  /*
-   * Resolve Terms & Conditions URL for storefront.
-   */
-  let termsUrl =
-    settings.terms_url || null;
-
-  if (termsUrl && session?.shop) {
-    try {
-      termsUrl = normalizeTermsUrl(
-        settings.terms_url,
-        session.shop
-      );
-    } catch {
-      termsUrl = settings.terms_url;
-    }
-  }
-
-  return {
-    eligible: true,
-
-    currency: shopCurrency,
-
-    pricingType,
-
-    country: country || null,
-
-    plans: enrichedPlans,
-
-    settings: {
-      termsUrl,
-
-      coverageText:
-        settings.coverage_text,
-
-      warrantyPricingType:
-        pricingType,
-    },
-
-    product: {
-      productId: productNumeric,
-
-      variantId:
-        productRef.shopify_variant_id,
-
-      sku:
-        sku || null,
     },
   };
 }

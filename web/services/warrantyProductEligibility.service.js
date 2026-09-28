@@ -41,30 +41,32 @@ const DEFAULT_ELIGIBLE_SLUG_SET = new Set(
  */
 export const DEFAULT_ELIGIBLE_SHOPIFY_TYPE_QUERIES = Object.freeze([
   // Headphones
-  "product_type:audiophile-headphones",
+  "product_type:product-type--audiophile-headphones",
   'product_type:"audiophile headphones"',
   "product_type:headphones",
-  'product_type:"headphones"',
+  'product_type:"Headphones"',
   'product_type:"wired headphones"',
-  "product_type:wired-headphones",
-  'product_type:"wireless headphones"',
-  "product_type:wireless-headphones",
+  "product_type:product-type--wired-headphones",
+  "product_type:product-type--wireless-headphones",
+  "product_type:product-type--headphones",
   'product_type:"ワイヤレスヘッドホン"',
 
   // Soundbars
-  "product_type:soundbar",
+  "product_type:product-type--soundbar",
   'product_type:"sound bar"',
   'product_type:"soundbars & sub"',
   'product_type:"ambeo soundbar"',
+  'product_type:"AMBEO Soundbar"',
 
   // TV listening / hearing
   'product_type:"tv listener"',
   'product_type:"tv hearing"',
-  "product_type:tv-hearing",
+  "product_type:product-type--tv-hearing",
 
   // Other
   "product_type:earplugs",
   'product_type:"bluetooth transmitters"',
+  "product_type:Microphone",
   "product_type:microphone",
 ]);
 
@@ -458,7 +460,7 @@ export async function hasProductOverride(db, shopId, productId) {
  * Inserts or re-enables a shop-scoped product override. Unique (shop, product)
  * prevents duplicates.
  */
-export async function upsertProductOverride(db, shopId, productId, actor = null) {
+export async function upsertProductOverride(db, shopId, productId) {
   const numericId = getNumericIdFromGid(productId);
   if (!numericId) {
     throw new Error("Invalid product ID");
@@ -469,16 +471,13 @@ export async function upsertProductOverride(db, shopId, productId, actor = null)
     INSERT INTO extended_warranty_product_overrides (
       shop_id,
       shopify_product_id,
-      enabled,
-      created_by,
-      updated_by
-    ) VALUES (?, ?, 1, ?, ?)
+      enabled
+    ) VALUES (?, ?, 1)
     ON DUPLICATE KEY UPDATE
       enabled = 1,
-      updated_by = VALUES(updated_by),
       updated_at = CURRENT_TIMESTAMP
     `,
-    [shopId, numericId, actor, actor]
+    [shopId, numericId]
   );
 
   return numericId;

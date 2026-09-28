@@ -150,41 +150,19 @@ async function findWarrantyProduct(admin, storedProductId) {
   return loadProductVariants(admin, existingId);
 }
 
-async function publishToOnlineStore(admin, productGid) {
-  try {
-    const data = await adminRequest(
-      admin,
-      `
-      query Publications {
-        publications(first: 20) {
-          nodes {
-            id
-            name
-          }
-        }
-      }
-      `
-    );
-    const publication = (data?.publications?.nodes || []).find((item) =>
-      /online store/i.test(item.name || "")
-    );
-    if (!publication?.id) return;
-
-    const publishData = await adminRequest(
-      admin,
-      `
-      mutation PublishWarrantyProduct($id: ID!, $input: [PublicationInput!]!) {
-        publishablePublish(id: $id, input: $input) {
-          userErrors { field message }
-        }
-      }
-      `,
-      { id: productGid, input: [{ publicationId: publication.id }] }
-    );
-    assertUserErrors(publishData?.publishablePublish, "publishablePublish");
-  } catch (err) {
-    console.warn("⚠️ Could not publish warranty product to Online Store:", err.message);
-  }
+// Publishing the warranty catalog product to Online Store is a one-time,
+// merchant-side setup step. The app no longer requests read/write_publications
+// (those scopes caused an OAuth/session loop), so if a brand-new warranty
+// product is ever auto-created it must be published to Online Store once from
+// Shopify admin. Existing warranty products stay published (publication is a
+// persistent state), so the storefront cart-add flow keeps working.
+async function publishToOnlineStore(_admin, productGid) {
+  if (!productGid) return;
+  console.log(
+    "ℹ️ Warranty product publish skipped (no publications scope). If this is a new " +
+      "warranty product, publish it to Online Store once in Shopify admin:",
+    productGid
+  );
 }
 
 async function createWarrantyProduct(admin, optionValue) {
@@ -443,12 +421,11 @@ export async function ensurePlanCheckoutVariant({
   await saveCheckoutProductId(shopId, productNumericId);
 
   let variant = variants.find((item) => item.sku === sku);
+  const alreadyReady = Boolean(variant);
   if (!variant && variants.length === 1 && !variants[0].sku) {
     variant = await updateVariant(admin, product.id, variants[0].gid, { price, sku });
   } else if (!variant) {
     variant = await createVariant(admin, product.id, { price, sku, optionValue });
-  } else {
-    variant = await updateVariant(admin, product.id, variant.gid, { price, sku });
   }
 
   if (!isUsableCheckoutVariant(variant.id, parentVariantId)) {
@@ -462,7 +439,11 @@ export async function ensurePlanCheckoutVariant({
     variantNumericId: variant.id,
   });
 
-  await makeWarrantyProductPurchasable(admin, product.id);
+  // Only a newly created service variant needs inventory turned off. Rewriting
+  // an existing variant on every add makes Shopify treat it as sold out.
+  if (!alreadyReady) {
+    await makeWarrantyProductPurchasable(admin, product.id);
+  }
 
   console.log("✅ Provisioned warranty checkout variant", {
     planId,
