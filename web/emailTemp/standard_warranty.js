@@ -5,26 +5,9 @@ import {
   renderDetailsGrid,
   renderCtaBlock,
   emailSection,
-  escapeHtml,
   formatEmailDisplayDate,
 } from "./_layout.js";
-
-function normalizeShopDomain(shopDomain) {
-  return String(shopDomain || "")
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/\/$/, "")
-    .replace(/^www\./i, "")
-    .toLowerCase();
-}
-
-function isJapanStoreDomain(shopDomain) {
-  return normalizeShopDomain(shopDomain) === "jp.sennheiser-hearing.com";
-}
-
-function isIndiaStoreDomain(shopDomain) {
-  return normalizeShopDomain(shopDomain) === "in.sennheiser-hearing.com";
-}
+import { copyText, fillCopy, fillPlain, plainToHtml } from "../services/emailCopyCatalog.js";
 
 function firstName(customerName) {
   return String(customerName || "Customer")
@@ -33,10 +16,8 @@ function firstName(customerName) {
 }
 
 /**
- * English standard-warranty confirmation in the shared card layout.
- *
- * Japan store uses a different heading.
- * India store uses India-specific sign-off/footer behavior.
+ * Standard-warranty confirmation. Static sentences and labels come from the
+ * shop's language copy. Names, serials, dates, and order data stay generated.
  */
 export default function WarrantyRegistrationSuccessTemplate({
   customerName,
@@ -44,12 +25,9 @@ export default function WarrantyRegistrationSuccessTemplate({
   purchaseDate,
   serialNumber,
   productDetailsHtml = "",
-  shopDomain,
-  shopifyShop,
   hasFreeExtendedWarranty = false,
   freeExtendedWarrantySource = null,
   registrationDate,
-  warrantyStartDate,
   orderNumber,
   warrantyExpiry,
   viewWarrantyUrl,
@@ -57,55 +35,43 @@ export default function WarrantyRegistrationSuccessTemplate({
   privacyUrl = "",
   termsUrl = "",
   supportUrl = "",
+  copy = {},
 }) {
-  const isJapanStore =
-    isJapanStoreDomain(shopDomain) ||
-    isJapanStoreDomain(shopifyShop);
-
-  const isIndiaStore =
-    isIndiaStoreDomain(shopDomain) ||
-    isIndiaStoreDomain(shopifyShop);
-
-  const heading = isJapanStore
-    ? "Product Registration Successful!!!"
-    : "Warranty Registration Successful!!!";
-
-  const registeredBadge = isJapanStore
-    ? "Product Registered"
-    : "Standard Warranty Registered";
-
-  const warrantyButtonLabel = isJapanStore
-    ? "View Product Details"
-    : "View my warranty";
-
-  const registrationIntro = isJapanStore
-  ? "Thank you for registering your product with us. We are pleased to confirm that your product is now registered successfully."
-  : "Thank you for registering your product with us. We are pleased to confirm that your product is now registered successfully. Your product is now covered by the standard warranty, and you can view your warranty details below.";
-
+  const heading = copyText(copy, "heading", "Warranty Registration Successful!!!");
   const expiryDisplay = formatEmailDisplayDate(warrantyExpiry);
   const freeWarrantyCopy =
     freeExtendedWarrantySource === "preorder_offer"
-      ? "Your product received a FREE 1-year extended warranty because it was purchased during the preorder offer."
-      : "Your product includes a FREE 1-year extended warranty.";
+      ? copyText(
+          copy,
+          "preorderWarrantyBody",
+          "Your product received a FREE 1-year extended warranty because it was purchased during the preorder offer."
+        )
+      : copyText(copy, "freeWarrantyBody", "Your product includes a FREE 1-year extended warranty.");
 
   const details = renderDetailsGrid([
-    { label: "Order Number", value: orderNumber || "—" },
-    { label: "Registration Date", value: formatEmailDisplayDate(registrationDate) },
-    { label: "Purchase Date", value: formatEmailDisplayDate(purchaseDate) },
-    { label: "Warranty expires", value: expiryDisplay },
+    { label: copyText(copy, "orderNumberLabel", "Order Number"), value: orderNumber || "—" },
+    { label: copyText(copy, "registrationDateLabel", "Registration Date"), value: formatEmailDisplayDate(registrationDate) },
+    { label: copyText(copy, "purchaseDateLabel", "Purchase Date"), value: formatEmailDisplayDate(purchaseDate) },
+    { label: copyText(copy, "warrantyExpiresLabel", "Warranty expires"), value: expiryDisplay },
   ]);
 
+  const purchaseNotice = copyText(copy, "purchaseNotice", "");
   const bodyHtml = [
     renderGreeting({
-      name: firstName(customerName),
-      introHtml: registrationIntro,
+      salutation: fillCopy(copyText(copy, "greeting", "Hi {{name}},"), {
+        name: firstName(customerName),
       }),
+      introHtml: plainToHtml(copyText(copy, "intro", "")),
+    }),
     renderProductCard({
       productTitle,
       serialNumber,
+      serialLabel: copyText(copy, "serialLabel", "Serial number"),
       badges: [
-        { label: registeredBadge },
-        expiryDisplay ? { label: `Expires ${expiryDisplay}`, tone: "warning" } : null,
+        { label: copyText(copy, "registeredBadge", "Standard Warranty Registered") },
+        expiryDisplay
+          ? { label: fillPlain(copyText(copy, "expiresBadge", "Expires {{date}}"), { date: expiryDisplay }), tone: "warning" }
+          : null,
       ].filter(Boolean),
     }),
     emailSection(`
@@ -119,12 +85,15 @@ export default function WarrantyRegistrationSuccessTemplate({
     hasFreeExtendedWarranty
       ? emailSection(`
           <p style="font-size:14px; font-weight:400; line-height:1.5; color:#000000; margin:16px 0 0;">
-            <strong>FREE 1-Year Extended Warranty:</strong> ${escapeHtml(freeWarrantyCopy)}
+            <strong>${plainToHtml(copyText(copy, "freeWarrantyTitle", "FREE 1-Year Extended Warranty:"))}</strong> ${plainToHtml(freeWarrantyCopy)}
           </p>
         `)
       : "",
     viewWarrantyUrl
-      ? renderCtaBlock({ href: viewWarrantyUrl, label: warrantyButtonLabel })
+      ? renderCtaBlock({
+          href: viewWarrantyUrl,
+          label: copyText(copy, "buttonLabel", "View my warranty"),
+        })
       : productDetailsHtml
         ? emailSection(productDetailsHtml)
         : "",
@@ -133,17 +102,22 @@ export default function WarrantyRegistrationSuccessTemplate({
   return renderEmailLayout({
     heading,
     bodyHtml,
-    storeName: isIndiaStore ? "" : "Sennheiser Hearing",
-    signOff: isIndiaStore
-      ? "Best Regards, Sennheiser India Team"
-      : "The Sennheiser Hearing",
+    storeName: copyText(copy, "footerName", "Sennheiser Hearing"),
+    signOff: copyText(copy, "signOff", "The Sennheiser Hearing"),
     storeUrl,
     privacyUrl,
     termsUrl,
     supportUrl,
+    additionalContentHtml: purchaseNotice
+      ? `<p style="font-size:12px; line-height:1.6; color:#000000; margin:0;">${plainToHtml(purchaseNotice)}</p>`
+      : "",
     labels: {
-      continueShopping: "Continue shopping",
+      continueShopping: copyText(copy, "continueShopping", "Continue shopping"),
+      supportMessage: copyText(copy, "supportMessage", ""),
+      supportLink: copyText(copy, "supportLink", "Visit our support centre →"),
+      privacy: copyText(copy, "privacy", "Privacy Policy"),
+      terms: copyText(copy, "terms", "Terms & Conditions"),
+      copyright: copyText(copy, "copyright", "Sonova Consumer Hearing GmbH. All rights reserved."),
     },
-    hideFooterStoreName: isIndiaStore,
   });
 }

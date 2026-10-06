@@ -1,7 +1,7 @@
 import shopify from "../shopify.js";
 import { pool } from "../db/mysql.js";
 import { sendEmailService } from "./email.service.js";
-import { sendShopEmail } from "./emailSettings.service.js";
+import { sendShopEmail, normalizeLocale } from "./emailSettings.service.js";
 import ExtendedWarrantyPurchaseTemplate from "../emailTemp/extended_warranty_purchase.js";
 import {
   renderViewProductDetailsButton,
@@ -861,6 +861,7 @@ export async function activateEntitlementFromPayment({
   customerName,
   shopDisplayName,
   session = null,
+  locale = null,
 }) {
   const settings = await getExtendedWarrantySettings(shopId);
   const conn = await pool.getConnection();
@@ -926,6 +927,7 @@ export async function activateEntitlementFromPayment({
       return existingActive;
     }
 
+    const customerLocale = normalizeLocale(locale) || null;
     const planToUse = plan;
     const resolvedDates = computeExtendedWarrantyDates(registered, planToUse);
     const activationDate = resolvedDates.startDate;
@@ -970,8 +972,9 @@ export async function activateEntitlementFromPayment({
         pricing_type,
         purchase_date,
         activation_date,
-        expiry_date
-      ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?)
+        expiry_date,
+        customer_locale
+      ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?, ?)
       `,
       [
         shopId,
@@ -986,6 +989,7 @@ export async function activateEntitlementFromPayment({
         resolvedPricingType,
         resolvedDates.startDate,
         resolvedDates.endDate,
+        customerLocale,
       ]
     );
 
@@ -1057,8 +1061,9 @@ export async function activateEntitlementFromPayment({
         warrantyNumber: registered.serial_number,
         registrationDate: activationDateText,
         warrantyExpiry: expiryDateText,
+        locale: customerLocale,
       },
-      renderDefault: async ({ urls } = {}) => ({
+      renderDefault: async ({ urls, copy } = {}) => ({
         subject: "Extended Warranty Purchase Confirmation",
         html: ExtendedWarrantyPurchaseTemplate({
           customerName: customerName || registered.customer_name || "Customer",
@@ -1076,6 +1081,7 @@ export async function activateEntitlementFromPayment({
           privacyUrl: urls?.privacyUrl || "",
           termsUrl: urls?.termsUrl || "",
           supportUrl: urls?.supportUrl || "",
+          copy,
         }),
       }),
     });

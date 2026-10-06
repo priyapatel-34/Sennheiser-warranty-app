@@ -7,21 +7,23 @@ import {
   emailSection,
   formatEmailDisplayDate,
 } from "./_layout.js";
+import { copyText, fillCopy, plainToHtml } from "../services/emailCopyCatalog.js";
 
 function firstName(customerName) {
-  return String(customerName || "Customer")
-    .trim()
-    .split(/\s+/)[0];
+  return String(customerName || "Customer").trim().split(/\s+/)[0];
 }
 
-/**
- * Rejected-refund email when a refund request is denied.
- *
- * IMPORTANT:
- * - Shared _layout.js owns Continue Shopping / Additional Content /
- *   Support / Team / Footer.
- * - Do NOT render the Support / Team section here.
- */
+function layoutLabels(copy) {
+  return {
+    continueShopping: copyText(copy, "continueShopping", "Continue shopping"),
+    supportMessage: copyText(copy, "supportMessage", ""),
+    supportLink: copyText(copy, "supportLink", "Visit our support centre →"),
+    privacy: copyText(copy, "privacy", "Privacy Policy"),
+    terms: copyText(copy, "terms", "Terms & Conditions"),
+    copyright: copyText(copy, "copyright", "Sonova Consumer Hearing GmbH. All rights reserved."),
+  };
+}
+
 export default function ExtendedWarrantyRefundRejectedTemplate({
   customerName,
   productTitle,
@@ -32,109 +34,57 @@ export default function ExtendedWarrantyRefundRejectedTemplate({
   privacyUrl,
   termsUrl,
   supportUrl,
-  storeName,
   serialNumber,
   processedDate,
   viewWarrantyUrl,
+  copy = {},
 }) {
   const bodyHtml = [
     renderGreeting({
-      name: firstName(customerName),
-
-      introHtml:
-        "We were unable to approve your extended warranty refund request at this time. Below are the details of our decision.",
+      salutation: fillCopy(copyText(copy, "greeting", "Hi {{name}},"), { name: firstName(customerName) }),
+      introHtml: plainToHtml(copyText(copy, "intro", "")),
     }),
-
     renderProductCard({
       productTitle,
       serialNumber,
-
-      badges: [
-        {
-          label: "Refund Not Approved",
-          tone: "warning",
-        },
-      ],
+      serialLabel: copyText(copy, "serialLabel", "Serial number"),
+      badges: [{ label: copyText(copy, "badge", "Refund Not Approved"), tone: "warning" }],
     }),
-
     emailSection(`
-      <table
-        width="100%"
-        cellspacing="0"
-        cellpadding="0"
-        style="width:100%;"
-      >
+      <table width="100%" cellspacing="0" cellpadding="0" style="width:100%;">
         <tbody>
-          <tr>
-            <td
-              height="24"
-              style="height:24px;"
-            ></td>
-          </tr>
-
-          <tr>
-            <td>
-              ${renderDetailsGrid([
-                {
-                  label: "Plan",
-                  value: planName,
-                },
-                {
-                  label: "Status",
-                  value: "Not approved",
-                },
-                {
-                  label: "Decision date",
-                  value:
-                    formatEmailDisplayDate(
-                      processedDate
-                    ),
-                },
-                {
-                  label: "Reason",
-                  value:
-                    rejectionReason ||
-                    "Not specified",
-                },
-              ])}
-            </td>
-          </tr>
+          <tr><td height="24" style="height:24px;"></td></tr>
+          <tr><td>${renderDetailsGrid([
+            { label: copyText(copy, "planLabel", "Plan"), value: planName },
+            { label: copyText(copy, "statusLabel", "Status"), value: copyText(copy, "statusValue", "Not approved") },
+            { label: copyText(copy, "decisionDateLabel", "Decision date"), value: formatEmailDisplayDate(processedDate) },
+            { label: copyText(copy, "reasonLabel", "Reason"), value: rejectionReason || copyText(copy, "reasonFallback", "Not specified") },
+          ])}</td></tr>
         </tbody>
       </table>
     `),
-
     viewWarrantyUrl
-      ? renderCtaBlock({
-          href: viewWarrantyUrl,
-          label: "View my warranty",
-        })
+      ? renderCtaBlock({ href: viewWarrantyUrl, label: copyText(copy, "buttonLabel", "View my warranty") })
       : productDetailsHtml
         ? emailSection(productDetailsHtml)
         : "",
   ].join("");
 
   return renderEmailLayout({
-    heading: "Extended Warranty Refund Request Update",
-
+    heading: copyText(copy, "heading", "Extended Warranty Refund Request Update"),
     bodyHtml,
-
-    storeName: "Sennheiser Hearing",
-
+    storeName: copyText(copy, "footerName", "Sennheiser Hearing"),
+    signOff: copyText(copy, "signOff", "The Sennheiser Hearing"),
     storeUrl,
     privacyUrl,
     termsUrl,
     supportUrl,
+    labels: layoutLabels(copy),
     hero: {
-      badge: "Refund Update",
-
-      title:
-        "Your refund request was not approved",
-
-      subtitle:
-        "We reviewed your extended warranty refund request and were unable to approve it at this time.",
+      badge: copyText(copy, "heroBadge", "Refund Update"),
+      title: copyText(copy, "heroTitle", "Your refund request was not approved"),
+      subtitle: copyText(copy, "heroSubtitle", ""),
     },
-
-    footerNotice:
-      "This email confirms the outcome of your extended warranty refund request. Please retain it for your records.",
+    footerNotice: plainToHtml(copyText(copy, "footerNotice", "")),
   });
 }

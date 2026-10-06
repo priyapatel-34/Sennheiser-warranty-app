@@ -165,8 +165,9 @@ async function sendReminderForRegistration(row, purchaseWindow) {
       warrantyNumber: row.serial_number,
       warrantyExpiry: eligibilityEndDate,
       storeName,
+      locale: row.customer_locale || null,
     },
-    renderDefault: async ({ urls } = {}) => ({
+    renderDefault: async ({ urls, copy } = {}) => ({
       subject: `Reminder: ${daysRemaining} day${daysRemaining === 1 ? "" : "s"} left to extend your warranty`,
       html: ExtendedWarrantyEligibilityReminderTemplate({
         customerName: row.customer_name,
@@ -186,6 +187,7 @@ async function sendReminderForRegistration(row, purchaseWindow) {
         privacyUrl: urls?.privacyUrl || "",
         termsUrl: urls?.termsUrl || "",
         supportUrl: urls?.supportUrl || "",
+        copy,
       }),
       from: process.env.DEFAULT_FROM_EMAIL,
     }),

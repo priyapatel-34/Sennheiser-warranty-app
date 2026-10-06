@@ -7,6 +7,7 @@ import {
   emailSection,
   formatEmailDisplayDate,
 } from "./_layout.js";
+import { copyText, fillCopy, plainToHtml } from "../services/emailCopyCatalog.js";
 
 function firstName(customerName) {
   return String(customerName || "Customer")
@@ -14,24 +15,25 @@ function firstName(customerName) {
     .split(/\s+/)[0];
 }
 
-/**
- * Extended-warranty purchase confirmation after upsell checkout.
- *
- * IMPORTANT:
- * - Shared _layout.js owns Continue Shopping / Additional Content /
- *   Support / Team / Footer.
- * - Do NOT render the Support / Team section here.
- */
+function layoutLabels(copy) {
+  return {
+    continueShopping: copyText(copy, "continueShopping", "Continue shopping"),
+    supportMessage: copyText(copy, "supportMessage", ""),
+    supportLink: copyText(copy, "supportLink", "Visit our support centre →"),
+    privacy: copyText(copy, "privacy", "Privacy Policy"),
+    terms: copyText(copy, "terms", "Terms & Conditions"),
+    copyright: copyText(copy, "copyright", "Sonova Consumer Hearing GmbH. All rights reserved."),
+  };
+}
+
 export default function ExtendedWarrantyPurchaseTemplate({
   customerName,
   productTitle,
   orderNumber,
   planName,
-  durationMonths,
   price,
   currency,
   serialNumber,
-  activationDate,
   expiryDate,
   productDetailsHtml = "",
   storeUrl,
@@ -39,109 +41,60 @@ export default function ExtendedWarrantyPurchaseTemplate({
   termsUrl,
   supportUrl,
   viewWarrantyUrl,
+  copy = {},
 }) {
-  const amountPaid = [price, currency]
-    .filter(Boolean)
-    .join(" ");
-
+  const amountPaid = [price, currency].filter(Boolean).join(" ");
   const details = renderDetailsGrid([
-    {
-      label: "Order number",
-      value: orderNumber,
-    },
-    {
-      label: "Plan",
-      value: planName,
-    },
-    {
-      label: "Amount paid",
-      value: amountPaid,
-    },
-    {
-      label: "Coverage ends",
-      value: formatEmailDisplayDate(expiryDate),
-    },
+    { label: copyText(copy, "orderNumberLabel", "Order number"), value: orderNumber },
+    { label: copyText(copy, "planLabel", "Plan"), value: planName },
+    { label: copyText(copy, "amountPaidLabel", "Amount paid"), value: amountPaid },
+    { label: copyText(copy, "coverageEndsLabel", "Coverage ends"), value: formatEmailDisplayDate(expiryDate) },
   ]);
 
   const bodyHtml = [
     renderGreeting({
-      name: firstName(customerName),
-
-      introHtml:
-        "Thank you for purchasing extended warranty coverage for your registered product. Your extended warranty has been added to your product.",
+      salutation: fillCopy(copyText(copy, "greeting", "Hi {{name}},"), { name: firstName(customerName) }),
+      introHtml: plainToHtml(copyText(copy, "intro", "")),
     }),
-
     renderProductCard({
       productTitle,
       serialNumber,
-
+      serialLabel: copyText(copy, "serialLabel", "Serial number"),
       badges: [
-        {
-          label: "Extended Warranty Active",
-        },
-
-        planName
-          ? {
-            label: planName,
-          }
-          : null,
+        { label: copyText(copy, "activeBadge", "Extended Warranty Active") },
+        planName ? { label: planName } : null,
       ].filter(Boolean),
     }),
-
     emailSection(`
-      <table
-        width="100%"
-        cellspacing="0"
-        cellpadding="0"
-        style="width:100%;"
-      >
+      <table width="100%" cellspacing="0" cellpadding="0" style="width:100%;">
         <tbody>
-          <tr>
-            <td
-              class="h-24"
-              height="24"
-              style="height:24px;"
-            ></td>
-          </tr>
-
-          <tr>
-            <td>
-              ${details}
-            </td>
-          </tr>
+          <tr><td class="h-24" height="24" style="height:24px;"></td></tr>
+          <tr><td>${details}</td></tr>
         </tbody>
       </table>
     `),
-
     viewWarrantyUrl
-      ? renderCtaBlock({
-        href: viewWarrantyUrl,
-        label: "View Product warranty",
-      })
+      ? renderCtaBlock({ href: viewWarrantyUrl, label: copyText(copy, "buttonLabel", "View Product warranty") })
       : productDetailsHtml
         ? emailSection(productDetailsHtml)
         : "",
   ].join("");
 
   return renderEmailLayout({
-    heading: "Extended Warranty Purchase Confirmation",
-
+    heading: copyText(copy, "heading", "Extended Warranty Purchase Confirmation"),
     bodyHtml,
-
-    storeName: "Sennheiser Hearing",
-
+    storeName: copyText(copy, "footerName", "Sennheiser Hearing"),
+    signOff: copyText(copy, "signOff", "The Sennheiser Hearing"),
     storeUrl,
     privacyUrl,
     termsUrl,
     supportUrl,
+    labels: layoutLabels(copy),
     hero: {
-      badge: "Extended Warranty Active",
-      title: "Your extended warranty is active",
-      subtitle:
-        "Thank you for extending your coverage. Keep this email as your proof of coverage.",
+      badge: copyText(copy, "heroBadge", "Extended Warranty Active"),
+      title: copyText(copy, "heroTitle", "Your extended warranty is active"),
+      subtitle: copyText(copy, "heroSubtitle", ""),
     },
-
-    footerNotice:
-      "This email confirms your extended warranty purchase. Please retain it for your records.",
+    footerNotice: plainToHtml(copyText(copy, "footerNotice", "")),
   });
 }

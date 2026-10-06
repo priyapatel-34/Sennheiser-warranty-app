@@ -13,6 +13,7 @@ import {
 import { syncExtendedWarrantyOrderTags } from "./services/shopifyOrderTags.service.js";
 import { normalizeWarrantyPricingType } from "./services/extendedWarrantyPricing.js";
 import { activatePdpEntitlementsFromOrder, collectPdpWarrantyTargets } from "./services/pdpExtendedWarrantyOrder.service.js";
+import { normalizeLocale } from "./services/emailSettings.service.js";
 
 /**
  * Extracts extended-warranty registration metadata from a Shopify line item.
@@ -29,7 +30,32 @@ function extractEwAttributesFromLineItem(lineItem) {
   return {
     registerId: map._ew_register_id ? Number(map._ew_register_id) : null,
     planId: map._ew_plan_id ? Number(map._ew_plan_id) : null,
+    locale: map._ew_locale || "",
   };
+}
+
+/**
+ * Storefront language stamped on the warranty line at checkout, if present.
+ */
+function purchaseLocaleForRegister(registerId, orderPayload, graphqlLineItems) {
+  for (const item of orderPayload.line_items || []) {
+    const props = {};
+    for (const prop of item.properties || []) {
+      props[prop.name] = prop.value;
+    }
+    const id = props._ew_register_id ? Number(props._ew_register_id) : null;
+    if (id === Number(registerId) && props._ew_locale) return props._ew_locale;
+  }
+
+  for (const edge of graphqlLineItems) {
+    const node = edge.node || edge;
+    const extracted = extractEwAttributesFromLineItem(node);
+    if (extracted.registerId === Number(registerId) && extracted.locale) {
+      return extracted.locale;
+    }
+  }
+
+  return "";
 }
 
 /**
@@ -109,6 +135,7 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
         id
         name
         email
+        customerLocale
         displayFinancialStatus
         customer {
           displayName
@@ -190,6 +217,7 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
         shopId,
         shopifyOrderId: String(orderId),
         customerEmail,
+        orderLocale: normalizeLocale(orderPayload.customer_locale || order.customerLocale),
         pricingType: normalizeWarrantyPricingType(settings?.warranty_pricing_type),
         targets: pdpTargets,
       });
@@ -209,6 +237,12 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
     }
 
     try {
+      const purchaseLocale = normalizeLocale(
+        purchaseLocaleForRegister(registerId, orderPayload, order.lineItems?.edges || []) ||
+          orderPayload.customer_locale ||
+          order.customerLocale
+      );
+
       await activateEntitlementFromPayment({
         shopId,
         registerId,
@@ -219,6 +253,7 @@ async function processExtendedWarrantyOrder(session, orderPayload) {
         customerName,
         shopDisplayName: shopName,
         session,
+        locale: purchaseLocale,
       });
       console.log(
         `[EW Webhook] Extended warranty activated: register=${registerId}, plan=${planId}, order=${orderId}`

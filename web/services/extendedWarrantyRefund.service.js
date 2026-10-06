@@ -137,6 +137,7 @@ async function loadEntitlementWithRegistration(shopId, entitlementId) {
       e.*,
       r.customer_email,
       r.customer_name,
+      r.customer_locale AS registration_customer_locale,
       r.product_name,
       r.serial_number,
       r.sku,
@@ -210,8 +211,12 @@ async function sendRefundCustomerEmail(
             productName: productTitle,
             planName,
             storeName,
+            locale:
+                entitlement.customer_locale ||
+                entitlement.registration_customer_locale ||
+                null,
         },
-        renderDefault: async ({ urls } = {}) => {
+        renderDefault: async ({ urls, copy } = {}) => {
             const linkUrls = {
                 storeUrl: urls?.storeUrl || "",
                 privacyUrl: urls?.privacyUrl || "",
@@ -231,6 +236,7 @@ async function sendRefundCustomerEmail(
                           serialNumber: record.serial_number || entitlement.serial_number,
                           processedDate: record.approved_at,
                           ...linkUrls,
+                          copy,
                       })
                     : RefundRejectedTemplate({
                           customerName,
@@ -242,6 +248,7 @@ async function sendRefundCustomerEmail(
                           serialNumber: record.serial_number || entitlement.serial_number,
                           processedDate: record.rejected_at,
                           ...linkUrls,
+                          copy,
                       });
             return {
                 subject,

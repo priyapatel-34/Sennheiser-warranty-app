@@ -136,6 +136,10 @@
             body: JSON.stringify({
                 register_id: registerId,
                 plan_id: planId,
+                locale:
+                    typeof window.getCurrentStorefrontLocale === "function"
+                        ? window.getCurrentStorefrontLocale()
+                        : "",
                 customer_email: customerEmail,
                 customer_name: customerName,
             }),

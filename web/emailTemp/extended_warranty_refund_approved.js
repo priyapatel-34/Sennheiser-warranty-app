@@ -7,28 +7,29 @@ import {
   emailSection,
   formatEmailDisplayDate,
 } from "./_layout.js";
+import { copyText, fillCopy, plainToHtml } from "../services/emailCopyCatalog.js";
 
 function firstName(customerName) {
-  return String(customerName || "Customer")
-    .trim()
-    .split(/\s+/)[0];
+  return String(customerName || "Customer").trim().split(/\s+/)[0];
 }
 
-/**
- * Approved-refund email after a refund request is accepted.
- *
- * IMPORTANT:
- * - Shared _layout.js owns Continue Shopping / Additional Content /
- *   Support / Team / Footer.
- * - Do NOT render the Support / Team section here.
- */
+function layoutLabels(copy) {
+  return {
+    continueShopping: copyText(copy, "continueShopping", "Continue shopping"),
+    supportMessage: copyText(copy, "supportMessage", ""),
+    supportLink: copyText(copy, "supportLink", "Visit our support centre →"),
+    privacy: copyText(copy, "privacy", "Privacy Policy"),
+    terms: copyText(copy, "terms", "Terms & Conditions"),
+    copyright: copyText(copy, "copyright", "Sonova Consumer Hearing GmbH. All rights reserved."),
+  };
+}
+
 export default function ExtendedWarrantyRefundApprovedTemplate({
   customerName,
   productTitle,
   planName,
   refundAmount,
   currency,
-  storeName,
   productDetailsHtml = "",
   storeUrl,
   privacyUrl,
@@ -37,107 +38,55 @@ export default function ExtendedWarrantyRefundApprovedTemplate({
   serialNumber,
   processedDate,
   viewWarrantyUrl,
+  copy = {},
 }) {
-  const amountDisplay =
-    String(refundAmount || "").trim() ||
-    [refundAmount, currency]
-      .filter(Boolean)
-      .join(" ");
-
+  const amountDisplay = String(refundAmount || "").trim() || [refundAmount, currency].filter(Boolean).join(" ");
   const bodyHtml = [
     renderGreeting({
-      name: firstName(customerName),
-
-      introHtml:
-        "Your extended warranty refund request has been approved. Here are the details.",
+      salutation: fillCopy(copyText(copy, "greeting", "Hi {{name}},"), { name: firstName(customerName) }),
+      introHtml: plainToHtml(copyText(copy, "intro", "")),
     }),
-
     renderProductCard({
       productTitle,
       serialNumber,
-
-      badges: [
-        {
-          label: "Refund Approved",
-        },
-      ],
+      serialLabel: copyText(copy, "serialLabel", "Serial number"),
+      badges: [{ label: copyText(copy, "badge", "Refund Approved") }],
     }),
-
     emailSection(`
-      <table
-        width="100%"
-        cellspacing="0"
-        cellpadding="0"
-        style="width:100%;"
-      >
+      <table width="100%" cellspacing="0" cellpadding="0" style="width:100%;">
         <tbody>
-          <tr>
-            <td
-              height="24"
-              style="height:24px;"
-            ></td>
-          </tr>
-
-          <tr>
-            <td>
-              ${renderDetailsGrid([
-                {
-                  label: "Plan",
-                  value: planName,
-                },
-                {
-                  label: "Refund amount",
-                  value: amountDisplay,
-                },
-                {
-                  label: "Status",
-                  value: "Approved",
-                },
-                {
-                  label: "Processed date",
-                  value:
-                    formatEmailDisplayDate(
-                      processedDate
-                    ),
-                },
-              ])}
-            </td>
-          </tr>
+          <tr><td height="24" style="height:24px;"></td></tr>
+          <tr><td>${renderDetailsGrid([
+            { label: copyText(copy, "planLabel", "Plan"), value: planName },
+            { label: copyText(copy, "refundAmountLabel", "Refund amount"), value: amountDisplay },
+            { label: copyText(copy, "statusLabel", "Status"), value: copyText(copy, "statusValue", "Approved") },
+            { label: copyText(copy, "processedDateLabel", "Processed date"), value: formatEmailDisplayDate(processedDate) },
+          ])}</td></tr>
         </tbody>
       </table>
     `),
-
     viewWarrantyUrl
-      ? renderCtaBlock({
-          href: viewWarrantyUrl,
-          label: "View my warranty",
-        })
+      ? renderCtaBlock({ href: viewWarrantyUrl, label: copyText(copy, "buttonLabel", "View my warranty") })
       : productDetailsHtml
         ? emailSection(productDetailsHtml)
         : "",
   ].join("");
 
   return renderEmailLayout({
-    heading: "Extended Warranty Refund Approved",
-
+    heading: copyText(copy, "heading", "Extended Warranty Refund Approved"),
     bodyHtml,
-
-    storeName: "Sennheiser Hearing",
-
+    storeName: copyText(copy, "footerName", "Sennheiser Hearing"),
+    signOff: copyText(copy, "signOff", "The Sennheiser Hearing"),
     storeUrl,
     privacyUrl,
     termsUrl,
     supportUrl,
+    labels: layoutLabels(copy),
     hero: {
-      badge: "Refund Approved",
-
-      title: "Your refund has been approved",
-
-      subtitle:
-        "We have processed your extended warranty refund request. Keep this email as your confirmation.",
+      badge: copyText(copy, "heroBadge", "Refund Approved"),
+      title: copyText(copy, "heroTitle", "Your refund has been approved"),
+      subtitle: copyText(copy, "heroSubtitle", ""),
     },
-
-    footerNotice:
-      "This email confirms your extended warranty refund approval. Please retain it for your records.",
+    footerNotice: plainToHtml(copyText(copy, "footerNotice", "")),
   });
 }

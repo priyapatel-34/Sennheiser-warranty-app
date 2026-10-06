@@ -64,7 +64,7 @@ export async function previewEmailSettings(req, res) {
     const session = res.locals.shopify?.session;
     if (!session?.shop) return res.status(401).json({ error: "Unauthorized" });
 
-    const { templateKey, subject, bodyHtml, urls } = req.body || {};
+    const { templateKey, subject, bodyHtml, urls, languageCode, strings } = req.body || {};
     if (!templateKey) {
       return res.status(400).json({ error: "templateKey is required" });
     }
@@ -78,7 +78,9 @@ export async function previewEmailSettings(req, res) {
       sampleData: {
         shopDomain: session.shop,
         shopifyShop: session.shop,
-        locale: "en",
+        locale: languageCode || "en",
+        languageCode: languageCode || "en",
+        strings: strings && typeof strings === "object" ? strings : {},
         ...(settings?.urls || {}),
         ...(urls && typeof urls === "object" ? urls : {}),
       },

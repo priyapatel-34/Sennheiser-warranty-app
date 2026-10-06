@@ -161,7 +161,7 @@ export function parseCoverageBenefitLines(text) {
 /**
  * "What extended coverage includes" list. Hidden when there are no benefits.
  */
-export function renderCoverageListSection(benefits) {
+export function renderCoverageListSection(benefits, title = "What extended coverage includes") {
   const lines = Array.isArray(benefits)
     ? benefits.map((line) => String(line || "").trim()).filter(Boolean)
     : parseCoverageBenefitLines(benefits);
@@ -192,7 +192,7 @@ export function renderCoverageListSection(benefits) {
         <tr><td class="h-24" height="44" style="height:44px;"></td></tr>
         <tr>
           <td style="font-size:18px; font-weight:700; color:#037CC2; line-height:1.1;">
-            What extended coverage includes
+            ${escapeHtml(title)}
           </td>
         </tr>
         <tr><td height="10" style="height:10px;"></td></tr>
@@ -207,6 +207,7 @@ export function renderProductCard({
   productTitle,
   serialNumber,
   badges = [],
+  serialLabel = "Serial number",
 }) {
   const badgeHtml = (badges || [])
     .filter((badge) => badge?.label)
@@ -241,7 +242,7 @@ export function renderProductCard({
                 <tr><td height="4" style="height:4px;"></td></tr>
                 <tr>
                   <td style="font-size:12px; font-weight:400; line-height:1.2; color:#000000;">
-                    Serial number : ${escapeHtml(serialNumber)}
+                    ${escapeHtml(serialLabel)} : ${escapeHtml(serialNumber)}
                   </td>
                 </tr>`
                     : ""
@@ -335,7 +336,7 @@ function planPriceLabel(plan) {
   return [plan.price, plan.currency].filter(Boolean).join(" ") || "—";
 }
 
-function renderPlanCard(plan, featured) {
+function renderPlanCard(plan, featured, coveragePrefix = "Coverage") {
   const title =
     plan.planName ||
     plan.title ||
@@ -343,7 +344,7 @@ function renderPlanCard(plan, featured) {
   const start = formatEmailDisplayDate(plan.startDate || plan.extendedWarrantyStartDate);
   const end = formatEmailDisplayDate(plan.endDate || plan.extendedWarrantyEndDate);
   const coverage =
-    start && end ? `Coverage: ${start} \u2013 ${end}` : start || end || "";
+    start && end ? `${coveragePrefix}: ${start} \u2013 ${end}` : start || end || "";
   const badgeLabel = plan.badgeLabel || "";
 
   const inner = `
@@ -419,6 +420,8 @@ export function renderExtendedCoveragePlans({
   plans = [],
   ctaHref = "",
   ctaLabel = "Extend my warranty",
+  title = "Choose your Extended Coverage",
+  coveragePrefix = "Coverage",
 }) {
   if (!plans.length) return "";
 
@@ -427,7 +430,7 @@ export function renderExtendedCoveragePlans({
       const featured = isFeaturedPlan(plan);
       return `
         <tr>
-          <td>${renderPlanCard(plan, featured)}</td>
+          <td>${renderPlanCard(plan, featured, coveragePrefix)}</td>
         </tr>
         <tr><td height="10" style="height:10px;"></td></tr>
       `;
@@ -449,7 +452,7 @@ export function renderExtendedCoveragePlans({
         <tr><td class="h-24" height="44" style="height:44px;"></td></tr>
         <tr>
           <td style="font-size:18px; font-weight:700; color:#037CC2; line-height:1.1;">
-            Choose your Extended Coverage
+            ${escapeHtml(title)}
           </td>
         </tr>
         <tr><td height="10" style="height:10px;"></td></tr>
@@ -954,7 +957,7 @@ export function renderEmailLayout({
                           <tr><td height="20" style="height:20px;"></td></tr>
                           <tr>
                             <td style="font-size:10px; font-weight:400; color:#ffffff; line-height:2;">
-                              &#169; ${new Date().getFullYear()} Sonova Consumer Hearing GmbH. ${escapeHtml(labels.rights || "All rights reserved.")}
+                              &#169; ${new Date().getFullYear()} ${escapeHtml(labels.copyright || "Sonova Consumer Hearing GmbH. All rights reserved.")}
                             </td>
                           </tr>
                           <tr><td height="24" style="height:24px;"></td></tr>

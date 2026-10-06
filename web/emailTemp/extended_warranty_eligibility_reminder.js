@@ -10,6 +10,7 @@ import {
   emailButton,
   safeHref,
 } from "./_layout.js";
+import { copyText, fillCopy, fillPlain, plainToHtml } from "../services/emailCopyCatalog.js";
 
 function firstName(customerName) {
   return String(customerName || "Customer")
@@ -43,8 +44,11 @@ export default function ExtendedWarrantyEligibilityReminderTemplate({
   offerExpiryDate,
   plans = [],
   coverageBenefits = "",
+  copy = {},
 }) {
-  const dayLabel = daysRemaining === 1 ? "day" : "days";
+  const dayLabel = daysRemaining === 1
+    ? copyText(copy, "daySingular", "Day")
+    : copyText(copy, "dayPlural", "Days");
 
   const offerDate = formatEmailDisplayDate(
     offerExpiryDate || eligibilityEndDate
@@ -56,18 +60,17 @@ export default function ExtendedWarrantyEligibilityReminderTemplate({
 
   const termsHref = String(termsUrl || "").trim();
 
-  const intro = `When you registered your product, you chose to skip extended warranty coverage. That is completely fine &#8212; but your offer window is still open, and we wanted to make sure you had a chance to reconsider before it closes${
-    offerDate
-      ? ` on <strong>${escapeHtml(offerDate)}</strong>`
-      : ""
-  }.`;
+  const intro = offerDate
+    ? plainToHtml(fillPlain(copyText(copy, "introWithDate", ""), { date: offerDate }))
+    : plainToHtml(copyText(copy, "intro", ""));
 
   const expiryPill =
     Number.isFinite(Number(daysRemaining)) &&
     Number(daysRemaining) > 0
-      ? `Extension Offer Expires in ${daysRemaining} ${
-          dayLabel === "day" ? "Day" : "Days"
-        }`
+      ? fillPlain(copyText(copy, "expiryPill", "Extension Offer Expires in {{days}} {{dayLabel}}"), {
+          days: daysRemaining,
+          dayLabel,
+        })
       : "";
 
   const offerBox = offerDate
@@ -99,11 +102,9 @@ export default function ExtendedWarrantyEligibilityReminderTemplate({
                         style="font-size:12px; color:#000000; line-height:1.67; font-weight:400;"
                       >
                         <strong style="font-weight:700;">
-                          This offer closes on ${escapeHtml(offerDate)}.
+                          ${escapeHtml(fillPlain(copyText(copy, "offerCloses", "This offer closes on {{date}}."), { date: offerDate }))}
                         </strong>
-
-                        After this date, extended warranty will no longer be
-                        available for this product.
+                        ${escapeHtml(copyText(copy, "offerClosedAfter", "After this date, extended warranty will no longer be available for this product."))}
 
                         ${
                           termsHref
@@ -111,10 +112,10 @@ export default function ExtendedWarrantyEligibilityReminderTemplate({
                               <a
                                 class="custom-link"
                                 href="${escapeHtml(termsHref)}"
-                                title="Terms &amp; conditions apply"
+                                title="${escapeHtml(copyText(copy, "termsApply", "Terms & conditions apply."))}"
                                 style="color:#037CC2; text-decoration:underline; font-weight:500;"
                               >
-                                Terms &amp; conditions apply.
+                                ${escapeHtml(copyText(copy, "termsApply", "Terms & conditions apply."))}
                               </a>
                             `
                             : ""
@@ -138,21 +139,24 @@ export default function ExtendedWarrantyEligibilityReminderTemplate({
 
   const bodyHtml = [
     renderGreeting({
-      name: firstName(customerName),
+      salutation: fillCopy(copyText(copy, "greeting", "Hi {{name}},"), {
+        name: firstName(customerName),
+      }),
       introHtml: intro,
     }),
 
     renderProductCard({
       productTitle,
       serialNumber,
+      serialLabel: copyText(copy, "serialLabel", "Serial number"),
       badges: [
         {
-          label: "Standard Warranty Active",
+          label: copyText(copy, "activeBadge", "Standard Warranty Active"),
         },
 
         warrantyUntil
           ? {
-              label: `Expires ${warrantyUntil}`,
+              label: fillPlain(copyText(copy, "expiresBadge", "Expires {{date}}"), { date: warrantyUntil }),
               tone: "warning",
             }
           : null,
@@ -162,7 +166,9 @@ export default function ExtendedWarrantyEligibilityReminderTemplate({
     renderExtendedCoveragePlans({
       plans,
       ctaHref: extendWarrantyUrl,
-      ctaLabel: "Extend my warranty",
+      ctaLabel: copyText(copy, "extendButton", "Extend my warranty"),
+      title: copyText(copy, "plansTitle", "Choose your Extended Coverage"),
+      coveragePrefix: copyText(copy, "coveragePrefix", "Coverage"),
     }),
 
     !plans.length && extendWarrantyUrl
@@ -182,7 +188,7 @@ export default function ExtendedWarrantyEligibilityReminderTemplate({
                 <td align="center" style="text-align:center;">
                   ${emailButton({
                     href: extendWarrantyUrl,
-                    label: "Extend my warranty",
+                    label: copyText(copy, "extendButton", "Extend my warranty"),
                   })}
                 </td>
               </tr>
@@ -199,48 +205,43 @@ export default function ExtendedWarrantyEligibilityReminderTemplate({
       ? emailSection(productDetailsHtml)
       : "",
 
-    renderCoverageListSection(coverageBenefits),
+    renderCoverageListSection(coverageBenefits, copyText(copy, "coverageTitle", "What extended coverage includes")),
 
     offerBox,
   ].join("");
 
   const subtitle = warrantyUntil
-    ? `Your standard warranty covers you until ${warrantyUntil}.<br />Extended coverage picks up exactly where it ends — no gap, no overlap.`
-    : "Extended coverage picks up exactly where your standard warranty ends — no gap, no overlap.";
+    ? plainToHtml(fillPlain(copyText(copy, "heroSubtitleWithDate", ""), { date: warrantyUntil }))
+    : plainToHtml(copyText(copy, "heroSubtitle", ""));
 
   return renderEmailLayout({
-    heading: "Extended Warranty Offer Ending Soon",
-
+    heading: copyText(copy, "heading", "Extended Warranty Offer Ending Soon"),
     bodyHtml,
-
-    storeName: "Sennheiser Hearing",
-
+    storeName: copyText(copy, "footerName", "Sennheiser Hearing"),
+    signOff: copyText(copy, "signOff", "The Sennheiser Hearing"),
     storeUrl,
     privacyUrl,
     termsUrl,
     supportUrl,
+    labels: {
+      continueShopping: copyText(copy, "continueShopping", "Continue shopping"),
+      supportMessage: copyText(copy, "supportMessage", ""),
+      supportLink: copyText(copy, "supportLink", "Visit our support centre →"),
+      privacy: copyText(copy, "privacy", "Privacy Policy"),
+      terms: copyText(copy, "terms", "Terms & Conditions"),
+      copyright: copyText(copy, "copyright", "Sonova Consumer Hearing GmbH. All rights reserved."),
+    },
     hero: {
       badge:
         Number(daysRemaining) <= 7
-          ? "Last chance"
-          : "Your offer is waiting",
-
-      title: `Protect your ${
-        productTitle || "product"
-      } beyond your standard warranty`,
-
+          ? copyText(copy, "heroBadgeSoon", "Last chance")
+          : copyText(copy, "heroBadgeWaiting", "Your offer is waiting"),
+      title: fillPlain(copyText(copy, "heroTitle", "Protect your {{product}} beyond your standard warranty"), {
+        product: productTitle || "product",
+      }),
       subtitleHtml: subtitle,
-
       expiry: expiryPill,
     },
-
-    footerNotice:
-      `You are receiving this email because you registered a Sennheiser product and have an active extended warranty offer.${
-        offerDate
-          ? `<br />This offer expires on ${escapeHtml(
-              offerDate
-            )} and will not be extended.`
-          : ""
-      }`,
+    footerNotice: plainToHtml(copyText(copy, "footerNotice", "")),
   });
 }

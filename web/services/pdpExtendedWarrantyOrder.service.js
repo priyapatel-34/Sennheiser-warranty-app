@@ -1,4 +1,5 @@
 import { pool } from "../db/mysql.js";
+import { normalizeLocale } from "./emailSettings.service.js";
 import { computeExtendedWarrantyDates } from "./extendedWarranty.service.js";
 import {
   attributesFromLineItem,
@@ -99,6 +100,7 @@ export function collectPdpWarrantyTargets(orderPayload = {}, graphqlLineItems = 
       variantId: lineVariantId(parent) || numericShopifyId(attrs._ew_variant_id),
       price: line.price,
       currency: line.currency,
+      locale: attrs._ew_locale || "",
       title: parent?.title || attrs._ew_product_id || "Product",
     });
   }
@@ -125,6 +127,7 @@ export async function activatePdpEntitlementsFromOrder({
   customerEmail,
   pricingType,
   targets,
+  orderLocale = null,
 }) {
   if (!shopId || !shopifyOrderId || !targets?.length) return [];
 
@@ -186,6 +189,7 @@ export async function activatePdpEntitlementsFromOrder({
           shopify_product_id,
           shopify_variant_id,
           customer_email,
+          customer_locale,
           source,
           status,
           plan_name,
@@ -197,7 +201,7 @@ export async function activatePdpEntitlementsFromOrder({
           purchase_date,
           activation_date,
           expiry_date
-        ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 'pdp', 'active', ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?)
+        ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, 'pdp', 'active', ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?)
         `,
         [
           shopId,
@@ -207,6 +211,7 @@ export async function activatePdpEntitlementsFromOrder({
           target.productId ? String(target.productId) : null,
           target.variantId ? String(target.variantId) : null,
           customerEmail ? String(customerEmail).trim().toLowerCase() : null,
+          normalizeLocale(target.locale || orderLocale) || null,
           plan.plan_name,
           plan.duration_years,
           plan.duration_months,

@@ -1,6 +1,6 @@
 import shopify from "../shopify.js";
 import { pool } from "../db/mysql.js";
-import { sendShopEmail, getWarrantyEmailTemplate, normalizeLocale, isJapanStoreDomain } from "../services/emailSettings.service.js";
+import { sendShopEmail, getWarrantyEmailTemplate, normalizeLocale } from "../services/emailSettings.service.js";
 import { renderViewProductDetailsButton, resolveCustomerFacingShopDomain, formatEmailDate } from "../services/emailLink.service.js";
 import {
   getEntitlementsForRegistrations,
@@ -3198,6 +3198,7 @@ export async function registerProducts(req, res) {
     const customerId = resolvedCustomer.customerId;
     let customerEmail = resolvedCustomer.customerEmail;
     const customerName = resolvedCustomer.customerName;
+    const customerLocale = normalizeLocale(req.body?.locale || req.query?.locale) || null;
 
     if (flow === "external" && customer?.email) {
       customerEmail = normalizeEmail(customer.email);
@@ -3441,6 +3442,7 @@ export async function registerProducts(req, res) {
             customer_id,
             customer_email,
             customer_name,
+            customer_locale,
             purchase_type,
             shopify_order_id,
             shopify_line_item_id,
@@ -3462,13 +3464,14 @@ export async function registerProducts(req, res) {
             consent_marketing,
             extended_warranty_offer_enabled_at_registration
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
           [
             shopId,
             customerId,
             normalizeEmail(customerEmail),
             customerName,
+            customerLocale,
             flow,
             p.shopify_order_id || null,
             shopifyLineItemId,
@@ -3549,13 +3552,7 @@ export async function registerProducts(req, res) {
         firstProduct.registerId
       );
 
-      const language = normalizeLocale(req.body?.locale || req.query?.locale);
-      const japanStore =
-        isJapanStoreDomain(customerFacingDomain) ||
-        isJapanStoreDomain(session.shop);
-      const standardEmailLocale = japanStore && language === "ja" ? "ja" : "en";
-
-      const renderer = getWarrantyEmailTemplate("standard_warranty", standardEmailLocale);
+      const renderer = getWarrantyEmailTemplate("standard_warranty");
 
       const emailResult = await sendShopEmail({
         shopId,
@@ -3576,9 +3573,9 @@ export async function registerProducts(req, res) {
           shopDomain: customerFacingDomain,
           shopifyShop: session.shop,
           registerId: firstProduct.registerId,
-          locale: language,
+          locale: customerLocale,
         },
-        renderDefault: async ({ urls } = {}) =>
+        renderDefault: async ({ urls, copy } = {}) =>
           renderer({
             shopDomain: customerFacingDomain,
             registerId: firstProduct.registerId,
@@ -3595,7 +3592,7 @@ export async function registerProducts(req, res) {
             serialNumber: firstProduct.serialNumber,
             productDetailsHtml,
             shopifyShop: session.shop,
-            locale: language,
+            locale: customerLocale,
             registrationDate: firstProduct.warrantyStart.toISOString().split("T")[0],
             warrantyStartDate: firstProduct.warrantyStart.toISOString().split("T")[0],
             warrantyExpiry: firstProduct.warrantyEnd.toISOString().split("T")[0],
@@ -3603,6 +3600,7 @@ export async function registerProducts(req, res) {
             privacyUrl: urls?.privacyUrl || "",
             termsUrl: urls?.termsUrl || "",
             supportUrl: urls?.supportUrl || "",
+            copy,
           }),
       });
 

@@ -3082,6 +3082,21 @@
         _ew_type: "extended_warranty",
         _ew_source: context.source || "pdp",
         _ew_plan_id: String(plan.planId),
+        _ew_locale: (function storefrontLocale() {
+          if (typeof window.getCurrentStorefrontLocale === "function") {
+            return window.getCurrentStorefrontLocale();
+          }
+          const raw =
+            (window.Weglot &&
+            typeof window.Weglot.getCurrentLang === "function"
+              ? window.Weglot.getCurrentLang()
+              : "") ||
+            window.Shopify?.locale ||
+            document.documentElement?.lang ||
+            "";
+          const code = String(raw).trim().split("-")[0].toLowerCase();
+          return /^[a-z]{2,3}$/.test(code) ? code : "";
+        })(),
         _ew_plan_name: String(plan.planName || payload.planName || ""),
         _ew_product_id: String(context.productId),
         _ew_variant_id: String(parentVariantId),

@@ -9,20 +9,24 @@ import {
     getNumericIdFromGid,
     canPurchaseExtendedWarranty,
 } from "../services/extendedWarranty.service.js";
+import { normalizeLocale } from "../services/emailSettings.service.js";
 import {
     isIndiaShop,
     loadProductPreorderMap,
     shouldSuppressPaidExtendedWarranty,
 } from "../services/indiaFreeExtendedWarranty.service.js";
 
-function checkoutLineItemProperties(registered, registerId, planId) {
-    return {
+function checkoutLineItemProperties(registered, registerId, planId, locale) {
+    const properties = {
         _ew_type: "extended_warranty",
         _ew_register_id: String(registerId),
         _ew_plan_id: String(planId),
         _ew_serial: registered.serial_number || "",
         _parent_product_id: String(registered.shopify_product_id || ""),
     };
+    const language = normalizeLocale(locale);
+    if (language) properties._ew_locale = language;
+    return properties;
 }
 
 function buildCartAddCheckoutUrl(shop, variantId, properties) {
@@ -165,7 +169,12 @@ export async function initiateExtendedWarrantyCheckout(req, res) {
             });
         }
 
-        const properties = checkoutLineItemProperties(registered, registerId, planId);
+        const properties = checkoutLineItemProperties(
+            registered,
+            registerId,
+            planId,
+            req.body?.locale
+        );
 
         return res.json({
             success: true,
@@ -229,7 +238,12 @@ export async function getCartCheckoutPayload(req, res) {
             success: true,
             method: "cart",
             variantId,
-            properties: checkoutLineItemProperties(registered, registerId, planId),
+            properties: checkoutLineItemProperties(
+                registered,
+                registerId,
+                planId,
+                req.body?.locale
+            ),
         });
     } catch (err) {
         console.error("❌ getCartCheckoutPayload error:", err);

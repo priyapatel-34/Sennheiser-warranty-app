@@ -1,4 +1,20 @@
 import { pool } from "../db/mysql.js";
+import {
+  EMAIL_LANGUAGE_OPTIONS,
+  EMAIL_COPY_FIELDS,
+  normalizeLocale,
+  emailLanguageLabel,
+  resolveEmailCopy,
+  getDefaultCopy,
+} from "./emailCopyCatalog.js";
+
+export {
+  EMAIL_LANGUAGE_OPTIONS,
+  normalizeLocale,
+  emailLanguageLabel,
+  resolveEmailCopy,
+  getDefaultCopy,
+};
 import { ADMIN_EMAIL_EXTRA_MARKER, renderEmailLayout } from "../emailTemp/_layout.js";
 import { sendEmailService } from "./email.service.js";
 import {
@@ -7,7 +23,6 @@ import {
   buildProductDetailsUrl,
 } from "./emailLink.service.js";
 import WarrantyRegistrationSuccessTemplate from "../emailTemp/standard_warranty.js";
-import WarrantyRegistrationSuccessTemplateJA from "../emailTemp/standard_warranty_ja.js";
 import ExtendedWarrantyPurchaseTemplate from "../emailTemp/extended_warranty_purchase.js";
 import ExtendedWarrantyEligibilityReminderTemplate from "../emailTemp/extended_warranty_eligibility_reminder.js";
 import ExtendedWarrantyRefundApprovedTemplate from "../emailTemp/extended_warranty_refund_approved.js";
@@ -75,6 +90,7 @@ function renderBuiltInEmailHtml(templateKey, sampleData = {}) {
   switch (templateKey) {
     case "standard_warranty":
       return WarrantyRegistrationSuccessTemplate({
+        copy: data.copy,
         customerName: data.customerName,
         productTitle: data.productName,
         orderNumber: data.orderNumber,
@@ -94,6 +110,7 @@ function renderBuiltInEmailHtml(templateKey, sampleData = {}) {
       });
     case "extended_warranty_purchase":
       return ExtendedWarrantyPurchaseTemplate({
+        copy: data.copy,
         customerName: data.customerName,
         productTitle: data.productName,
         orderNumber: data.orderNumber,
@@ -110,6 +127,7 @@ function renderBuiltInEmailHtml(templateKey, sampleData = {}) {
       });
     case "extended_warranty_reminder":
       return ExtendedWarrantyEligibilityReminderTemplate({
+        copy: data.copy,
         customerName: data.customerName,
         productTitle: data.productName,
         serialNumber: data.serialNumber || data.warrantyNumber,
@@ -125,6 +143,7 @@ function renderBuiltInEmailHtml(templateKey, sampleData = {}) {
       });
     case "extended_warranty_refund_approved":
       return ExtendedWarrantyRefundApprovedTemplate({
+        copy: data.copy,
         customerName: data.customerName,
         productTitle: data.productName,
         planName: data.planName,
@@ -138,6 +157,7 @@ function renderBuiltInEmailHtml(templateKey, sampleData = {}) {
       });
     case "extended_warranty_refund_rejected":
       return ExtendedWarrantyRefundRejectedTemplate({
+        copy: data.copy,
         customerName: data.customerName,
         productTitle: data.productName,
         planName: data.planName,
@@ -281,72 +301,44 @@ export const EMAIL_TEMPLATE_DEFINITIONS = {
   },
 };
 
-/**
- * Normalizes and validates a locale string, returning a supported base code.
- * Supported: 'en', 'ja'. Falls back to 'en'.
- */
-export function normalizeLocale(locale) {
-  const raw = String(locale || "").trim().toLowerCase().replace(/_/g, "-");
-  if (!raw) return "en";
-  if (raw.startsWith("ja")) return "ja";
-  if (raw.startsWith("en")) return "en";
-  return "en";
-}
+const EMAIL_LANGUAGE_CODES = new Set(EMAIL_LANGUAGE_OPTIONS.map((option) => option.code));
 
-const JAPAN_STORE_HOST = "jp.sennheiser-hearing.com";
-
-/**
- * True only for the Japan storefront. Accepts a bare host or a full URL,
- * with or without www, so the standard-email branch does not miss the shop.
- */
-export function isJapanStoreDomain(shopDomain) {
-  const host = String(shopDomain || "")
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .split("/")[0]
-    .replace(/:\d+$/, "")
-    .replace(/^www\./, "");
-  return host === JAPAN_STORE_HOST;
+function parseStrings(value) {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 /**
- * Returns a renderer function for a built-in templateKey and locale. The
- * renderer returns an object { subject, html } when called with template data.
+ * Picks the store language for an email. Uses the customer's language when
+ * that store has it configured, otherwise the store's default language.
  */
-export function getWarrantyEmailTemplate(templateKey, locale) {
-  const lang = normalizeLocale(locale);
+export function resolveConfiguredLanguage(languages, requestedLocale) {
+  const configured = Array.isArray(languages) ? languages : [];
+  const requested = normalizeLocale(requestedLocale);
+  if (requested && configured.some((language) => language.code === requested)) {
+    return requested;
+  }
+  const fallback = configured.find((language) => language.isDefault) || configured[0];
+  return fallback?.code || "en";
+}
 
+/**
+ * Returns the shared layout renderer for a template. Language-specific subject
+ * and extra content are applied later from the store's saved settings.
+ */
+export function getWarrantyEmailTemplate(templateKey) {
   switch (templateKey) {
     case "standard_warranty":
-      if (lang === "ja") {
-        return (data = {}) => ({
-          subject: "製品登録が完了しました",
-          html: WarrantyRegistrationSuccessTemplateJA({
-            customerName: data.customerName,
-            productTitle: data.productTitle || data.productName,
-            orderNumber: data.orderNumber,
-            purchaseDate: data.purchaseDate,
-            warrantyPeriod: data.warrantyPeriod || data.warrantyDuration,
-            serialNumber: data.serialNumber,
-            shopDomain: data.shopDomain,
-            registerId: data.registerId,
-            registrationDate: data.registrationDate,
-            warrantyStartDate: data.warrantyStartDate,
-            warrantyExpiry: data.warrantyExpiry,
-            viewWarrantyUrl: data.viewWarrantyUrl,
-            storeUrl: data.storeUrl,
-            privacyUrl: data.privacyUrl,
-            termsUrl: data.termsUrl,
-            supportUrl: data.supportUrl,
-          }),
-        });
-      }
-
-      // default English renderer
       return (data = {}) => ({
         subject: EMAIL_TEMPLATE_DEFINITIONS.standard_warranty.defaultSubject,
         html: WarrantyRegistrationSuccessTemplate({
+          copy: data.copy,
           customerName: data.customerName,
           productTitle: data.productTitle || data.productName,
           orderNumber: data.orderNumber,
@@ -358,7 +350,6 @@ export function getWarrantyEmailTemplate(templateKey, locale) {
           shopifyShop: data.shopifyShop,
           hasFreeExtendedWarranty: Boolean(data.hasFreeExtendedWarranty),
           freeExtendedWarrantySource: data.freeExtendedWarrantySource || null,
-          locale: data.locale,
           registrationDate: data.registrationDate,
           warrantyStartDate: data.warrantyStartDate,
           warrantyExpiry: data.warrantyExpiry,
@@ -450,49 +441,106 @@ function validateOptionalUrl(value, label) {
 }
 
 /**
- * Fetches the saved per-template customization row for a given shop.
+ * Fetches the saved customization for one shop, email type, and language.
  */
-async function getShopTemplateRow(shopId, templateKey) {
+async function getShopTemplateRow(shopId, templateKey, languageCode) {
   const [[row]] = await pool.query(
     `
-    SELECT enabled, subject, body_html
+    SELECT enabled, subject, body_html, strings_json, language_code
     FROM email_template_settings
-    WHERE shop_id = ? AND template_key = ?
+    WHERE shop_id = ? AND template_key = ? AND language_code = ?
     `,
-    [shopId, templateKey]
+    [shopId, templateKey, languageCode]
   );
   return row || null;
 }
 
 /**
- * Returns the effective email settings for a shop, including saved overrides
- * and built-in defaults for every supported template key.
+ * Email types are enabled once for the store. Language rows share that flag.
+ */
+async function isTemplateEnabled(shopId, templateKey) {
+  const [[row]] = await pool.query(
+    `
+    SELECT MIN(enabled) AS enabled
+    FROM email_template_settings
+    WHERE shop_id = ? AND template_key = ?
+    `,
+    [shopId, templateKey]
+  );
+  if (!row || row.enabled == null) return true;
+  return Boolean(Number(row.enabled));
+}
+
+async function listShopEmailLanguageRows(shopId) {
+  const [rows] = await pool.query(
+    `
+    SELECT language_code, is_default
+    FROM shop_email_languages
+    WHERE shop_id = ?
+    ORDER BY is_default DESC, language_code ASC
+    `,
+    [shopId]
+  );
+  return rows;
+}
+
+function mapLanguageRows(rows) {
+  return rows.map((row) => ({
+    code: row.language_code,
+    label: emailLanguageLabel(row.language_code),
+    isDefault: Boolean(row.is_default),
+  }));
+}
+
+/**
+ * Returns the effective email settings for a shop, including each configured
+ * language and that language's subject and extra content.
  */
 export async function getEmailSettingsForShop(shopId) {
   const globalSettings = await getShopGlobalSettings(shopId);
+  const languageRows = await listShopEmailLanguageRows(shopId);
+  const languages = languageRows.length
+    ? mapLanguageRows(languageRows)
+    : [{ code: "en", label: "English", isDefault: true }];
+
   const [rows] = await pool.query(
     `
-    SELECT template_key, enabled, subject, body_html
+    SELECT template_key, language_code, enabled, subject, body_html, strings_json
     FROM email_template_settings
     WHERE shop_id = ?
     `,
     [shopId]
   );
-  const savedByKey = Object.fromEntries(rows.map((r) => [r.template_key, r]));
 
   const templates = Object.entries(EMAIL_TEMPLATE_DEFINITIONS).map(
     ([key, def]) => {
-      const saved = savedByKey[key];
+      const savedRows = rows.filter((row) => row.template_key === key);
+      const activeCodes = languages.map((language) => language.code);
+      const storedCodes = savedRows
+        .map((row) => row.language_code)
+        .filter((code) => code && !activeCodes.includes(code));
+      const variantCodes = [...activeCodes, ...storedCodes];
+      const variants = variantCodes.map((code) => {
+        const saved = savedRows.find((row) => row.language_code === code);
+        const defaults = getDefaultCopy(key, code);
+        return {
+          languageCode: code,
+          subject: saved?.subject || defaults.subject || def.defaultSubject,
+          bodyHtml: saved?.body_html || "",
+          strings: resolveEmailCopy(key, code, parseStrings(saved?.strings_json)),
+        };
+      });
+      const activeRows = savedRows.filter((row) => activeCodes.includes(row.language_code));
+      const enabledRows = activeRows.length ? activeRows : savedRows;
       return {
         key,
         label: def.label,
         description: def.description || "",
-        enabled: saved ? Boolean(saved.enabled) : true,
-        subject: saved?.subject || def.defaultSubject,
-        bodyHtml: saved?.body_html || "",
+        enabled: enabledRows.length ? enabledRows.every((row) => Boolean(row.enabled)) : true,
         defaultSubject: def.defaultSubject,
+        fields: EMAIL_COPY_FIELDS[key] || [],
         sampleData: def.sampleData,
-        hasExtraContent: Boolean(saved?.body_html?.trim()),
+        variants,
       };
     }
   );
@@ -500,8 +548,57 @@ export async function getEmailSettingsForShop(shopId) {
   return {
     globalEnabled: globalSettings.globalEnabled,
     urls: globalSettings.urls,
+    languageOptions: EMAIL_LANGUAGE_OPTIONS,
+    languages,
     templates,
+    copyDefaults: Object.fromEntries(
+      EMAIL_LANGUAGE_OPTIONS.map((language) => [
+        language.code,
+        Object.fromEntries(
+          Object.keys(EMAIL_TEMPLATE_DEFINITIONS).map((key) => [key, getDefaultCopy(key, language.code)])
+        ),
+      ])
+    ),
   };
+}
+
+/**
+ * Resolves which configured store language an outgoing email should use.
+ */
+export async function resolveShopEmailLanguage(shopId, requestedLocale) {
+  const rows = await listShopEmailLanguageRows(shopId);
+  return resolveConfiguredLanguage(mapLanguageRows(rows), requestedLocale);
+}
+
+function normalizeShopLanguages(languages) {
+  if (!Array.isArray(languages) || languages.length === 0) {
+    throw new Error("Add at least one language for this store");
+  }
+
+  const seen = new Set();
+  const normalized = [];
+  for (const language of languages) {
+    const code = normalizeLocale(language?.code || language?.languageCode);
+    if (!EMAIL_LANGUAGE_CODES.has(code)) {
+      throw new Error("Select a supported language");
+    }
+    if (seen.has(code)) continue;
+    seen.add(code);
+    normalized.push({
+      code,
+      isDefault: Boolean(language?.isDefault),
+    });
+  }
+
+  if (!normalized.some((language) => language.code === "en")) {
+    normalized.unshift({ code: "en", isDefault: false });
+  }
+
+  const defaults = normalized.filter((language) => language.isDefault);
+  if (defaults.length !== 1) {
+    throw new Error("Choose one default language for this store");
+  }
+  return normalized;
 }
 
 /**
@@ -515,57 +612,99 @@ export async function saveEmailSettingsForShop(shopId, payload = {}) {
   const privacyUrl = validateOptionalUrl(urls.privacyUrl, "Privacy Policy URL");
   const termsUrl = validateOptionalUrl(urls.termsUrl, "Terms & Conditions URL");
   const supportUrl = validateOptionalUrl(urls.supportUrl, "Support URL");
+  const languages = normalizeShopLanguages(payload.languages);
+  const languageCodes = languages.map((language) => language.code);
+  const conn = await pool.getConnection();
 
-  await pool.query(
-    `
-    INSERT INTO email_settings (
-      shop_id, global_enabled, store_url, privacy_policy_url, terms_conditions_url, support_url
-    ) VALUES (?, ?, ?, ?, ?, ?)
-    ON DUPLICATE KEY UPDATE
-      global_enabled = VALUES(global_enabled),
-      store_url = VALUES(store_url),
-      privacy_policy_url = VALUES(privacy_policy_url),
-      terms_conditions_url = VALUES(terms_conditions_url),
-      support_url = VALUES(support_url),
-      updated_at = CURRENT_TIMESTAMP
-    `,
-    [shopId, globalEnabled ? 1 : 0, storeUrl, privacyUrl, termsUrl, supportUrl]
-  );
+  try {
+    await conn.beginTransaction();
 
-  if (!Array.isArray(payload.templates)) {
-    return getEmailSettingsForShop(shopId);
-  }
-
-  for (const template of payload.templates) {
-    const def = EMAIL_TEMPLATE_DEFINITIONS[template.key];
-    if (!def) continue;
-
-    const subject = String(template.subject || "").trim();
-    const bodyHtml = String(template.bodyHtml || "").trim();
-
-    if (!subject) {
-      throw new Error(`Subject is required for ${def.label}`);
-    }
-
-    await pool.query(
+    await conn.query(
       `
-      INSERT INTO email_template_settings (
-        shop_id, template_key, enabled, subject, body_html
-      ) VALUES (?, ?, ?, ?, ?)
+      INSERT INTO email_settings (
+        shop_id, global_enabled, store_url, privacy_policy_url, terms_conditions_url, support_url
+      ) VALUES (?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
-        enabled = VALUES(enabled),
-        subject = VALUES(subject),
-        body_html = VALUES(body_html),
+        global_enabled = VALUES(global_enabled),
+        store_url = VALUES(store_url),
+        privacy_policy_url = VALUES(privacy_policy_url),
+        terms_conditions_url = VALUES(terms_conditions_url),
+        support_url = VALUES(support_url),
         updated_at = CURRENT_TIMESTAMP
       `,
-      [
-        shopId,
-        template.key,
-        template.enabled === false ? 0 : 1,
-        subject,
-        bodyHtml || null,
-      ]
+      [shopId, globalEnabled ? 1 : 0, storeUrl, privacyUrl, termsUrl, supportUrl]
     );
+
+    await conn.query(`DELETE FROM shop_email_languages WHERE shop_id = ?`, [shopId]);
+    for (const language of languages) {
+      await conn.query(
+        `
+        INSERT INTO shop_email_languages (shop_id, language_code, is_default)
+        VALUES (?, ?, ?)
+        `,
+        [shopId, language.code, language.isDefault ? 1 : 0]
+      );
+    }
+
+    const template = payload.template;
+    if (template?.key) {
+      const def = EMAIL_TEMPLATE_DEFINITIONS[template.key];
+      if (!def) throw new Error("Unknown template");
+
+      const languageCode = normalizeLocale(template.languageCode || template.language_code);
+      if (!languageCodes.includes(languageCode)) {
+        throw new Error("Select a language that is enabled for this store");
+      }
+
+      const enabled = template.enabled === false ? 0 : 1;
+      const defaults = getDefaultCopy(template.key, languageCode);
+      const subject = String(template.subject || defaults.subject || "").trim();
+      const bodyHtml = String(template.bodyHtml || "").trim();
+      const strings = template.strings && typeof template.strings === "object" ? template.strings : {};
+
+      if (!subject) {
+        throw new Error(`Subject is required for ${def.label} (${emailLanguageLabel(languageCode)})`);
+      }
+
+      await conn.query(
+        `
+        UPDATE email_template_settings
+        SET enabled = ?
+        WHERE shop_id = ? AND template_key = ? AND enabled <> ?
+        `,
+        [enabled, shopId, template.key, enabled]
+      );
+
+      await conn.query(
+        `
+        INSERT INTO email_template_settings (
+          shop_id, template_key, language_code, enabled, subject, body_html, strings_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          enabled = VALUES(enabled),
+          subject = VALUES(subject),
+          body_html = VALUES(body_html),
+          strings_json = VALUES(strings_json),
+          updated_at = CURRENT_TIMESTAMP
+        `,
+        [
+          shopId,
+          template.key,
+          languageCode,
+          enabled,
+          subject,
+          bodyHtml || null,
+          JSON.stringify(strings),
+        ]
+      );
+    }
+
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
   }
 
   return getEmailSettingsForShop(shopId);
@@ -578,8 +717,13 @@ export function previewEmailTemplate(templateKey, { subject, bodyHtml, sampleDat
   const def = EMAIL_TEMPLATE_DEFINITIONS[templateKey];
   if (!def) throw new Error("Unknown template");
 
-  const data = { ...def.sampleData, ...sampleData };
-  const resolvedSubject = subject?.trim() || def.defaultSubject;
+  const languageCode = normalizeLocale(sampleData.languageCode || sampleData.locale) || "en";
+  const data = {
+    ...def.sampleData,
+    ...sampleData,
+    copy: resolveEmailCopy(templateKey, languageCode, sampleData.strings),
+  };
+  const resolvedSubject = subject?.trim() || data.copy.subject || def.defaultSubject;
   const defaultHtml = renderBuiltInEmailHtml(templateKey, data);
   const html = bodyHtml?.trim()
     ? injectExtraEmailContent(defaultHtml, bodyHtml.trim())
@@ -612,52 +756,25 @@ export async function sendShopEmail({
     return { success: false, error: "Unknown template" };
   }
 
-  const saved = await getShopTemplateRow(shopId, templateKey);
-  if (def && saved && !saved.enabled) {
+  if (def && !(await isTemplateEnabled(shopId, templateKey))) {
     return { success: true, skipped: true, reason: "template_disabled" };
   }
-
-  let subject;
-  let html;
 
   if (typeof renderDefault !== "function") {
     return { success: false, error: "No template renderer available" };
   }
 
-  const rendered = await renderDefault({ urls: globalSettings.urls });
+  const languageCode = await resolveShopEmailLanguage(shopId, data.locale);
+  const saved = def ? await getShopTemplateRow(shopId, templateKey, languageCode) : null;
+  const copy = def ? resolveEmailCopy(templateKey, languageCode, parseStrings(saved?.strings_json)) : {};
+  const rendered = await renderDefault({ urls: globalSettings.urls, copy });
 
-  const isJapanStore =
-    isJapanStoreDomain(data.shopDomain) ||
-    isJapanStoreDomain(data.shopifyShop);
-  const japaneseStandardEmail =
-    templateKey === "standard_warranty" &&
-    isJapanStore &&
-    normalizeLocale(data.locale) === "ja";
+  const subject = saved?.subject?.trim()
+    ? interpolateTemplate(saved.subject, data)
+    : copy.subject || rendered.subject;
+  let html = rendered.html;
 
-  if (japaneseStandardEmail) {
-    html = getWarrantyEmailTemplate("standard_warranty", "ja")({
-      ...data,
-      ...(globalSettings.urls || {}),
-      productTitle: data.productTitle || data.productName,
-      warrantyPeriod: data.warrantyPeriod || data.warrantyDuration,
-      registerId: data.registerId || data.warrantyNumber,
-    }).html;
-  } else {
-    html = rendered.html;
-  }
-
-  if (templateKey === "standard_warranty" && isJapanStore) {
-    subject =
-      normalizeLocale(data.locale) === "ja"
-        ? "製品登録が完了しました"
-        : "Product Registration Successful!!!";
-  } else {
-    subject = saved?.subject?.trim()
-      ? interpolateTemplate(saved.subject, data)
-      : rendered.subject;
-  }
-
-  if (saved?.body_html?.trim() && !japaneseStandardEmail) {
+  if (saved?.body_html?.trim()) {
     html = injectExtraEmailContent(html, saved.body_html.trim());
   }
 
