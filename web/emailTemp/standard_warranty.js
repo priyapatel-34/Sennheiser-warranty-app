@@ -55,7 +55,6 @@ export default function WarrantyRegistrationSuccessTemplate({
     { label: copyText(copy, "warrantyExpiresLabel", "Warranty expires"), value: expiryDisplay },
   ]);
 
-  const purchaseNotice = copyText(copy, "purchaseNotice", "");
   const bodyHtml = [
     renderGreeting({
       salutation: fillCopy(copyText(copy, "greeting", "Hi {{name}},"), {
@@ -108,9 +107,6 @@ export default function WarrantyRegistrationSuccessTemplate({
     privacyUrl,
     termsUrl,
     supportUrl,
-    additionalContentHtml: purchaseNotice
-      ? `<p style="font-size:12px; line-height:1.6; color:#000000; margin:0;">${plainToHtml(purchaseNotice)}</p>`
-      : "",
     labels: {
       continueShopping: copyText(copy, "continueShopping", "Continue shopping"),
       supportMessage: copyText(copy, "supportMessage", ""),

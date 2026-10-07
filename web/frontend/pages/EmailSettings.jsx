@@ -177,7 +177,7 @@ export default function EmailSettings() {
 
   const removeLanguage = (code) => {
     if (code === "en") {
-      toast.showError("English stays available as the fallback language");
+      toast.showError("English stays available as it's default language");
       return;
     }
     setLanguages((current) => {
@@ -215,7 +215,7 @@ export default function EmailSettings() {
     const added = nextCodes.filter((code) => !currentCodes.includes(code));
     const removed = currentCodes.filter((code) => !nextCodes.includes(code));
     if (!nextCodes.includes("en")) {
-      toast.showError("English stays available as the fallback language");
+      toast.showError("English stays available as it's default language");
       nextCodes = ["en", ...nextCodes];
     }
     if (!nextCodes.length) {
@@ -415,25 +415,26 @@ export default function EmailSettings() {
     { key: "supportUrl", label: "Support URL", placeholder: "https://example.com/support" },
   ];
 
-  /**
-   * Renders one editable copy field so short and long fields share identical
-   * wiring.
-   */
-  const renderField = (field) => (
-    <TextField
-      key={field.key}
-      label={field.label}
-      value={activeVariant?.strings?.[field.key] || ""}
-      helpText={field.help}
-      multiline={field.multiline ? 2 : undefined}
-      autoComplete="off"
-      disabled={!selectedLanguage}
-      onChange={(value) =>
-        updateActiveVariant({
-          strings: { ...(activeVariant?.strings || {}), [field.key]: value },
-        })
-      }
-    />
+  const renderCopyRow = (field) => (
+    <div key={field.key} className={`es-copy__row${field.multiline ? " es-copy__row--tall" : ""}`}>
+      <div className="es-copy__meta">
+        <span className="es-copy__label">{field.label}</span>
+        {field.help ? <span className="es-copy__hint">{field.help}</span> : null}
+      </div>
+      <TextField
+        label={field.label}
+        labelHidden
+        value={activeVariant?.strings?.[field.key] || ""}
+        multiline={field.multiline ? 2 : undefined}
+        autoComplete="off"
+        disabled={!selectedLanguage}
+        onChange={(value) =>
+          updateActiveVariant({
+            strings: { ...(activeVariant?.strings || {}), [field.key]: value },
+          })
+        }
+      />
+    </div>
   );
 
   const languageSummary = languages.length
@@ -616,21 +617,14 @@ export default function EmailSettings() {
                     {["Content", "Labels", "Footer"].map((section) => {
                       const fields = (activeTemplate.fields || []).filter((field) => field.section === section);
                       if (!fields.length) return null;
-                      const shortFields = fields.filter((field) => !field.multiline);
-                      const longFields = fields.filter((field) => field.multiline);
                       return (
                         <div key={section} className="es-section">
                           <div className="es-section__head">
                             <Text as="h3" variant="headingSm">{section}</Text>
                           </div>
                           <div className="es-section__body">
-                            <div className="es-stack es-gap-300">
-                              {shortFields.length ? (
-                                <div className="es-grid-3">{shortFields.map(renderField)}</div>
-                              ) : null}
-                              {longFields.length ? (
-                                <div className="es-grid-2">{longFields.map(renderField)}</div>
-                              ) : null}
+                            <div className="es-copy">
+                              {fields.map(renderCopyRow)}
                             </div>
                           </div>
                         </div>
@@ -644,7 +638,7 @@ export default function EmailSettings() {
                       autoComplete="off"
                       disabled={!selectedLanguage}
                       onChange={(bodyHtml) => updateActiveVariant({ bodyHtml })}
-                      helpText="Added after the purchase notice. Leave empty if you do not need more text."
+                      helpText="Shown in the email below the main content, before the support message. Leave empty if you do not need more text."
                     />
                   </div>
 

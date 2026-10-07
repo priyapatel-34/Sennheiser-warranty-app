@@ -1,4 +1,5 @@
 import { pool } from "../db/mysql.js";
+import { getIndiaFreeWarrantyEmailCopy } from "./indiaFreeExtendedWarranty.service.js";
 import {
   EMAIL_LANGUAGE_OPTIONS,
   EMAIL_COPY_FIELDS,
@@ -766,7 +767,10 @@ export async function sendShopEmail({
 
   const languageCode = await resolveShopEmailLanguage(shopId, data.locale);
   const saved = def ? await getShopTemplateRow(shopId, templateKey, languageCode) : null;
-  const copy = def ? resolveEmailCopy(templateKey, languageCode, parseStrings(saved?.strings_json)) : {};
+  let copy = def ? resolveEmailCopy(templateKey, languageCode, parseStrings(saved?.strings_json)) : {};
+  if (templateKey === "standard_warranty" && data.hasFreeExtendedWarranty) {
+    copy = { ...copy, ...getIndiaFreeWarrantyEmailCopy(languageCode) };
+  }
   const rendered = await renderDefault({ urls: globalSettings.urls, copy });
 
   const subject = saved?.subject?.trim()

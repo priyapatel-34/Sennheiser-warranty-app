@@ -1,4 +1,5 @@
 import { pool } from "../db/mysql.js";
+import { normalizeLocale } from "./emailCopyCatalog.js";
 
 export const INDIA_SHOP_DOMAINS = [
   "in.sennheiser-hearing.com",
@@ -21,6 +22,25 @@ export const PREORDER_METAFIELDS_SELECTION = `
 
 export const STANDARD_PLUS_FREE_EXTENDED_LABEL =
   "Standard Warranty + Free Extended Warranty (1 year)";
+
+/**
+ * India registration-email sentences. These stay in code so the India store
+ * does not need email-settings fields for them. English is the fallback when
+ * a store language has no entry here.
+ */
+const INDIA_FREE_WARRANTY_EMAIL_COPY = {
+  en: {
+    freeWarrantyTitle: "FREE 1-Year Extended Warranty:",
+    freeWarrantyBody: "Your product includes a FREE 1-year extended warranty.",
+    preorderWarrantyBody:
+      "Your product received a FREE 1-year extended warranty because it was purchased during the preorder offer.",
+  },
+};
+
+export function getIndiaFreeWarrantyEmailCopy(languageCode) {
+  const code = normalizeLocale(languageCode) || "en";
+  return INDIA_FREE_WARRANTY_EMAIL_COPY[code] || INDIA_FREE_WARRANTY_EMAIL_COPY.en;
+}
 
 export const FREE_EXTENDED_WARRANTY_TAG = "Free_Extended_Warranty";
 
